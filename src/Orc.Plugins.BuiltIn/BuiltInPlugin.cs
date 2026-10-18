@@ -6,6 +6,7 @@ using Orc.Game.Cards.Data.Components;
 using Orc.Game.Judicators;
 using Orc.Game.Plugins;
 using Orc.Game.Triggers;
+using Orc.Packages;
 
 namespace Orc.Plugins.BuiltIn;
 
@@ -31,15 +32,18 @@ public static class BuiltInPlugin
         context.RegisterJudicator(JudicatorNames.CounterUse, new CounterUseJudicator());
 
         // ---------- K1：交战合法性判定族（组合器 ＋ 三条子规则） ----------
-        var combatRangeEntry = context.RegisterJudicator(
-            JudicatorNames.CombatRange,
-            new CombatRangeJudicator(match.Battlefield, owner => match.EnemyOf(owner)));
+        var combatRange = new CombatRangeJudicator(match.Battlefield, owner => match.EnemyOf(owner));
+        var combatRangeEntry = context.RegisterJudicator(JudicatorNames.CombatRange, combatRange);
+        DeclareKeywordRule(context, JudicatorNames.CombatRange, combatRange);
+
+        var combatGuardEligibility = new CombatGuardEligibilityJudicator();
         var combatGuardEligibilityEntry = context.RegisterJudicator(
-            JudicatorNames.CombatGuardEligibility,
-            new CombatGuardEligibilityJudicator());
-        var combatInterceptionEntry = context.RegisterJudicator(
-            JudicatorNames.CombatInterception,
-            new CombatInterceptionJudicator(match.Battlefield, owner => match.EnemyOf(owner)));
+            JudicatorNames.CombatGuardEligibility, combatGuardEligibility);
+        DeclareKeywordRule(context, JudicatorNames.CombatGuardEligibility, combatGuardEligibility);
+
+        var combatInterception = new CombatInterceptionJudicator(match.Battlefield, owner => match.EnemyOf(owner));
+        var combatInterceptionEntry = context.RegisterJudicator(JudicatorNames.CombatInterception, combatInterception);
+        DeclareKeywordRule(context, JudicatorNames.CombatInterception, combatInterception);
         context.RegisterJudicator(
             JudicatorNames.CombatTargetLegal,
             new CombatTargetLegalJudicator(
@@ -52,8 +56,13 @@ public static class BuiltInPlugin
                     CombatJudicatorInvoker.InvokeBool(combatInterceptionEntry, attacker, targetSlot, targetIsFighter)));
 
         // ---------- K2：反击豁免与伏击条件 ----------
-        context.RegisterJudicator(JudicatorNames.CombatCounterEligibility, new CombatCounterEligibilityJudicator());
-        context.RegisterJudicator(JudicatorNames.CombatAmbushCondition, new CombatAmbushConditionJudicator());
+        var combatCounterEligibility = new CombatCounterEligibilityJudicator();
+        context.RegisterJudicator(JudicatorNames.CombatCounterEligibility, combatCounterEligibility);
+        DeclareKeywordRule(context, JudicatorNames.CombatCounterEligibility, combatCounterEligibility);
+
+        var combatAmbushCondition = new CombatAmbushConditionJudicator();
+        context.RegisterJudicator(JudicatorNames.CombatAmbushCondition, combatAmbushCondition);
+        DeclareKeywordRule(context, JudicatorNames.CombatAmbushCondition, combatAmbushCondition);
 
         // ---------- K3：复验消重（共享 leg 条目 ＋ 推进前置 ＋ 复验两条） ----------
         var moveLegEligibilityEntry = context.RegisterJudicator(
@@ -89,6 +98,37 @@ public static class BuiltInPlugin
         context.RegisterJudicator(JudicatorNames.PointSlotLose, new PointSlotLoseAmountJudicator());
         context.RegisterJudicator(JudicatorNames.PointGain, new PointGainAmountJudicator());
         context.RegisterJudicator(JudicatorNames.PointLose, new PointLoseAmountJudicator());
+    }
+
+    /// <summary>
+    /// L2：把「内置基线 → 词条程序规则覆盖」注册为该判定器的一条 moding。
+    /// 调用点（CommandManager／组合器／测试）不再做特判；改写经注册表统一解析点生效、注销即回退。
+    /// moding 为纯替换，故基线由**内置实例**直接求值（不经注册表，避免解析栈自引用）。
+    /// </summary>
+    private static void DeclareKeywordRule(IMatchPluginContext context, string name, Judicator baseline)
+    {
+        context.DeclareModing(ModingTarget.Judicator, name, args =>
+        {
+            var value = baseline.Invoke(args) is { Length: 1 } raw && raw[0] is bool flag
+                ? flag
+                : throw new InvalidOperationException(
+                    $"判定器 '{name}' 基线输出契约不符：期望 object[]{{bool}}（1 元素）——fail-fast。");
+
+            // 冲击（bypass range）：效果发起的攻击无视范围矩阵（原 InvokeBool 内联特判迁入）。
+            if (name == JudicatorNames.CombatRange
+                && args.FirstOrDefault() is UnitCard unit
+                && KeywordProgramRuntime.BypassesRange(unit))
+            {
+                value = true;
+            }
+
+            if (args.FirstOrDefault() is Orc.Cards.Card actor && KeywordProgram.RuleNames.Contains(name))
+            {
+                value = KeywordProgramRuntime.Resolve(actor, name, value ? 1 : 0) != 0;
+            }
+
+            return new object[] { value };
+        });
     }
 
     /// <summary>

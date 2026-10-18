@@ -13,14 +13,12 @@ namespace Orc.Game.Judicators;
 /// </summary>
 internal static class CombatJudicatorInvoker
 {
-    /// <summary>经注册表条目句柄调用并解包 bool（对局路径；每次调用经统一解析点取栈顶——moding 动态生效）。</summary>
+    /// <summary>
+    /// 经注册表条目句柄调用并解包 bool（对局路径；每次调用经统一解析点取栈顶——moding 动态生效）。
+    /// 词条规则覆盖已是各判定器上的 moding（L2：内置插件注册段声明），本调用点不再做特判。
+    /// </summary>
     public static bool InvokeBool(JudicatorRegistration registration, params object[] args)
-    {
-        var baseline=UnpackBool(registration.Invoke(args), registration.Name);
-        if(registration.Name==JudicatorNames.CombatRange&&args.FirstOrDefault() is UnitCard unit&&KeywordProgramRuntime.BypassesRange(unit))baseline=true;
-        return args.FirstOrDefault() is Orc.Cards.Card actor && KeywordProgram.RuleNames.Contains(registration.Name)
-            ? KeywordProgramRuntime.Resolve(actor,registration.Name,baseline?1:0)!=0 : baseline;
-    }
+        => UnpackBool(registration.Invoke(args), registration.Name);
 
     /// <summary>经内置实例主方法调用并解包 bool（独立构造路径；无注册表、无改写通道）。</summary>
     public static bool InvokeBool(Judicator judicator, params object[] args)

@@ -1,5 +1,6 @@
 using Orc.Core;
 using Orc.Game;
+using Orc.Game.Judicators;
 using Xunit;
 
 namespace Orc.Game.Tests;
@@ -139,5 +140,28 @@ public class JudicatorAssemblyTests
         // 跨对局句柄宽容：向 B 注册 A 的句柄 moding＝无操作、不抛错
         Assert.Null(matchB.Judicators.RegisterModing(handleA, _ => new object[] { "不该执行" }));
         Assert.Equal(new object[] { "B" }, matchB.Judicators.Invoke(ProbeName, null));
+    }
+
+    [Fact]
+    public async Task KeywordRuleOverrideIsAModingEntryAndUnregisterRestoresTheBaseline()
+    {
+        // L2：词条规则覆盖（combat.range 等 5 条）不再内联在 CombatJudicatorInvoker，
+        // 而是判定器注册段声明的一条 moding——栈语义（最后者胜）、注销回退到「基线 + 词条覆盖」。
+        var match = CommandTestKit.CreateCommandMatch();
+        await match.Initialize();
+        var probe = match.Judicators.RegisterModing(
+            match.Judicators.Resolve(JudicatorNames.CombatRange), _ => new object[] { false });
+
+        var attacker = await CommandTestKit.PrepareOnSupportAsync(match, match.Players[0], CommandTestKit.InfantryId, 1);
+        var defender = await CommandTestKit.PrepareOnFrontAsync(match, match.Players[1], CommandTestKit.InfantryId, 1);
+        var targetSlot = defender.GetData<Orc.Game.Cards.UnitStateData>().Position!;
+
+        bool RangeAvailable() => (bool)match.Judicators
+            .Resolve(JudicatorNames.CombatRange)
+            .Invoke(new object[] { attacker, targetSlot })![0];
+
+        Assert.False(RangeAvailable()); // 自定义 moding 最后注册 → 胜出
+        Assert.True(match.Judicators.UnregisterModing(probe!));
+        Assert.True(RangeAvailable());  // 注销回退到内置「基线 + 词条覆盖」moding
     }
 }
