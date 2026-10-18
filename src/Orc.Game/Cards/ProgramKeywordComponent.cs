@@ -144,13 +144,15 @@ public sealed class ProgramKeywordComponent : KeywordComponent
                     case "unlink":_linked=null;break;
                     case "attack":if(_host is UnitCard attacker)await KeywordProgramRuntime.MatchFor(_host.Engine).CommandManager.AttackByEffectAsync(attacker,target,ct,a.BypassRange);break;
                     case "retreat":
-                        // 遗留（S1b）：引擎尚无「效果发起位移」的门户（CommandManager 只有两阶段的
-                        // BeginMoveAsync），此处直接操作槽位并补发位置变更信号。待引擎提供
-                        // MoveByEffectAsync（同 AttackByEffectAsync 的形态）后改为调用该门户。
-                        if(target is UnitCard retreat&&retreat.Owner is { } retreatOwner&&retreat.GetData<UnitStateData>().Position is { } oldPosition)
+                        // 效果位移门户（S1b 遗留已收口）：不扣费、不清行动位；槽位变更与位置更新
+                        // 由引擎 CommandManager.MoveByEffectAsync 单一执行面完成，本处不再直写槽位。
+                        if(target is UnitCard retreat&&retreat.Owner is { } retreatOwner)
                         {
-                            var retreatMatch=KeywordProgramRuntime.MatchFor(_host.Engine);var support=retreatMatch.Battlefield.GetSupportLine(retreatOwner);
-                            if(!support.Contains(oldPosition)&&support.FirstOrDefault(s=>s.IsEmpty) is { } destination){oldPosition.Clear();destination.Place(retreat);retreat.GetData<UnitStateData>().Position=destination;await GameUpdates.EmitUnitPositionChanged(_host.Engine,retreat,oldPosition,destination,ct);}
+                            var retreatMatch=KeywordProgramRuntime.MatchFor(_host.Engine);
+                            var support=retreatMatch.Battlefield.GetSupportLine(retreatOwner);
+                            var retreatPosition=retreat.GetData<UnitStateData>().Position;
+                            if(retreatPosition is not null&&!support.Contains(retreatPosition)&&support.FirstOrDefault(s=>s.IsEmpty) is { } destination)
+                                await retreatMatch.CommandManager.MoveByEffectAsync(retreat,destination,ct);
                         }break;
                     case "replace":
                         if(target is UnitCard original&&original.Owner is { } originalOwner&&original.GetData<UnitStateData>().Position is { } oldSlot)

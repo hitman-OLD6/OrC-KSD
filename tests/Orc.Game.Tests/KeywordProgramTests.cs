@@ -121,6 +121,41 @@ public sealed class KeywordProgramTests
         await EffectRuntime.ResolveFor(u)!.DamageAsync(u,1);Assert.True(u.GetData<UnitStateData>().IsDestroyed);
     }
     [Fact]
+    public async Task DeathInterceptorIsConsultedBeforeTheKeywordProgramAndCanCancel()
+    {
+        var (m, u, _) = await Create(new());
+        await m.PlayManager.PlayUnitAsync(u, m.Battlefield.PlayerASupportLine[1]);
+        var calls = 0;
+        m.CommandManager.DeathInterceptor = (_, _, _) => { calls++; return Task.FromResult(true); };
+
+        await EffectRuntime.ResolveFor(u)!.DamageAsync(u, 100);
+
+        Assert.Equal(1, calls);
+        Assert.False(u.GetData<UnitStateData>().IsDestroyed);
+        Assert.Same(m.Battlefield.PlayerASupportLine[1], u.GetData<UnitStateData>().Position);
+
+        // 无拦截时的正常死亡路径由 PreventDeathOnceRetainsOneDefenseAndLaterDeathStillExecutes 覆盖
+        // （该用例验证 death.cancel 后再次致死仍会消灭）。
+    }
+
+    [Fact]
+    public async Task EffectDisplacementUsesThePortalWithoutPayingOrConsumingActions()
+    {
+        var (m, u, _) = await Create(new());
+        await m.PlayManager.JoinUnitAsync(u, m.Battlefield.FrontLine[0]);
+        CommandTestKit.Activate(u);
+        var support = m.Battlefield.PlayerASupportLine.First(s => s.IsEmpty);
+        var points = m.Players[0].Points;
+
+        Assert.True(await m.CommandManager.MoveByEffectAsync(u, support));
+
+        Assert.Same(support, u.GetData<UnitStateData>().Position);
+        Assert.Equal(points, m.Players[0].Points);
+        Assert.True(u.GetData<CommandData>().CanMove);
+        Assert.False(await m.CommandManager.MoveByEffectAsync(u, m.Battlefield.FrontLine[1]));
+    }
+
+    [Fact]
     public async Task RecordValueIsBoundToEachCreatedCardRatherThanGlobalOrSourceReference()
     {
         var (m,u,_)=await Create(new(){Handlers=[new(){Actions=[A("capture","target.attack","recordedAttack"),new(){Op="create.hand",Key=CommandTestKit.InfantryId,Bindings=new(){{"damage","data.recordedAttack"}}}]}]});

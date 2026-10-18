@@ -1144,12 +1144,18 @@ public sealed class CommandManager
         }
 
         // 执行段：槽位变更（旧槽移除 → 放入目标空槽；原槽变为空槽、参与后续邻位计算）→ 发射更新（恰一次；先于收尾段）
+        await ApplyPositionChangeAsync(unit, oldSlot, newSlot, ct);
+        // 守护维护由本更新驱动（订阅重算——布局已变更、收尾未发生）
+    }
+
+    /// <summary>槽位变更与位置更新的**单一执行面**（指挥移动与效果位移共用；不扣费、不发 unit.acted）。</summary>
+    private async Task ApplyPositionChangeAsync(UnitCard unit, Slot oldSlot, Slot newSlot, CancellationToken ct)
+    {
         var state = unit.GetData<UnitStateData>();
         oldSlot.Clear();
         newSlot.Place(unit);
         state.Position = newSlot;
         await GameUpdates.EmitUnitPositionChanged(_engine, unit, oldSlot, newSlot, ct);
-        // 守护维护由本更新驱动（订阅重算——布局已变更、收尾未发生）
     }
 
     // ---------- ⑦ 单位攻击触发器默认链（执行段） ----------
@@ -1379,6 +1385,12 @@ public sealed class CommandManager
             : GameUpdates.EmitUnitCombatSurvived(engine, unit, ct);
 
     /// <summary>
+    /// 死亡链替换口（消灭确认前、槽位释放与卸载前）：返回 <c>true</c> ＝ 取消本次消灭。
+    /// 与词条程序的 <c>death.cancel</c> 串联——注册面在前、内置词条面在后，任一取消即终止。
+    /// </summary>
+    public Func<UnitCard, Card?, CancellationToken, Task<bool>>? DeathInterceptor { get; set; }
+
+    /// <summary>
     /// 统一死亡流程（攻击结算判定死亡后调用；伏击改写的攻击者死亡同走此流程）。
     /// 完整次序（A4 定稿·唯一权威口径——《需求文档》Q&A-1）：
     /// ①槽位释放（变空槽）→ ②IsDestroyed 置位 → ③**亡计结算**（新增步：仅含亡计词条的卡驱动其内部效果动作一次；
@@ -1409,6 +1421,25 @@ public sealed class CommandManager
             [CommandDataKeys.Attacker]=unit.Ref,[CommandDataKeys.Target]=target.Ref,[CommandDataKeys.TriggerCard]=unit.Ref
         },ct);
         return result.Outcome==ExecutionOutcome.Normal;
+    }
+
+    /// <summary>
+    /// 效果发起的位移（`retreat` 等；与 <see cref="AttackByEffectAsync"/> 同构的门户）：
+    /// 不扣行动费、不清行动位、不做推进资格判定（目标为支援线空槽，方向与"推进"相反）；
+    /// 槽位变更与位置更新走与指挥移动共用的单一执行面。返回是否实际位移。
+    /// </summary>
+    public async Task<bool> MoveByEffectAsync(UnitCard unit, Slot destination, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(unit);
+        ArgumentNullException.ThrowIfNull(destination);
+        if (_lifecycle?.IsEnded == true) return false;
+        if (!unit.TryGetData<UnitStateData>(out var state) || state.IsDestroyed || state.Position is not { } oldSlot) return false;
+        if (ReferenceEquals(oldSlot, destination) || !destination.IsEmpty) return false;
+        if (unit.Owner is not { } owner || !_battlefield.GetSupportLine(owner).Contains(destination)) return false;
+
+        await using var scope = _engine.BeginAction();
+        await ApplyPositionChangeAsync(unit, oldSlot, destination, ct);
+        return true;
     }
 
     /// <summary>
@@ -1493,7 +1524,9 @@ public sealed class CommandManager
         var state = unit.GetData<UnitStateData>();
         if (state.IsDestroyed) return;
 
-        // 效果层「取消消灭」：引擎暂无死亡链替换口，这是唯一拦截点（消灭确认前、卸载前）。
+        // 死亡链（消灭确认前、卸载前）：注册面（moding/插件）在前，内置词条面（death.cancel）在后；
+        // 任一取消即终止，且都发生在 IsDestroyed 置位与任何清理之前。
+        if (DeathInterceptor is not null && await DeathInterceptor(unit, killer, ct)) return;
         if (await KeywordProgramRuntime.BeforeDestroy(unit,killer,ct)) return;
         state.Position?.Clear();
         state.IsDestroyed = true;
