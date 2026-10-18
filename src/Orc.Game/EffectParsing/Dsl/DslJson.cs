@@ -153,6 +153,9 @@ public static class DslJson
         Kind = condition.Kind,
         Raw = condition.Raw,
         All = condition.All?.Select(ToDto).ToList(),
+        UnitTypes = condition.UnitTypes?.ToList(),
+        Comparison = condition.Comparison,
+        Value = condition.Value,
     };
 
     private static DslOp FromDto(OpDto dto)
@@ -270,7 +273,10 @@ public static class DslJson
     private static DslCondition FromDto(ConditionDto dto) => new(
         dto.Kind ?? string.Empty,
         dto.Raw,
-        dto.All is { Count: > 0 } ? dto.All.Select(FromDto).ToList() : null);
+        dto.All is { Count: > 0 } ? dto.All.Select(FromDto).ToList() : null,
+        dto.UnitTypes is { Count: > 0 } ? dto.UnitTypes.ToList() : null,
+        dto.Comparison,
+        dto.Value);
 
     private sealed class ConditionDto
     {
@@ -280,6 +286,15 @@ public static class DslJson
 
         /// <summary>合取子条件（仅 <c>all</c>；递归）。</summary>
         public List<ConditionDto>? All { get; set; }
+
+        /// <summary>单位类型集合（仅 <c>owner.controls.type</c>；缺失＝条件不成立）。</summary>
+        public List<string>? UnitTypes { get; set; }
+
+        /// <summary>比较运算（仅 <c>owner.controls.type</c>；受控白名单）。</summary>
+        public string? Comparison { get; set; }
+
+        /// <summary>比较右值（仅 <c>owner.controls.type</c>）。</summary>
+        public int? Value { get; set; }
     }
 
     private sealed class SelectorDto

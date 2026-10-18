@@ -155,7 +155,12 @@ public sealed class EffectCompiler
         }
 
         var list = string.Join(", ", types.Select(t => "\"" + t.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\""));
-        return $"orcRuntime.OwnerUnits(self).Count(u => u.Definition.UnitTypes.Any(t => new[] {{{list}}}.Contains(t.ToString()))) {comparison} {value}";
+        // 守卫在动作块之外求值——此处 `runtime` 局部变量尚未声明，必须自包含解析；
+        // 类型一律全限定并走 `as` 下转，不依赖 csx 头部 `Card` 的命名空间解析。
+        // （历史上这里写的是不存在的 `orcRuntime`，因条件字段曾被 DslJson 丢弃而从未真正执行。）
+        const string host = "(self as Orc.Game.Cards.CardBase)";
+        return $"({host} is not null && {RuntimeType}.ResolveFor({host}) is {{ }} conditionRuntime"
+            + $" && conditionRuntime.OwnerUnits({host}).Count(u => (u as Orc.Game.Cards.CardBase)?.Definition.UnitTypes.Any(t => new[] {{{list}}}.Contains(t)) == true) {comparison} {value})";
     }
 
     private static string ConditionExpression(DslCondition condition) => condition.Kind switch

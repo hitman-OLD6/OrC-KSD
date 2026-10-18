@@ -146,6 +146,38 @@ public class EffectParsingTests
     }
 
     [Fact]
+    public void Dsl_Condition_OwnerControlsType_RoundTrips()
+    {
+        // 缺陷修复（L1）：`owner.controls.type` 的 unitTypes/comparison/value 此前未进
+        // ConditionDto，序列化后字段丢失 ⇒ 条件编译成恒假守卫（声明式卡片效果永不触发）。
+        var condition = new DslCondition(DslCondition.AllKind, all:
+        [
+            new DslCondition(DslCondition.PayloadSelf, "Card"),
+            new DslCondition(DslCondition.OwnerControlsType,
+                unitTypes: ["fighter", "bomber"], comparison: ">=", value: 1),
+        ]);
+        var dsl = new DslEffectInstance(
+            "deploy_basic",
+            new Dictionary<string, DslSlotFill>(StringComparer.Ordinal)
+            {
+                ["on_deploy"] = new(new[] { new DslOp("draw", count: 1, condition: condition) }),
+            });
+
+        var json = DslJson.Serialize(dsl);
+        // `>` 经 System.Text.Json 默认编码器转义（\u003E），故只对无特殊字符的字段做原文断言。
+        Assert.Contains("\"unitTypes\":[\"fighter\",\"bomber\"]", json, StringComparison.Ordinal);
+
+        var op = Assert.Single(Assert.Single(DslJson.Deserialize(json).Fills).Value.Ops);
+        var all = Assert.IsType<IReadOnlyList<DslCondition>>(op.Condition!.All, exactMatch: false);
+        Assert.Equal(2, all.Count);
+        Assert.Equal(DslCondition.PayloadSelf, all[0].Kind);
+        Assert.Equal(DslCondition.OwnerControlsType, all[1].Kind);
+        Assert.Equal(["fighter", "bomber"], all[1].UnitTypes);
+        Assert.Equal(">=", all[1].Comparison);
+        Assert.Equal(1, all[1].Value);
+    }
+
+    [Fact]
     public void Dsl_Rejects_Missing_Template()
     {
         var ok = DslJson.TryDeserialize("""{ "fills": {} }""", out var instance, out var error);
