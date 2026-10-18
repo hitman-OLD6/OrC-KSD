@@ -27,7 +27,7 @@ public class EffectLifecycleTests
         // W3-A3（受控适配：原「放置前＝静态组装」断言反转）——添加即装载：未放置也装载、注入已就绪
         Assert.True(heal.IsMounted);
         Assert.Equal(1, heal.MountCount);
-        Assert.Contains("攻击时回血", engine.Bus.GetSubscribers(Updates.EffectRemoved));
+        Assert.Contains("攻击时回血/dispose", engine.Bus.GetSubscribers(Updates.CardDestroyed));
 
         await engine.AttackFlow.ExecuteAsync(attacker, defender, 3); // 装载已生效：回血
         Assert.Equal(1, heal.HealCount);
@@ -163,7 +163,7 @@ public class EffectLifecycleTests
         Assert.Equal(1, heal.UnmountCount);
         Assert.True(heal.ExclusiveCleanupRan);
         Assert.True(heal.InjectionRefCleared);
-        Assert.DoesNotContain("攻击时回血", engine.Bus.GetSubscribers(Updates.EffectRemoved));
+        Assert.DoesNotContain("攻击时回血/dispose", engine.Bus.GetSubscribers(Updates.CardDestroyed));
 
         await engine.AttackFlow.ExecuteAsync(attacker, defender, 3); // 清理后不再回血、不再进入 handler
         Assert.Equal(0, heal.HealCount);
@@ -189,7 +189,7 @@ public class EffectLifecycleTests
         Assert.False(heal.IsMounted);
         Assert.Equal(1, heal.UnmountCount);
         Assert.True(heal.ExclusiveCleanupRan);
-        Assert.DoesNotContain("攻击时回血", engine.Bus.GetSubscribers(Updates.EffectRemoved));
+        Assert.DoesNotContain("攻击时回血/dispose", engine.Bus.GetSubscribers(Updates.CardDestroyed));
         Assert.Contains(
             engine.RootStream.Entries,
             e => e.Keywords.Contains("loadout") && e.Keywords.Contains("cleanup") && e.Keywords.Contains("攻击时回血"));
@@ -293,7 +293,7 @@ public class EffectLifecycleTests
 
         Assert.False(bad.IsMounted);  // 视为未生效（回滚）
         Assert.True(good.IsMounted);  // 不阻断其它效果的装载
-        Assert.DoesNotContain("装载炸弹", engine.Bus.GetSubscribers(Updates.EffectRemoved)); // 回滚：主触发器未滞留
+        Assert.DoesNotContain("装载炸弹/dispose", engine.Bus.GetSubscribers(Updates.CardDestroyed)); // 回滚：disposing 触发器未滞留
         var firstErrors = engine.RootStream.Entries
             .Where(e => e.Level == LogLevel.Error && e.Source == "装载炸弹/OnMount")
             .ToArray();
@@ -332,11 +332,11 @@ public class EffectLifecycleTests
         Assert.False(bad.IsMounted);  // 框架撤销/卸载照常完成（「清理未完成，以实况计」）
         Assert.False(good.IsMounted); // 不阻断其它效果的清理
         Assert.Empty(card.Effects);
-        Assert.DoesNotContain("卸载炸弹", engine.Bus.GetSubscribers(Updates.EffectRemoved));
+        Assert.DoesNotContain("卸载炸弹/dispose", engine.Bus.GetSubscribers(Updates.CardDestroyed));
 
         var error = engine.RootStream.Entries.Single(
-            e => e.Level == LogLevel.Error && e.Source == "卸载炸弹/OnUnmount");
-        Assert.Contains("loadout", error.Keywords);
+            e => e.Level == LogLevel.Error && e.Source == "卸载炸弹/dispose/效果销毁");
+        Assert.Contains("exception:InvalidOperationException", error.Keywords);
         Assert.Contains(
             engine.RootStream.Entries,
             e => e.Keywords.Contains("cleanup") && e.Keywords.Contains("卸载炸弹")); // 框架部分照常留痕
@@ -359,7 +359,7 @@ public class EffectLifecycleTests
         Assert.Equal(10, heal.MountHp);         // 钩子内可访问宿主卡牌与数据组件
 
         card.RemoveEffect(heal);
-        Assert.True(heal.UnmountSawTriggerOnBus); // OnUnmount 先行、总线卸载后随
+        Assert.False(heal.UnmountSawTriggerOnBus); // E-D1：进入即停用——OnUnmount 执行时总线挂载已先卸载
         Assert.Equal("战士", heal.UnmountHostName); // OnUnmount 时宿主可访问（专属清理语境）
         Assert.Equal(1, heal.MountCount);
         Assert.Equal(1, heal.UnmountCount);       // 恰一次
@@ -376,16 +376,17 @@ public class EffectLifecycleTests
         await S4TestHelpers.Place(engine, caster); // 放置处理：主动效果不做装载动作
 
         Assert.False(order.IsMounted);      // 主动效果无装载动作
-        Assert.Equal(0, order.MountCount);  // 不执行钩子
-        Assert.DoesNotContain("火球术", engine.Bus.GetSubscribers(Updates.EffectRemoved));
+        Assert.Equal(0, order.MountCount);  // 不执行装载钩子
+        Assert.DoesNotContain("火球术/dispose", engine.Bus.GetSubscribers(Updates.EffectRemoved));
 
         caster.RemoveEffect(order);
-        Assert.Equal(0, order.UnmountCount); // 移除时也不执行钩子（仅列表移除）
+        Assert.Equal(1, order.UnmountCount); // E-D1：主动效果销毁执行 disposing 默认事件（OnUnmount）
         Assert.Empty(caster.Effects);
 
         caster.AddEffect(order);             // 已放置后 Add（主动：仍无装载动作）
         Assert.False(order.IsMounted);
         Assert.Equal(0, order.MountCount);
+        Assert.False(order.IsDisposed); // 复装＝新生命周期（销毁状态已复位）
     }
 
     [Fact]

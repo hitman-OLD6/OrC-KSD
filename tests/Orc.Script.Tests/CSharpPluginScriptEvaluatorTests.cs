@@ -133,7 +133,15 @@ public class CSharpPluginScriptEvaluatorTests
 
         public string ReadAsset(string assetName) => assetName;
 
-        public void DeclareModing(ModingTarget target, string name, Func<object[]?, object[]?> moding)
+        public void DeclareBeforeWrapper(WrapperTarget target, string name, Action<object[]?> wrapper)
+        {
+        }
+
+        public void DeclareAfterWrapper(WrapperTarget target, string name, Func<object[]?, object[]?, object[]?> wrapper)
+        {
+        }
+
+        public void DeclareReplaceWrapper(WrapperTarget target, string name, Func<object[]?, object[]?> moding)
         {
         }
     }

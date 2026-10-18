@@ -112,18 +112,18 @@ public class JudicatorAssemblyTests
         await match.Initialize();
 
         var handle = match.Judicators.Resolve(ProbeName);
-        var m = match.Judicators.RegisterModing(handle, _ => new object[] { "改写" });
+        var m = match.Judicators.RegisterReplaceWrapper(handle, _ => new object[] { "改写" });
         Assert.NotNull(m);
 
         Assert.Equal(new object[] { "改写" }, match.Judicators.Invoke(ProbeName, null)); // 按名解析的调用
         Assert.Equal(new object[] { "改写" }, handle.Invoke(null));                      // 持有句柄的调用
 
-        Assert.True(match.Judicators.UnregisterModing(m!));
+        Assert.True(match.Judicators.UnregisterWrapper(m!));
         Assert.Equal(new object[] { "默认" }, match.Judicators.Invoke(ProbeName, null)); // 注销回退
     }
 
     [Fact]
-    public async Task Matches_Are_Isolated_And_Cross_Match_Handles_Are_Tolerated()
+    public async Task Matches_Are_Isolated_And_Cross_Match_Handles_Fail_Fast()
     {
         var matchA = CreateMatch(registry => registry.Register(ProbeName, new ProbeJudicator(_ => new object[] { "A" })));
         var matchB = CreateMatch(registry => registry.Register(ProbeName, new ProbeJudicator(_ => new object[] { "B" })));
@@ -131,14 +131,14 @@ public class JudicatorAssemblyTests
         await matchB.Initialize();
 
         var handleA = matchA.Judicators.Resolve(ProbeName);
-        var m = matchA.Judicators.RegisterModing(handleA, _ => new object[] { "A改写" });
+        var m = matchA.Judicators.RegisterReplaceWrapper(handleA, _ => new object[] { "A改写" });
         Assert.NotNull(m);
 
         Assert.Equal(new object[] { "A改写" }, matchA.Judicators.Invoke(ProbeName, null)); // 对局 A：moding 生效
         Assert.Equal(new object[] { "B" }, matchB.Judicators.Invoke(ProbeName, null));     // 对局 B：不受影响（跨对局隔离）
 
-        // 跨对局句柄宽容：向 B 注册 A 的句柄 moding＝无操作、不抛错
-        Assert.Null(matchB.Judicators.RegisterModing(handleA, _ => new object[] { "不该执行" }));
+        // 跨对局句柄：fail-fast（配置错误）
+        Assert.Throws<ArgumentException>(() => matchB.Judicators.RegisterReplaceWrapper(handleA, _ => new object[] { "不该执行" }));
         Assert.Equal(new object[] { "B" }, matchB.Judicators.Invoke(ProbeName, null));
     }
 
@@ -149,7 +149,7 @@ public class JudicatorAssemblyTests
         // 而是判定器注册段声明的一条 moding——栈语义（最后者胜）、注销回退到「基线 + 词条覆盖」。
         var match = CommandTestKit.CreateCommandMatch();
         await match.Initialize();
-        var probe = match.Judicators.RegisterModing(
+        var probe = match.Judicators.RegisterReplaceWrapper(
             match.Judicators.Resolve(JudicatorNames.CombatRange), _ => new object[] { false });
 
         var attacker = await CommandTestKit.PrepareOnSupportAsync(match, match.Players[0], CommandTestKit.InfantryId, 1);
@@ -161,7 +161,7 @@ public class JudicatorAssemblyTests
             .Invoke(new object[] { attacker, targetSlot })![0];
 
         Assert.False(RangeAvailable()); // 自定义 moding 最后注册 → 胜出
-        Assert.True(match.Judicators.UnregisterModing(probe!));
+        Assert.True(match.Judicators.UnregisterWrapper(probe!));
         Assert.True(RangeAvailable());  // 注销回退到内置「基线 + 词条覆盖」moding
     }
 }

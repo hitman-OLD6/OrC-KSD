@@ -6,6 +6,7 @@ using Orc.Game.Commanding;
 using Orc.Game.Judicators;
 using Orc.Game.Managers;
 using Orc.Game.Players;
+using Orc.Game.Targeting;
 
 namespace Orc.Game.Effects;
 
@@ -23,7 +24,8 @@ public sealed record EffectSelector(
     string? UnitType = null,
     string? Keyword = null,
     int? Count = null,
-    EffectThreshold? Threshold = null);
+    EffectThreshold? Threshold = null,
+    bool IncludeCovert = false);
 
 /// <summary>
 /// **目标阈值过滤**（E1-57）：目标卡的属性须满足 字段 算子 取值（如 花费不大干 3 的单位）。
@@ -635,12 +637,86 @@ public sealed partial class EffectRuntime
             return Task.FromResult<IReadOnlyList<Card>>(Array.Empty<Card>());
         }
 
-        var result = judicators.Invoke(JudicatorNames.EffectTargetResolve, new object[] { viewer, selector });
+        var result = judicators.Invoke(
+            JudicatorNames.EffectTargetResolve, new object[] { viewer, selector }, OwnerOf(viewer)?.Index);
         return Task.FromResult(
             result is { Length: > 0 } && result[0] is IReadOnlyList<Card> cards
                 ? cards
                 : (IReadOnlyList<Card>)Array.Empty<Card>());
     }
+
+    /// <summary>
+    /// 交互式选靶（首选单目标）：候选来自**目标候选名单判定器**（玩家域＝viewer 归属域）——
+    /// "不可被敌方指令指向"等可选性声明经该判定器的包装器生效；取消/失败/无候选＝空集。
+    /// 一次调用＝一次 targeter 请求（经玩家侧 TargeterManager → 前端桥接）。
+    /// </summary>
+    /// <exception cref="ArgumentNullException">viewer 或 selector 为 null。</exception>
+    public async Task<IReadOnlyList<Card>> BeginTargetSelectionAsync(
+        Card viewer,
+        EffectSelector selector,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(viewer);
+        ArgumentNullException.ThrowIfNull(selector);
+
+        if (_judicators() is not { } judicators)
+        {
+            return Array.Empty<Card>();
+        }
+
+        var targeterManager = OwnerOf(viewer)?.TargeterManager;
+        if (targeterManager is null)
+        {
+            return Array.Empty<Card>();
+        }
+
+        var rule = new JudicatorSelectionRule(
+            judicators.Resolve(JudicatorNames.TargetCandidateEligibility), viewer, selector);
+        var candidates = rule.Candidates();
+        if (candidates.Count == 0)
+        {
+            return Array.Empty<Card>();
+        }
+
+        // 单次请求内用名单快照复核（避免逐候选重算）；候选本身也是快照（D15）。
+        var validator = rule.Snapshot();
+        Ref<Entity>? selected = null;
+        var result = await targeterManager.RunAsync(async flow =>
+        {
+            var step = await flow.Step(
+                SelectorTemplates.FieldUnit,
+                new ReferenceSetParameter(candidates, 1, 1, domainValidator: validator, tag: viewer));
+
+            while (step.IsFailed && step.Failure == SelectorFailureReason.InvalidSelection)
+            {
+                step = await flow.Retry<Ref<Entity>>();
+            }
+
+            if (step.IsCancelled)
+            {
+                return TargeterResult.Cancelled();
+            }
+
+            if (step.IsFailed)
+            {
+                return TargeterResult.FromSelectorFailure(step.Failure);
+            }
+
+            selected = step.Value;
+            return TargeterResult.Ok();
+        }).ConfigureAwait(false);
+
+        return result.IsOk && selected is { IsAlive: true } reference && reference.Value is Card card
+            ? new[] { card }
+            : Array.Empty<Card>();
+    }
+
+    private static Player? OwnerOf(Card card) => card switch
+    {
+        Hq hq => hq.Owner,
+        CardBase cardBase => cardBase.Owner,
+        _ => null,
+    };
 
     /// <summary>按**卡名**在卡池反查定义 id（首个同名；未命中＝null）。</summary>
     private static string? ResolveDefinitionIdByName(MatchCardService service, string cardName)
@@ -890,10 +966,4 @@ public sealed partial class EffectRuntime
         };
     }
 
-    private static Player? OwnerOf(Card card) => card switch
-    {
-        Hq hq => hq.Owner,
-        CardBase cardBase => cardBase.Owner,
-        _ => null,
-    };
 }

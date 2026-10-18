@@ -35,6 +35,7 @@ public sealed class PlayManager
     private readonly TurnManager? _turnManager;
     private readonly MatchLifecycle? _lifecycle;
     private readonly Func<Player, Entity?, Entity?, bool> _inputAllowed;
+    private readonly Func<Player, bool>? _turnOwner;
 
     /// <summary>创建打出管理器。</summary>
     /// <param name="engine">对局引擎（发射更新 / 触发子触发器）。</param>
@@ -42,6 +43,8 @@ public sealed class PlayManager
     /// <param name="battlefield">战场（部署候选＝己方支援阵型插入空隙的计算源）。</param>
     /// <param name="turnManager">回合管理器（反制「仅己方回合」的当前行动方真源；可空——缺省＝独立构造场景，反制使用抛明确异常）。</param>
     /// <param name="lifecycle">对局生命周期（终局门禁——后置项 B；缺省＝null＝独立构造场景无门禁）。</param>
+    /// <param name="inputAllowed">行动输入准入通道（前端状态）。</param>
+    /// <param name="turnOwner">回合归属判定通道（R4；缺省＝null＝按 turnManager 当前行动方引用比较）。</param>
     /// <exception cref="ArgumentNullException">engine / targeterManager / battlefield 为 null。</exception>
     public PlayManager(
         LogicEngine engine,
@@ -49,7 +52,8 @@ public sealed class PlayManager
         Battlefield battlefield,
         TurnManager? turnManager = null,
         MatchLifecycle? lifecycle = null,
-        Func<Player, Entity?, Entity?, bool>? inputAllowed = null)
+        Func<Player, Entity?, Entity?, bool>? inputAllowed = null,
+        Func<Player, bool>? turnOwner = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(targeterManager);
@@ -61,6 +65,7 @@ public sealed class PlayManager
         _turnManager = turnManager;
         _lifecycle = lifecycle;
         _inputAllowed = inputAllowed ?? ((_, _, _) => true);
+        _turnOwner = turnOwner;
     }
 
     // ---------- ① 单位预打出（开始→交互→确认/取消；一次调用链） ----------
@@ -98,12 +103,15 @@ public sealed class PlayManager
         await using var _actionScope = _engine.BeginAction();
 
         // ① 开始：触发预打出触发器（验证＝指挥点检查；不足＝拒绝、不发起 targeter 请求、不发任何更新）。
+        // 捕获箱与指令预打出同形：单位预打出也可声明选靶（指向型部署），handler 经 CaptureBox 提交/取消。
+        var captureBox = new CardCaptureBox();
         var preStream = await card.PrePlayTrigger.InvokeAsync(
             _engine,
             new Dictionary<string, object?>
             {
                 [GameUpdates.PayloadCard] = card,
                 [GameUpdates.PayloadPlayer] = owner,
+                [nameof(CardTriggerView.CaptureBox)] = captureBox,
                 [nameof(CardTriggerView.SelectorSlots)] = card.HandOriginSlots,
             },
             ct);
@@ -116,6 +124,11 @@ public sealed class PlayManager
         if (preStream.Outcome != ExecutionOutcome.Normal)
         {
             return PlayResult.Failure(PlayFailureReason.PlayChainFault);
+        }
+
+        if (captureBox.IsPrePlayCancelled)
+        {
+            return PlayResult.Cancelled(); // 预打出选靶被取消：打出不发生（零副作用）
         }
 
         // Engine-owned insertion gaps: before, between and after all units and HQ.
@@ -296,7 +309,10 @@ public sealed class PlayManager
         // keep their established low-level semantics; JoinUnitAsync never reads frontend state.
         if (requireHand && _turnManager is not null)
         {
-            if (!ReferenceEquals(_turnManager.CurrentPlayer, owner)) return PlayFailureReason.NonOwnerTurn;
+            var ownerTurn = _turnOwner is not null
+                ? _turnOwner(owner)
+                : ReferenceEquals(_turnManager.CurrentPlayer, owner);
+            if (!ownerTurn) return PlayFailureReason.NonOwnerTurn;
             if (!owner.Hand.Contains(card)) return PlayFailureReason.CardNotInHand;
         }
         return _inputAllowed(owner, card, null) ? null : PlayFailureReason.InteractionBlocked;

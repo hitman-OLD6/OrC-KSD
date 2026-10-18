@@ -8,7 +8,7 @@ namespace Orc.Output;
 /// 审查链 JSON 序列化器（S-C4；真源）：把 <see cref="AuditChain"/> 导出为结构化 JSON——
 /// 顶层 { schemaVersion, hooks[], nodes[] }；节点（触发器种类）＝
 /// { id, stableKey, declaredKey, displayName, kind, serializable, hooks[], events[], instances[] }；
-/// 事件＝{ name, seq, band, priority, modingCount, downstream[] }，downstream 项＝{ key, resolved }（未登记＝null＝图缺口）。
+/// 事件＝{ name, seq, band, priority, wrapperCount / beforeWrapperCount / afterWrapperCount / replaceWrapperCount / seamCount / seamWrapperCount, downstream[] }，downstream 项＝{ key, resolved }（未登记＝null＝图缺口）。
 /// 形式约定：id 为 16 位小写十六进制（稳定标识原始值）；kind 为小写字符串；顺序＝管理器产出的确定性顺序。
 /// 空链＝合法输出（空数组）；不抛错（除写入器自身外部故障）。
 /// </summary>
@@ -94,7 +94,12 @@ public static class AuditChainJson
             writer.WriteNumber("seq", info.Seq);
             writer.WriteNumber("band", info.BandValue);
             writer.WriteNumber("priority", info.Priority);
-            writer.WriteNumber("modingCount", info.ModingCount);
+            writer.WriteNumber("wrapperCount", info.WrapperCount);
+            writer.WriteNumber("beforeWrapperCount", info.BeforeWrapperCount);
+            writer.WriteNumber("afterWrapperCount", info.AfterWrapperCount);
+            writer.WriteNumber("replaceWrapperCount", info.ReplaceWrapperCount);
+            writer.WriteNumber("seamCount", info.SeamCount);
+            writer.WriteNumber("seamWrapperCount", info.SeamWrapperCount);
 
             writer.WriteStartArray("downstream");
             foreach (var key in info.Downstream)

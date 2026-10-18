@@ -87,9 +87,9 @@ public class PrefabTests
             "o", "watch.trigger", TriggerKind.Passive,
             hooks: new[] { "turn.end" },
             events: new[] { CsxEvent("onTurnEnd", "effect.lifecycle") });
-        var moding = new ModingPrefab("onRemove", CsxEvent("onRemoveOverride"));
+        var wrapper = new WrapperPrefab("replace", "onRemove", null, CsxEvent("onRemoveOverride"));
 
-        var snapshot = new EffectSnapshot(new EffectPrefab("p", main, new[] { other }, new[] { moding }));
+        var snapshot = new EffectSnapshot(new EffectPrefab("p", main, new[] { other }, new[] { wrapper }));
         var plan = snapshot.BuildLoadPlan();
 
         Assert.Equal(EffectSnapshot.SchemaVersion, snapshot.Version);
@@ -100,14 +100,15 @@ public class PrefabTests
                 EffectLoadStepKind.RegisterEvent,
                 EffectLoadStepKind.MountTrigger,
                 EffectLoadStepKind.RegisterEvent,
-                EffectLoadStepKind.ApplyModing,
+                EffectLoadStepKind.ApplyWrapper,
+                EffectLoadStepKind.Dispose,
             },
             plan.Steps.Select(s => s.Kind));
 
         Assert.Equal("effect.lifecycle", plan.Steps[0].Target);
         Assert.Contains("effect.removed", plan.Steps[0].Detail);
         Assert.Contains("csx:HandleAsync", plan.Steps[1].Detail);
-        Assert.Contains("onRemoveOverride", plan.Steps[^1].Detail);
+        Assert.Contains(plan.Steps, s => s.Detail.Contains("onRemoveOverride"));
     }
 
     [Fact]
@@ -120,9 +121,10 @@ public class PrefabTests
         var plan = new EffectSnapshot(new EffectPrefab("p", main)).BuildLoadPlan();
 
         Assert.DoesNotContain(plan.Steps, s => s.Kind == EffectLoadStepKind.MountMainTrigger);
-        var register = Assert.Single(plan.Steps);
-        Assert.Equal(EffectLoadStepKind.RegisterEvent, register.Kind);
-        Assert.Contains("asm:prefab.events.cast", register.Detail);
+        Assert.Equal(2, plan.Steps.Count);
+        Assert.Equal(EffectLoadStepKind.RegisterEvent, plan.Steps[0].Kind);
+        Assert.Contains("asm:prefab.events.cast", plan.Steps[0].Detail);
+        Assert.Equal(EffectLoadStepKind.Dispose, plan.Steps[1].Kind); // E-D1：disposing 触发器默认必选
     }
 
     [Fact]
@@ -151,6 +153,6 @@ public class PrefabTests
     {
         var main = new TriggerPrefab("m", "k", TriggerKind.Active, events: new[] { AsmEvent("cast") });
         Assert.Throws<ArgumentException>(() =>
-            new EffectPrefab("p", main, modings: new[] { new ModingPrefab("  ", AsmEvent("r")) }));
+            new EffectPrefab("p", main, wrappers: new[] { new WrapperPrefab("replace", "  ", null, AsmEvent("r")) }));
     }
 }

@@ -82,11 +82,11 @@ internal static class EffectCompilationDriverTestKit
             AssertTriggerEqual(expected.OtherTriggers[i], actual.OtherTriggers[i]);
         }
 
-        Assert.Equal(expected.Modings.Count, actual.Modings.Count);
-        for (var i = 0; i < expected.Modings.Count; i++)
+        Assert.Equal(expected.Wrappers.Count, actual.Wrappers.Count);
+        for (var i = 0; i < expected.Wrappers.Count; i++)
         {
-            Assert.Equal(expected.Modings[i].TargetEventId, actual.Modings[i].TargetEventId);
-            AssertEventEqual(expected.Modings[i].Replacement, actual.Modings[i].Replacement);
+            Assert.Equal(expected.Wrappers[i].TargetEventId, actual.Wrappers[i].TargetEventId);
+            AssertEventEqual(expected.Wrappers[i].Handler, actual.Wrappers[i].Handler);
         }
 
         Assert.Equal(expected.Injects.Count, actual.Injects.Count);

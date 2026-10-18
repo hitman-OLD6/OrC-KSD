@@ -22,7 +22,7 @@ public class EffectLoadingPipelineTests
         var card = new Card(engine, "战士");
         card.AddData(new HealthData { Hp = 10 });
         var cleanups = new List<string>();
-        engine.RegisterCardMountCompletedAction((_, effect) => effect.AddUnmountCleanup(() => cleanups.Add(effect.Name)));
+        engine.RegisterCardMountCompletedAction((_, effect) => effect.AddTeardownRegistration(() => cleanups.Add(effect.Name)));
 
         var effect = new RecordingPassiveEffect("效果甲", "r1", new List<string>());
         card.AddEffect(effect); // 授予→装载（通用装载路径自动执行托管登记）
@@ -50,7 +50,7 @@ public class EffectLoadingPipelineTests
         var failFirst = true;
         engine.RegisterCardMountCompletedAction((_, effect) =>
         {
-            effect.AddUnmountCleanup(() => fired++);
+            effect.AddTeardownRegistration(() => fired++);
             if (failFirst)
             {
                 failFirst = false;
@@ -217,6 +217,6 @@ public class EffectLoadingPipelineTests
 
         Assert.Equal(0, emittedCount);
         Assert.Empty(card.Effects);
-        Assert.False(effect.IsMounted); // 已装载卸载链照常完成
+        Assert.False(effect.IsMounted); // 静默销毁：已装载卸载链照常完成（不发射）
     }
 }

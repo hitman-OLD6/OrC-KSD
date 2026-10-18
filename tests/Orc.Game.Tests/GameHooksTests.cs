@@ -210,13 +210,13 @@ public class GameHooksTests
             .Select(field => (string)field.GetRawConstantValue()!)
             .ToList();
 
-        Assert.Equal(22, names.Count);
+        Assert.Equal(23, names.Count);
         Assert.Equal(names.OrderBy(v => v, StringComparer.Ordinal),
             GameHooks.JudicatorNameList.OrderBy(v => v, StringComparer.Ordinal));
 
-        // 装配面：20 内置固定注册段（4 验证类＋6 交战类＋3 动作资格类＋1 效果选靶类＋5 资源类
-        // ＋1 目标候选合法性〔S2 提入〕） + 1 外部装配段 = 全量 21
-        Assert.Equal(21, GameHooks.BuiltInJudicatorNames.Count);
+        // 装配面：21 内置固定注册段（4 验证类＋6 交战类＋3 动作资格类＋1 效果选靶类＋5 资源类
+        // ＋1 目标候选合法性〔S2 提入〕＋1 回合归属〔R4〕） + 1 外部装配段 = 全量 22
+        Assert.Equal(22, GameHooks.BuiltInJudicatorNames.Count);
         Assert.Single(GameHooks.ExternalJudicatorNames);
         Assert.Equal(GameHooks.JudicatorNameList.OrderBy(v => v, StringComparer.Ordinal),
             GameHooks.BuiltInJudicatorNames.Concat(GameHooks.ExternalJudicatorNames)
@@ -363,7 +363,7 @@ public class GameHooksTests
         var root = document.RootElement;
 
         Assert.Equal(31, root.GetProperty("signals").GetArrayLength()); // S1 受控适配（29 → 30）：新增 unit.upgraded；S2 受控适配（30 → 31）：新增 unit.revealed
-        Assert.Equal(22, root.GetProperty("judicators").GetArrayLength());
+        Assert.Equal(23, root.GetProperty("judicators").GetArrayLength());
         Assert.Equal(GameHooks.TriggerLayers.Count, root.GetProperty("triggerLayers").GetArrayLength());
         Assert.Equal(27, root.GetProperty("pending").GetArrayLength());
 

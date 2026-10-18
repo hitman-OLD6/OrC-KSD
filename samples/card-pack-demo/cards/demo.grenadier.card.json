@@ -51,7 +51,7 @@
               "version": 1
             },
             "otherTriggers": [],
-            "modings": [],
+            "wrappers":[],
             "injects": []
           }
         }

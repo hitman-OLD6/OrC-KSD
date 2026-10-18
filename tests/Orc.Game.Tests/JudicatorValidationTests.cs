@@ -58,14 +58,14 @@ public class JudicatorValidationTests
         Assert.All(instances, trigger => Assert.False(trigger.Validate(empty)));
 
         // moding 恒真改写＝费用验证改写（其全部引用点生效——单源绑定 4 实例的一致性证明）。
-        var moding = match.Judicators.RegisterModing(
+        var moding = match.Judicators.RegisterReplaceWrapper(
             match.Judicators.Resolve(JudicatorNames.CostCheck),
             _ => new object[] { ValidationVerdict.Valid });
         Assert.NotNull(moding);
         Assert.All(instances, trigger => Assert.True(trigger.Validate(empty)));
 
         // 注销回退：4 个实例全部回退默认逻辑（拒绝）。
-        Assert.True(match.Judicators.UnregisterModing(moding!));
+        Assert.True(match.Judicators.UnregisterWrapper(moding!));
         Assert.All(instances, trigger => Assert.False(trigger.Validate(empty)));
     }
 
@@ -84,7 +84,7 @@ public class JudicatorValidationTests
         Assert.True(counter.UseCounterTrigger.Validate(empty));
 
         // moding 恒假（缺类别）：触发器验证拒绝；入口预检同步拒绝并降级为一般性失败原因（规范内缺省——不伪造具体类别）。
-        var moding = match.Judicators.RegisterModing(
+        var moding = match.Judicators.RegisterReplaceWrapper(
             match.Judicators.Resolve(JudicatorNames.CounterUse),
             _ => new object[] { ValidationVerdict.Invalid() });
         Assert.NotNull(moding);
@@ -96,7 +96,7 @@ public class JudicatorValidationTests
         Assert.False(counter.GetData<CounterActivationData>().IsActive);         // 零副作用（未翻转）
 
         // 注销回退：两侧恢复默认（入口预检经判定器通过 → 激活成功）。
-        Assert.True(match.Judicators.UnregisterModing(moding!));
+        Assert.True(match.Judicators.UnregisterWrapper(moding!));
         Assert.True(counter.UseCounterTrigger.Validate(empty));
         var accepted = await match.PlayManager.UseCounterAsync(counter);
         Assert.Equal(PlayResultStatus.Success, accepted.Status);
@@ -126,23 +126,23 @@ public class JudicatorValidationTests
         Assert.False(attackTrigger.Validate(empty));
 
         // ① 改写移动复验（恒真）：移动（空输入）通过＝改写真实生效；攻击保持拒绝＝互不牵连。
-        var moveModing = match.Judicators.RegisterModing(
+        var moveModing = match.Judicators.RegisterReplaceWrapper(
             match.Judicators.Resolve(JudicatorNames.MoveRecheck),
             _ => new object[] { ValidationVerdict.Valid });
         Assert.NotNull(moveModing);
         Assert.True(moveTrigger.Validate(empty));
         Assert.False(attackTrigger.Validate(empty));
-        Assert.True(match.Judicators.UnregisterModing(moveModing!));
+        Assert.True(match.Judicators.UnregisterWrapper(moveModing!));
         Assert.False(moveTrigger.Validate(empty)); // 注销回退
 
         // ② 改写攻击复验（恒真）：攻击（空输入）通过＝改写真实生效；移动保持拒绝＝互不牵连。
-        var attackModing = match.Judicators.RegisterModing(
+        var attackModing = match.Judicators.RegisterReplaceWrapper(
             match.Judicators.Resolve(JudicatorNames.AttackRecheck),
             _ => new object[] { ValidationVerdict.Valid });
         Assert.NotNull(attackModing);
         Assert.True(attackTrigger.Validate(empty));
         Assert.False(moveTrigger.Validate(empty));
-        Assert.True(match.Judicators.UnregisterModing(attackModing!));
+        Assert.True(match.Judicators.UnregisterWrapper(attackModing!));
         Assert.False(attackTrigger.Validate(empty)); // 注销回退
     }
 
@@ -245,7 +245,7 @@ public class JudicatorValidationTests
         trigger.BindValidation(JudicatorBinding.FromRegistration(match.Judicators.Resolve("test.validation.custom")));
         Assert.False(trigger.Validate(Array.Empty<Ref<Entity>>()));
 
-        var moding = match.Judicators.RegisterModing(
+        var moding = match.Judicators.RegisterReplaceWrapper(
             match.Judicators.Resolve("test.validation.custom"),
             _ => new object[] { ValidationVerdict.Valid });
         Assert.NotNull(moding);

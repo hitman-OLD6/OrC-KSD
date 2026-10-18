@@ -340,7 +340,11 @@ public sealed class UiProjectionProvider : IUiProjectionProvider
     {
         try
         {
-            return card.Modifiers.GetEffectiveValue(field);
+            var value = card.Modifiers.GetEffectiveValue(field);
+            // 行动费下限 0（与 OperateCosts.Effective 同口径）：减费修饰不得把面板显示成负数。
+            return string.Equals(field, CardStatFields.OperateCost, StringComparison.Ordinal)
+                ? Math.Max(0, value)
+                : value;
         }
         catch (InvalidOperationException)
         {

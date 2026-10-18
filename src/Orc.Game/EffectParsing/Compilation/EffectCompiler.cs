@@ -46,21 +46,21 @@ public sealed class EffectCompiler
         var mainTrigger = BuildTrigger(template.Root.MainTrigger, template, handlers);
         var others = template.Root.OtherTriggers.Select(trigger => BuildTrigger(trigger, template, handlers)).ToList();
 
-        var modings = template.Root.Modings.Select(m =>
+        var wrappers = template.Root.Modings.Select(m =>
         {
             if (string.IsNullOrWhiteSpace(m.Replacement.Csx))
             {
                 throw new InvalidOperationException($"模板 '{template.Id}' 的 moding 替换事件 '{m.Replacement.Id}' 缺少 csx。");
             }
 
-            return new ModingPrefab(m.TargetEventId, new EventPrefab(m.Replacement.Id, m.Replacement.Entry, csxSource: m.Replacement.Csx));
+            return new WrapperPrefab("replace", m.TargetEventId, null, new EventPrefab(m.Replacement.Id, m.Replacement.Entry, csxSource: m.Replacement.Csx));
         }).ToList();
 
         var injects = template.Root.Injects
             .Select(i => new InjectPrefab(i.TargetTriggerName, i.BandName, i.EventId, i.Priority))
             .ToList();
 
-        var prefab = new EffectPrefab(effectId, mainTrigger, others, modings, version, injects);
+        var prefab = new EffectPrefab(effectId, mainTrigger, others, wrappers, version, injects);
         return new EffectSnapshot(prefab);
     }
 

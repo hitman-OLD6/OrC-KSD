@@ -1,13 +1,13 @@
 namespace Orc.Core;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 统一服务机制（资产化 S2）：判定器与资产服务**共用**的"条目 + moding 栈 + 句柄"机制基类。
+// 统一服务机制（资产化 S2）：判定器与资产服务**共用**的"条目 + 包装器 + 句柄"机制基类。
 // 背景：判定器（Judicator：「可被改写」的逻辑服务）与资产服务（AssetService：静态资产的数据/逻辑
 // 储存服务）语义分立、**名字域独立**（判定器名＝受控常量集；资产名＝插件命名），但机制同构——
 // 本文件把该机制抽出为泛型基类，二者各具其具体化实例，避免机制复制。
-// 语义（与既有 JudicatorRegistry 对齐）：注册即配置（装配期一次成型、重复注册拒绝、未注册引用 fail-fast）；
-// moding＝栈语义（最后者胜、注销回退、纯替换）；句柄即权限（无注册者校验）；快照一致（一次调用＝一次解析）；
-// 机制静默（moding 面无读面、注册/注销/解析不留痕）。
+// 语义：注册即配置（装配期一次成型、重复注册拒绝、未注册引用 fail-fast）；
+// 包装器＝管道式（前置 LIFO→核心或替换→后置 FIFO）；句柄即权限（无注册者校验）；
+// 快照一致（一次调用＝一次快照）；机制静默（包装器面无读面、注册/注销/解析不留痕）。
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
@@ -20,8 +20,8 @@ public interface IUnifiedService
 }
 
 /// <summary>
-/// 强类型 moding 适配面：服务子类声明强类型 delegate 并实现本面时，moding 可经强类型 delegate 注入
-/// （机制侧调用 <see cref="Adapt"/> 适配为统一签名后入栈——与统一签名底层等效替换，同一条目同一栈）。
+/// 强类型替换包装器适配面：服务子类声明强类型 delegate 并实现本面时，replace wrapper 可经强类型 delegate 注入
+/// （机制侧调用 <see cref="Adapt"/> 适配为统一签名后入栈——统一签名底层等效替换，同一条目同一组）。
 /// </summary>
 /// <typeparam name="TDelegate">服务子类声明的强类型 delegate（该服务的签名）。</typeparam>
 public interface IStrongTypedService<in TDelegate> where TDelegate : Delegate
@@ -31,19 +31,55 @@ public interface IStrongTypedService<in TDelegate> where TDelegate : Delegate
 }
 
 /// <summary>
-/// 服务条目：默认服务 ＋ moding 栈。栈序＝moding 注册序（尾＝最后注册者）；执行时点解析（不做注册期换绑）。
+/// 服务签名描述（包装器严格校验用）：强类型判定器由 <see cref="Judicator{TDelegate}"/> 一处实现；
+/// 非强类型服务回退为统一签名 <c>object[] → object[]</c>。
+/// </summary>
+public interface IServiceSignature
+{
+    /// <summary>目标核心逻辑的参数类型（按序、严格相等比较）。</summary>
+    IReadOnlyList<Type> ParameterTypes { get; }
+
+    /// <summary>目标核心逻辑的返回类型。</summary>
+    Type ReturnType { get; }
+}
+
+/// <summary>
+/// 服务条目：默认服务 ＋ 前置/后置/替换三组包装器。
+/// 前置与后置按注册序追加（前置执行时反序取 LIFO、后置正序取 FIFO）；替换取尾项（最后注册者生效）。
 /// 条目生命周期＝注册表生命周期（无条目注销通道——「注册即配置」）。
 /// </summary>
 /// <typeparam name="TService">服务类型。</typeparam>
 public sealed class ServiceEntry<TService> where TService : class, IUnifiedService
 {
-    private readonly List<ModingEntry> _modings = new();
+    /// <summary>默认域键（无玩家语境；对外的 null 映射到此——Dictionary 不接受 null 键）。</summary>
+    internal const int DefaultDomain = -1;
+
+    private readonly Dictionary<int, WrapperBucket> _buckets = new();
+
+    /// <summary>单域的包装器集合（三组；与「条目」分离，使同一服务可按玩家域并行持有）。</summary>
+    private sealed class WrapperBucket
+    {
+        public readonly List<(Delegate Handler, long Seq)> Before = new();
+        public readonly List<(Delegate Handler, long Seq)> After = new();
+        public readonly List<(Delegate Handler, long Seq)> Replace = new();
+    }
 
     internal ServiceEntry(object owner, string name, TService service)
     {
         Owner = owner;
         Name = name;
         Service = service;
+
+        if (service is IServiceSignature signature)
+        {
+            SignatureParameterTypes = signature.ParameterTypes;
+            SignatureReturnType = signature.ReturnType;
+        }
+        else
+        {
+            SignatureParameterTypes = new[] { typeof(object[]) };
+            SignatureReturnType = typeof(object[]);
+        }
     }
 
     /// <summary>所属注册表（跨注册表句柄判定用）。</summary>
@@ -55,45 +91,163 @@ public sealed class ServiceEntry<TService> where TService : class, IUnifiedServi
     /// <summary>默认服务实例。</summary>
     public TService Service { get; }
 
-    /// <summary>当前生效的 moding 逻辑：最后注册且未注销者；无＝null（回退默认）。机制静默：无公共读面。</summary>
-    internal Func<object[]?, object[]?>? LastModing => _modings.Count == 0 ? null : _modings[^1].Handler;
+    /// <summary>目标核心逻辑的参数类型（强类型判定器经 <see cref="IServiceSignature"/> 提供）。</summary>
+    internal IReadOnlyList<Type> SignatureParameterTypes { get; }
 
-    internal void AddModing(Func<object[]?, object[]?> handler, long seq) => _modings.Add(new ModingEntry(handler, seq));
+    /// <summary>目标核心逻辑的返回类型。</summary>
+    internal Type SignatureReturnType { get; }
 
-    internal bool RemoveModing(long seq)
+    /// <summary>取指定域的包装器集合（不存在＝创建）。</summary>
+    private WrapperBucket Bucket(int domain)
     {
-        var index = _modings.FindIndex(m => m.Seq == seq);
+        if (!_buckets.TryGetValue(domain, out var bucket))
+        {
+            bucket = new WrapperBucket();
+            _buckets.Add(domain, bucket);
+        }
+
+        return bucket;
+    }
+
+    /// <summary>取指定域的包装器集合（不存在＝null）。</summary>
+    private WrapperBucket? ExistingBucket(int domain)
+        => _buckets.TryGetValue(domain, out var bucket) ? bucket : null;
+
+    /// <summary>指定域当前生效的替换包装器：最后注册且未注销者；无＝null（回退默认）。机制静默：无公共读面。</summary>
+    private static Func<object[]?, object[]?>? LastReplace(WrapperBucket? bucket)
+        => bucket is null || bucket.Replace.Count == 0 ? null : (Func<object[]?, object[]?>)bucket.Replace[^1].Handler;
+
+    /// <summary>挂载一条包装器（统一签名；类别不符＝fail-fast）。domain 缺省＝默认域。</summary>
+    internal void AddWrapper(WrapperPhase phase, Delegate handler, long seq, int domain = DefaultDomain)
+    {
+        var bucket = Bucket(domain);
+        switch (phase)
+        {
+            case WrapperPhase.Before:
+                if (handler is not Action<object[]?> before)
+                {
+                    throw new ArgumentException("前置包装器签名须为 Action<object[]?>。", nameof(handler));
+                }
+
+                bucket.Before.Add((before, seq));
+                break;
+
+            case WrapperPhase.After:
+                if (handler is not Func<object[]?, object[]?, object[]?> after)
+                {
+                    throw new ArgumentException(
+                        "后置包装器签名须为 Func<object[]?, object[]?, object[]?>。", nameof(handler));
+                }
+
+                bucket.After.Add((after, seq));
+                break;
+
+            case WrapperPhase.Replace:
+                if (handler is not Func<object[]?, object[]?> replace)
+                {
+                    throw new ArgumentException("替换包装器签名须为 Func<object[]?, object[]?>。", nameof(handler));
+                }
+
+                bucket.Replace.Add((replace, seq));
+                break;
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(phase), phase, "未定义的包装器类别。");
+        }
+    }
+
+    /// <summary>按注册序移除一项（跨全部域查找）；不存在＝false（幂等）。</summary>
+    internal bool RemoveWrapper(long seq)
+    {
+        foreach (var bucket in _buckets.Values)
+        {
+            if (RemoveFrom(bucket.Before, seq) || RemoveFrom(bucket.After, seq) || RemoveFrom(bucket.Replace, seq))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>清空全部包装器（条目撤销时调用：包装器随之失效、避免悬空）。</summary>
+    internal void ClearWrappers() => _buckets.Clear();
+
+    /// <summary>
+    /// 统一解析点：一次调用＝一次快照。管道＝前置（LIFO）→ 替换或默认 → 后置（FIFO，逐层改写 result）。
+    /// 异常对称性：不捕获、不包装——默认与包装器逻辑异常可见性一致。
+    /// </summary>
+    public object[]? Invoke(object[]? args) => Invoke(args, DefaultDomain);
+
+    /// <summary>
+    /// 统一解析点（指定域）：**全局层（默认域）→ 玩家层** 两层管道。
+    /// 全局层＝插件/装配期注册（对所有玩家域生效）；玩家层＝卡效果按来源注入（仅该域生效）。
+    /// 替换包装器：玩家层优先、否则全局层；后置：玩家层先、全局层后（全局为基线改写，玩家为叠加）。
+    /// </summary>
+    public object[]? Invoke(object[]? args, int domain)
+    {
+        var global = ExistingBucket(DefaultDomain);
+        var local = domain == DefaultDomain ? null : ExistingBucket(domain);
+
+        foreach (var wrapper in SnapshotBefore(global))
+        {
+            wrapper(args);
+        }
+
+        if (local is not null)
+        {
+            foreach (var wrapper in SnapshotBefore(local))
+            {
+                wrapper(args);
+            }
+        }
+
+        var replace = LastReplace(local) ?? LastReplace(global);
+        var result = replace is { } replacement ? replacement(args) : Service.Invoke(args);
+
+        if (local is not null)
+        {
+            foreach (var wrapper in SnapshotAfter(local))
+            {
+                result = wrapper(args, result);
+            }
+        }
+
+        foreach (var wrapper in SnapshotAfter(global))
+        {
+            result = wrapper(args, result);
+        }
+
+        return result;
+    }
+
+    private static Action<object[]?>[] SnapshotBefore(WrapperBucket? bucket)
+    {
+        if (bucket is null)
+        {
+            return Array.Empty<Action<object[]?>>();
+        }
+
+        var snapshot = bucket.Before.ToArray();
+        Array.Reverse(snapshot);
+        return Array.ConvertAll(snapshot, static e => (Action<object[]?>)e.Handler);
+    }
+
+    private static Func<object[]?, object[]?, object[]?>[] SnapshotAfter(WrapperBucket? bucket)
+        => bucket is null
+            ? Array.Empty<Func<object[]?, object[]?, object[]?>>()
+            : Array.ConvertAll(bucket.After.ToArray(), static e => (Func<object[]?, object[]?, object[]?>)e.Handler);
+
+    private static bool RemoveFrom(List<(Delegate Handler, long Seq)> list, long seq)
+    {
+        var index = list.FindIndex(e => e.Seq == seq);
         if (index < 0)
         {
             return false;
         }
 
-        _modings.RemoveAt(index);
+        list.RemoveAt(index);
         return true;
-    }
-
-    /// <summary>
-    /// 统一解析点：每次调用解析栈顶一次并固定（moding 生效＝纯替换；无 moding＝默认服务主方法）。
-    /// 异常对称性：不捕获、不包装——默认与替换逻辑异常可见性一致。
-    /// </summary>
-    public object[]? Invoke(object[]? args)
-    {
-        var moding = LastModing;
-        return moding is null ? Service.Invoke(args) : moding(args);
-    }
-
-    private sealed class ModingEntry
-    {
-        internal ModingEntry(Func<object[]?, object[]?> handler, long seq)
-        {
-            Handler = handler;
-            Seq = seq;
-        }
-
-        internal Func<object[]?, object[]?> Handler { get; }
-
-        /// <summary>moding 注册序（注册表内唯一，作 moding 项身份）。</summary>
-        internal long Seq { get; }
     }
 }
 
@@ -111,48 +265,52 @@ public class ServiceRegistration<TService> where TService : class, IUnifiedServi
     /// <summary>条目内部件（机制内部使用）。</summary>
     internal ServiceEntry<TService> Entry { get; }
 
-    /// <summary>调用（持有句柄的调用；经统一解析点）。</summary>
+    /// <summary>调用（持有句柄的调用；经统一解析点——默认域）。</summary>
     public object[]? Invoke(object[]? args) => Entry.Invoke(args);
+
+    /// <summary>调用（指定玩家域；<paramref name="playerIndex"/> 为 null＝默认域）。</summary>
+    public object[]? Invoke(object[]? args, int? playerIndex)
+        => Entry.Invoke(args, playerIndex ?? ServiceEntry<TService>.DefaultDomain);
 }
 
-/// <summary>moding 注册句柄基类（注销凭据；句柄即权限）。仅由注册面创建；不含可变状态。</summary>
-public class ServiceModingRegistration<TService> where TService : class, IUnifiedService
+/// <summary>包装器注册句柄基类（注销凭据；句柄即权限）。仅由注册面创建；不含可变状态。</summary>
+public class ServiceWrapperRegistration<TService> where TService : class, IUnifiedService
 {
-    internal ServiceModingRegistration(ServiceEntry<TService> target, long modingSeq)
+    internal ServiceWrapperRegistration(ServiceEntry<TService> target, long wrapperSeq)
     {
         Target = target;
-        ModingSeq = modingSeq;
+        WrapperSeq = wrapperSeq;
     }
 
     /// <summary>目标条目（机制内部使用）。</summary>
     internal ServiceEntry<TService> Target { get; }
 
-    /// <summary>moding 注册序（注册表内唯一；机制内部使用）。</summary>
-    internal long ModingSeq { get; }
+    /// <summary>包装器注册序（注册表内唯一；机制内部使用）。</summary>
+    internal long WrapperSeq { get; }
 }
 
 /// <summary>
-/// 通用服务注册表基类（机制）：字符串名（ordinal）→ 条目（默认服务 ＋ moding 栈）。
+/// 通用服务注册表基类（机制）：字符串名（ordinal）→ 条目（默认服务 ＋ 三组包装器）。
 /// 语义见文件头；具体注册表（<c>JudicatorRegistry</c> / <c>AssetServiceRegistry</c>）经本类具体化，
 /// 各自持有独立实例（名字域隔离），并各自声明其句柄类型。
 /// </summary>
 /// <typeparam name="TService">服务类型。</typeparam>
 /// <typeparam name="THandle">条目句柄类型（派生自 <see cref="ServiceRegistration{TService}"/>）。</typeparam>
-/// <typeparam name="TModingHandle">moding 句柄类型（派生自 <see cref="ServiceModingRegistration{TService}"/>）。</typeparam>
-public abstract class ServiceRegistry<TService, THandle, TModingHandle>
+/// <typeparam name="TWrapperHandle">包装器句柄类型（派生自 <see cref="ServiceWrapperRegistration{TService}"/>）。</typeparam>
+public abstract class ServiceRegistry<TService, THandle, TWrapperHandle>
     where TService : class, IUnifiedService
     where THandle : ServiceRegistration<TService>
-    where TModingHandle : ServiceModingRegistration<TService>
+    where TWrapperHandle : ServiceWrapperRegistration<TService>
 {
     private readonly Dictionary<string, ServiceEntry<TService>> _entries = new(StringComparer.Ordinal);
     private readonly Dictionary<ServiceEntry<TService>, THandle> _handles = new();
-    private long _modingSeq;
+    private long _wrapperSeq;
 
     /// <summary>创建条目句柄（派生类提供；每条目恰一次——注册所得＝解析所得）。</summary>
     protected abstract THandle CreateHandle(ServiceEntry<TService> entry);
 
-    /// <summary>创建 moding 句柄（派生类提供）。</summary>
-    protected abstract TModingHandle CreateModingHandle(ServiceEntry<TService> entry, long modingSeq);
+    /// <summary>创建包装器句柄（派生类提供）。</summary>
+    protected abstract TWrapperHandle CreateWrapperHandle(ServiceEntry<TService> entry, long wrapperSeq);
 
     /// <summary>注册一枚服务条目（注册即配置——重复注册拒绝）。返回条目等价句柄。</summary>
     /// <exception cref="ArgumentException">name 为 null/空白。</exception>
@@ -200,53 +358,91 @@ public abstract class ServiceRegistry<TService, THandle, TModingHandle>
     /// </summary>
     public IReadOnlyCollection<string> Names => _entries.Keys;
 
-    /// <summary>按名调用（解析栈顶并执行；一次调用＝一次解析）。</summary>
-    public object[]? Invoke(string name, object[]? args) => ResolveCore(name).Invoke(args);
+    /// <summary>按名调用（一次调用＝一次快照；执行管道）。<paramref name="playerIndex"/> 为 null＝默认域。</summary>
+    public object[]? Invoke(string name, object[]? args, int? playerIndex = null)
+        => ResolveCore(name).Invoke(args, playerIndex);
 
     /// <summary>
-    /// 注册一条 moding（统一签名底层形态）：纯替换（moding 生效时不执行默认逻辑）。
-    /// 无效目标（句柄不属本注册表）＝幂等无操作、不生效（返回 null、不抛错）。
+    /// 注册一条**前置包装器**（统一签名）：核心之前 LIFO 执行；可就地改写 <c>object[]</c> 元素。
+    /// 目标句柄无效（不属本注册表）＝fail-fast。
     /// </summary>
-    /// <exception cref="ArgumentNullException">target 或 moding 为 null。</exception>
-    public TModingHandle? RegisterModing(THandle target, Func<object[]?, object[]?> moding)
+    /// <exception cref="ArgumentNullException">target 或 wrapper 为 null。</exception>
+    /// <exception cref="ArgumentException">句柄不属本注册表。</exception>
+    public TWrapperHandle RegisterBeforeWrapper(THandle target, Action<object[]?> wrapper, int? playerIndex = null)
+        => RegisterWrapperCore(target, WrapperPhase.Before, wrapper, playerIndex);
+
+    /// <summary>
+    /// 注册一条**前置包装器**（强类型工厂产物）：严格校验参数类型与目标一致、返回 <c>void</c>；
+    /// 不符＝挂载期 fail-fast。
+    /// </summary>
+    /// <exception cref="ArgumentNullException">target 为 null。</exception>
+    /// <exception cref="ArgumentException">句柄不属本注册表，或签名不符。</exception>
+    public TWrapperHandle RegisterBeforeWrapper(THandle target, BeforeWrapper wrapper, int? playerIndex = null)
     {
         ArgumentNullException.ThrowIfNull(target);
-        ArgumentNullException.ThrowIfNull(moding);
-
-        if (!ReferenceEquals(target.Entry.Owner, this))
-        {
-            return null; // 跨注册表句柄：幂等无操作
-        }
-
-        target.Entry.AddModing(moding, _modingSeq++);
-        return CreateModingHandle(target.Entry, _modingSeq - 1);
+        ValidateTarget(target);
+        ValidateBeforeSignature(target.Entry, wrapper);
+        return RegisterWrapperCore(target, WrapperPhase.Before, wrapper.Handler, playerIndex);
     }
 
     /// <summary>
-    /// 注册一条 moding（强类型封装便捷面）：目标服务实现 <see cref="IStrongTypedService{TDelegate}"/> 时经其适配；
+    /// 注册一条**后置包装器**（统一签名）：核心之后 FIFO 执行；接收「原参数＋核心结果」并返回新结果。
+    /// 目标句柄无效（不属本注册表）＝fail-fast。
+    /// </summary>
+    /// <exception cref="ArgumentNullException">target 或 wrapper 为 null。</exception>
+    /// <exception cref="ArgumentException">句柄不属本注册表。</exception>
+    public TWrapperHandle RegisterAfterWrapper(THandle target, Func<object[]?, object[]?, object[]?> wrapper, int? playerIndex = null)
+        => RegisterWrapperCore(target, WrapperPhase.After, wrapper, playerIndex);
+
+    /// <summary>
+    /// 注册一条**后置包装器**（强类型工厂产物）：严格校验参数＝目标参数＋结果、返回＝目标返回；
+    /// 不符＝挂载期 fail-fast。
+    /// </summary>
+    /// <exception cref="ArgumentNullException">target 为 null。</exception>
+    /// <exception cref="ArgumentException">句柄不属本注册表，或签名不符。</exception>
+    public TWrapperHandle RegisterAfterWrapper(THandle target, AfterWrapper wrapper, int? playerIndex = null)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ValidateTarget(target);
+        ValidateAfterSignature(target.Entry, wrapper);
+        return RegisterWrapperCore(target, WrapperPhase.After, wrapper.Handler, playerIndex);
+    }
+
+    /// <summary>
+    /// 注册一条**替换包装器**（统一签名）：只替换核心段；最后一个未注销者生效。
+    /// 目标句柄无效（不属本注册表）＝fail-fast。
+    /// </summary>
+    /// <exception cref="ArgumentNullException">target 或 wrapper 为 null。</exception>
+    /// <exception cref="ArgumentException">句柄不属本注册表。</exception>
+    public TWrapperHandle RegisterReplaceWrapper(THandle target, Func<object[]?, object[]?> wrapper, int? playerIndex = null)
+        => RegisterWrapperCore(target, WrapperPhase.Replace, wrapper, playerIndex);
+
+    /// <summary>
+    /// 注册一条**替换包装器**（强类型便捷面）：目标服务实现 <see cref="IStrongTypedService{TDelegate}"/> 时经其适配；
     /// 恰为统一签名 delegate＝直接采用；否则＝适配错误（fail-fast）。
     /// </summary>
-    /// <exception cref="ArgumentNullException">target 或 moding 为 null。</exception>
+    /// <exception cref="ArgumentNullException">target 或 wrapper 为 null。</exception>
+    /// <exception cref="ArgumentException">句柄不属本注册表。</exception>
     /// <exception cref="InvalidOperationException">目标服务不支持该强类型 delegate（适配错误——fail-fast）。</exception>
-    public TModingHandle? RegisterModing<TDelegate>(THandle target, TDelegate moding)
+    public TWrapperHandle RegisterReplaceWrapper<TDelegate>(THandle target, TDelegate wrapper, int? playerIndex = null)
         where TDelegate : Delegate
     {
         ArgumentNullException.ThrowIfNull(target);
-        ArgumentNullException.ThrowIfNull(moding);
+        ArgumentNullException.ThrowIfNull(wrapper);
 
         if (!ReferenceEquals(target.Entry.Owner, this))
         {
-            return null;
+            throw new ArgumentException("包装器目标句柄不属于本注册表（跨注册表挂载被拒绝）。", nameof(target));
         }
 
         Func<object[]?, object[]?> unified;
         if (target.Entry.Service is IStrongTypedService<TDelegate> typed)
         {
-            unified = typed.Adapt(moding);
+            unified = typed.Adapt(wrapper);
         }
-        else if (moding is Func<object[]?, object[]?> direct)
+        else if (wrapper is Func<object[]?, object[]?> direct)
         {
-            unified = direct; // 统一签名恒受支持
+            unified = direct;
         }
         else
         {
@@ -254,13 +450,14 @@ public abstract class ServiceRegistry<TService, THandle, TModingHandle>
                 $"服务 '{target.Name}' 不支持强类型 delegate '{typeof(TDelegate).Name}' 的注入（适配错误——fail-fast）。");
         }
 
-        target.Entry.AddModing(unified, _modingSeq++);
-        return CreateModingHandle(target.Entry, _modingSeq - 1);
+        var seq = _wrapperSeq++;
+        target.Entry.AddWrapper(WrapperPhase.Replace, unified, seq, playerIndex ?? ServiceEntry<TService>.DefaultDomain);
+        return CreateWrapperHandle(target.Entry, seq);
     }
 
-    /// <summary>注销一条 moding（句柄即权限）。句柄不属本注册表/已注销＝幂等无操作、返回 false。</summary>
+    /// <summary>注销一条包装器（句柄即权限）。句柄不属本注册表／已注销＝幂等无操作、返回 false。</summary>
     /// <exception cref="ArgumentNullException">registration 为 null。</exception>
-    public bool UnregisterModing(TModingHandle registration)
+    public bool UnregisterWrapper(TWrapperHandle registration)
     {
         ArgumentNullException.ThrowIfNull(registration);
 
@@ -269,6 +466,81 @@ public abstract class ServiceRegistry<TService, THandle, TModingHandle>
             return false;
         }
 
-        return registration.Target.RemoveModing(registration.ModingSeq);
+        return registration.Target.RemoveWrapper(registration.WrapperSeq);
     }
+
+    private TWrapperHandle RegisterWrapperCore(THandle target, WrapperPhase phase, Delegate wrapper, int? playerIndex)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(wrapper);
+
+        ValidateTarget(target);
+
+        var seq = _wrapperSeq++;
+        target.Entry.AddWrapper(phase, wrapper, seq, playerIndex ?? ServiceEntry<TService>.DefaultDomain);
+        return CreateWrapperHandle(target.Entry, seq);
+    }
+
+    private void ValidateTarget(THandle target)
+    {
+        if (!ReferenceEquals(target.Entry.Owner, this))
+        {
+            throw new ArgumentException("包装器目标句柄不属于本注册表（跨注册表挂载被拒绝）。", nameof(target));
+        }
+    }
+
+    private static void ValidateBeforeSignature(ServiceEntry<TService> entry, BeforeWrapper wrapper)
+    {
+        if (wrapper.ReturnType != typeof(void))
+        {
+            throw new ArgumentException("前置包装器返回类型必须为 void。", nameof(wrapper));
+        }
+
+        if (!SameSequence(wrapper.ParameterTypes, entry.SignatureParameterTypes))
+        {
+            throw new ArgumentException(
+                $"前置包装器签名不符：目标 '{entry.Name}' 期望 ({(FormatTypes(entry.SignatureParameterTypes))})，"
+                + $"实际 ({(FormatTypes(wrapper.ParameterTypes))})。", nameof(wrapper));
+        }
+    }
+
+    private static void ValidateAfterSignature(ServiceEntry<TService> entry, AfterWrapper wrapper)
+    {
+        var expected = new Type[entry.SignatureParameterTypes.Count + 1];
+        for (var i = 0; i < entry.SignatureParameterTypes.Count; i++)
+        {
+            expected[i] = entry.SignatureParameterTypes[i];
+        }
+
+        expected[^1] = entry.SignatureReturnType;
+
+        if (!SameSequence(wrapper.ParameterTypes, expected) || wrapper.ReturnType != entry.SignatureReturnType)
+        {
+            throw new ArgumentException(
+                $"后置包装器签名不符：目标 '{entry.Name}' 期望 ({(FormatTypes(expected))}) -> {entry.SignatureReturnType.Name}，"
+                + $"实际 ({(FormatTypes(wrapper.ParameterTypes))}) -> {wrapper.ReturnType.Name}。", nameof(wrapper));
+        }
+    }
+
+    private static bool SameSequence(IReadOnlyList<Type> left, IReadOnlyList<Type> right)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < left.Count; i++)
+        {
+            if (left[i] != right[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string FormatTypes(IReadOnlyList<Type> types) => string.Join(", ", types);
+
+
 }

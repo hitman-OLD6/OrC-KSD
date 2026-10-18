@@ -72,7 +72,7 @@ public class Scenario1Tests
         counterCard.AddEffect(counter);
         await S4TestHelpers.Place(engine, counterCard);
         Assert.True(counter.IsMounted);
-        Assert.Contains("指令反制", engine.Bus.GetSubscribers(Updates.EffectRemoved)); // 主触发器已挂载（装载链完成）
+        Assert.Contains("指令反制/dispose", engine.Bus.GetSubscribers(Updates.CardDestroyed)); // disposing 触发器已挂载（装载链完成）
 
         var stream = await engine.OrderFlow.ExecuteAsync(mage, fireball, goblin, 6);
 

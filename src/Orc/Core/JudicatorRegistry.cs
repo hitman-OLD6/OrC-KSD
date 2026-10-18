@@ -13,7 +13,7 @@ namespace Orc.Core;
 /// 实现＝<see cref="ServiceRegistry{TService,THandle,TModingHandle}"/> 的具体化（与 <see cref="AssetServiceRegistry"/>
 /// **共用机制、名字域独立**——判定器名＝受控常量集合为唯一称谓来源，资产名非受控常量集）。
 /// </summary>
-public sealed class JudicatorRegistry : ServiceRegistry<Judicator, JudicatorRegistration, JudicatorModingRegistration>
+public sealed class JudicatorRegistry : ServiceRegistry<Judicator, JudicatorRegistration, JudicatorWrapperRegistration>
 {
     /// <summary>
     /// 注册一枚判定器条目（字符串名 ordinal；注册即配置——重复注册拒绝）。返回条目等价句柄
@@ -41,8 +41,8 @@ public sealed class JudicatorRegistry : ServiceRegistry<Judicator, JudicatorRegi
     protected override JudicatorRegistration CreateHandle(ServiceEntry<Judicator> entry) => new(entry);
 
     /// <inheritdoc />
-    protected override JudicatorModingRegistration CreateModingHandle(ServiceEntry<Judicator> entry, long modingSeq)
-        => new(entry, modingSeq);
+    protected override JudicatorWrapperRegistration CreateWrapperHandle(ServiceEntry<Judicator> entry, long wrapperSeq)
+        => new(entry, wrapperSeq);
 }
 
 /// <summary>
@@ -60,15 +60,15 @@ public sealed class JudicatorRegistration : ServiceRegistration<Judicator>
 }
 
 /// <summary>
-/// moding（逻辑替换）注册句柄：<see cref="ServiceRegistry{TService,THandle,TModingHandle}.RegisterModing(THandle,Func{object[],object[]})"/>
-/// 成功时返回，标识某条目上的一条 moding 项，可用作 <see cref="ServiceRegistry{TService,THandle,TModingHandle}.UnregisterModing"/>
+/// moding（逻辑替换）注册句柄：<see cref="ServiceRegistry{TService,THandle,TModingHandle}.RegisterReplaceWrapper(THandle,Func{object[],object[]})"/>
+/// 成功时返回，标识某条目上的一条 moding 项，可用作 <see cref="ServiceRegistry{TService,THandle,TModingHandle}.UnregisterWrapper"/>
 /// 的注销依据（句柄即权限——不引入注册者校验/所有权面）。
 /// 仅由注册面创建；不含可变状态。
 /// </summary>
-public sealed class JudicatorModingRegistration : ServiceModingRegistration<Judicator>
+public sealed class JudicatorWrapperRegistration : ServiceWrapperRegistration<Judicator>
 {
-    internal JudicatorModingRegistration(ServiceEntry<Judicator> target, long modingSeq)
-        : base(target, modingSeq)
+    internal JudicatorWrapperRegistration(ServiceEntry<Judicator> target, long wrapperSeq)
+        : base(target, wrapperSeq)
     {
     }
 }

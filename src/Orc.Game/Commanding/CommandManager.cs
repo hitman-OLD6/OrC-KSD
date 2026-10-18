@@ -74,6 +74,13 @@ public sealed class CommandManager
     /// <summary>默认基础互伤在「造成攻击伤害」触发器内的事件优先级（数值大者后执行——伏击改写先判定）。</summary>
     private const int DefaultDamagePriority = 100;
 
+    /// <summary>
+    /// 「攻击执行」默认链在「单位攻击触发器」内的事件优先级（数值大者后执行）。
+    /// 效果预制体 injects 默认优先级为 0，因此攻击前类效果（如 H39 sWG「抑制被本单位攻击的单位」）
+    /// 先于伤害结算执行——否则目标的防御增益会先吸收一次伤害，剥光失去意义。
+    /// </summary>
+    private const int AttackExecutionPriority = 100;
+
     private readonly LogicEngine _engine;
     private readonly Battlefield _battlefield;
     private readonly TargeterManager _targeterManager;
@@ -192,15 +199,17 @@ public sealed class CommandManager
         UnitMoveTrigger = new Trigger<UnitMoveTriggerView>("单位移动触发器");
         UnitMoveTrigger.BindValidation(
             ResolveRecheckBinding(JudicatorNames.MoveRecheck),
-            refs => refs.Count > 0 ? refs[0] : null);
+            refs => refs.Count > 0 ? refs[0] : null,
+            refs => refs.Count > 0 && refs[0].Value is CardBase card ? card.Owner?.Index : null);
         UnitMoveTrigger.Register("移动执行", HandleUnitMoveAsync);
 
         // ③ 单位攻击触发器（执行前复验＝验证判定器承载——按名绑定攻击复验判定器〔J2〕；默认链＝攻击执行）
         UnitAttackTrigger = new Trigger<UnitAttackTriggerView>("单位攻击触发器");
         UnitAttackTrigger.BindValidation(
             ResolveRecheckBinding(JudicatorNames.AttackRecheck),
-            refs => refs.Count > 0 ? refs[0] : null);
-        UnitAttackTrigger.Register("攻击执行", HandleUnitAttackAsync);
+            refs => refs.Count > 0 ? refs[0] : null,
+            refs => refs.Count > 0 && refs[0].Value is CardBase card ? card.Owner?.Index : null);
+        UnitAttackTrigger.Register("攻击执行", HandleUnitAttackAsync, AttackExecutionPriority);
 
         // ④ 造成攻击伤害触发器（与对局同生的内置共享流程触发器；伏击加载时在此注册改写逻辑）
         //    默认基础互伤＝高优先级（后执行）——伏击改写（注册默认优先级）先判定；改写生效＝替代默认。

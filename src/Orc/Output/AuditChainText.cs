@@ -58,9 +58,17 @@ public static class AuditChainText
             sb.Append("      #").Append(info.Seq).Append(' ').Append(info.Name)
                 .Append(" band=").Append(info.BandValue)
                 .Append(" prio=").Append(info.Priority);
-            if (info.ModingCount > 0)
+            if (info.WrapperCount > 0)
             {
-                sb.Append(" moding=").Append(info.ModingCount);
+                sb.Append(" wrappers=").Append(info.WrapperCount)
+                    .Append(" (b:").Append(info.BeforeWrapperCount)
+                    .Append("/a:").Append(info.AfterWrapperCount)
+                    .Append("/r:").Append(info.ReplaceWrapperCount).Append(')');
+            }
+
+            if (info.SeamCount > 0)
+            {
+                sb.Append(" seams=").Append(info.SeamCount).Append("(s:").Append(info.SeamWrapperCount).Append(')');
             }
 
             sb.Append('\n');

@@ -1,5 +1,6 @@
 using Orc.Core;
 using Orc.Game.Cards;
+using Orc.Game.Players;
 
 namespace Orc.Game.Judicators;
 
@@ -14,6 +15,12 @@ namespace Orc.Game.Judicators;
 /// </summary>
 internal sealed class CounterUseJudicator : ValidationJudicator
 {
+    private readonly Func<Player, bool>? _turnOwner;
+
+    /// <summary>创建判定器。</summary>
+    /// <param name="turnOwner">回合归属判定通道（R4；缺省＝null＝按卡上 TurnPlayerProvider 引用比较）。</param>
+    internal CounterUseJudicator(Func<Player, bool>? turnOwner = null) => _turnOwner = turnOwner;
+
     /// <inheritdoc />
     protected override ValidationVerdict ValidateLogic(IReadOnlyList<Ref<Entity>> refs, Ref<Entity>? subject)
     {
@@ -23,7 +30,21 @@ internal sealed class CounterUseJudicator : ValidationJudicator
             throw new ArgumentException("反制使用检查判定器载荷不符：被判定对象须为存活反制卡引用（fail-fast）。");
         }
 
-        var rejection = card.EvaluateUse(card.TurnPlayerProvider?.Invoke());
+        var owner = card.Owner;
+        if (owner is null)
+        {
+            return ValidationVerdict.Invalid(CounterUseRejection.NotOwnerTurn);
+        }
+
+        // R4：回合归属经判定器同源判定；否则保持卡上提供器路径（独立构造兼容）。
+        if (_turnOwner is not null && !_turnOwner(owner))
+        {
+            return ValidationVerdict.Invalid(CounterUseRejection.NotOwnerTurn);
+        }
+
+        var rejection = _turnOwner is not null
+            ? card.EvaluateUse(owner) // 回合已判定＝以 owner 作为当前行动方传给卡侧（保留费用检查）
+            : card.EvaluateUse(card.TurnPlayerProvider?.Invoke());
         return rejection is null ? ValidationVerdict.Valid : ValidationVerdict.Invalid(rejection);
     }
 }

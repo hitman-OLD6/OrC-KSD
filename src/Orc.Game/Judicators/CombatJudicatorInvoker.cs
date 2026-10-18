@@ -20,6 +20,10 @@ internal static class CombatJudicatorInvoker
     public static bool InvokeBool(JudicatorRegistration registration, params object[] args)
         => UnpackBool(registration.Invoke(args), registration.Name);
 
+    /// <summary>经注册表条目句柄调用并解包 bool（指定玩家域；playerIndex 为 null＝默认域）。</summary>
+    public static bool InvokeBool(JudicatorRegistration registration, int? playerIndex, object[] args)
+        => UnpackBool(registration.Invoke(args, playerIndex), registration.Name);
+
     /// <summary>经内置实例主方法调用并解包 bool（独立构造路径；无注册表、无改写通道）。</summary>
     public static bool InvokeBool(Judicator judicator, params object[] args)
         => UnpackBool(judicator.Invoke(args), judicator.GetType().Name);

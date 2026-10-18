@@ -158,7 +158,7 @@ public class CovertMechanismTests
 
         // 生产装配默认链：判定器经内置注册段解析可用（S2 提入生产装配——非测试私装）。
         var registration = match.Judicators.Resolve(JudicatorNames.TargetCandidateEligibility);
-        var rule = new JudicatorSelectionRule(registration);
+        var rule = new JudicatorSelectionRule(registration, playerA.Hq, new EffectSelector("all"));
         var targeter = match.TargeterManager.CreateTargeter(filter: rule.AsFilter());
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
@@ -200,7 +200,7 @@ public class CovertMechanismTests
         var plain = await CommandTestKit.PrepareOnSupportAsync(match, playerA, PlainUnitId, 2);
 
         var registration = match.Judicators.Resolve(JudicatorNames.TargetCandidateEligibility);
-        var rule = new JudicatorSelectionRule(registration, includeCovert: true); // 请求级覆盖
+        var rule = new JudicatorSelectionRule(registration, playerA.Hq, new EffectSelector("all", IncludeCovert: true)); // 请求级覆盖
         var targeter = match.TargeterManager.CreateTargeter(filter: rule.AsFilter());
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
@@ -235,7 +235,7 @@ public class CovertMechanismTests
         var covert = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CovertScoutId, 1);
         var plain = await CommandTestKit.PrepareOnSupportAsync(match, playerA, PlainUnitId, 2); // 对照（保证允许集非空、交互可观测）
         var registration = match.Judicators.Resolve(JudicatorNames.TargetCandidateEligibility);
-        var rule = new JudicatorSelectionRule(registration); // 同一包装路径观测三态
+        var rule = new JudicatorSelectionRule(registration, playerA.Hq, new EffectSelector("all")); // 同一包装路径观测三态
         var targeter = match.TargeterManager.CreateTargeter(filter: rule.AsFilter());
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
@@ -248,9 +248,12 @@ public class CovertMechanismTests
         Assert.Equal(TargeterStatus.Cancelled, (await task1).Status);
 
         // 态 2（改写：替换规则自行包含「隐蔽可选」完整逻辑——允许全部单位）。
-        var moding = match.Judicators.RegisterModing<TargetEligibilityJudicator.TargetCandidateRule>(
+        var moding = match.Judicators.RegisterAfterWrapper(
             registration,
-            candidate => candidate.IsAlive && candidate.Value is UnitCard);
+            (_, result) => result is { Length: 1 } && result[0] is IReadOnlyList<Ref<Entity>> list
+                ? new object[] { list.Append(covert.Ref).ToArray() }
+                : result,
+            playerIndex: playerA.Index);
         Assert.NotNull(moding);
 
         var task2 = targeter.Targeting();
@@ -265,7 +268,7 @@ public class CovertMechanismTests
         Assert.Equal(TargeterStatus.Ok, result2.Status);
 
         // 态 3（注销回退）：隐蔽恢复不可选。
-        Assert.True(match.Judicators.UnregisterModing(moding!));
+        Assert.True(match.Judicators.UnregisterWrapper(moding!));
         var task3 = targeter.Targeting();
         var (d3, r3) = await bridge.WaitForNextBeginAsync();
         Assert.DoesNotContain(covert.Ref, d3.AllowedTargets);

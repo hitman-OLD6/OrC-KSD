@@ -9,7 +9,7 @@ namespace Orc.Cards;
 //     并把动态主触发器与其它被动触发器一并挂载（owner=效果实例，卸载整批移除）。
 //   · 主动（主触发器 Active）→ DynamicActiveEffect（纯动作型，无 hook 段），施放经 CastAsync。
 //   实例化＝**执行装载计划**（BuildLoadPlan 的步骤序）：挂主触发器 → 注册事件 → 施加 moding；
-//   交由既有装载链（Effect.ExecuteMount/ExecuteUnmount）驱动生效与清理。
+//   交由既有装载链（Effect.ExecuteMount/ExecuteDispose）驱动生效与清理。
 //   视图类型为泛型参数，故触发器经反射构造、注册/挂载/施放经泛型适配（调用侧无泛型耦合）。
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -84,9 +84,18 @@ internal static class DynamicEffectBuilder
         }
 
         var isPassive = prefab.MainTrigger.Kind == TriggerKind.Passive;
+
+        // E-D1：OneShot 只对"有可挂载业务主触发器"的效果成立（纯注入型主触发器从不 Invoke，无法判定一次触发）。
+        if (prefab.OneShot && isPassive && prefab.MountedHooks.Count == 0)
+        {
+            return DynamicEffectInstantiation.Fail(
+                "one-shot-no-trigger",
+                $"效果 '{name}' 声明了 OneShot，但主触发器无挂载 hooks（纯注入型无法判定\"一次触发\"）；请改用 Manual。");
+        }
+
         Effect effect = isPassive
-            ? new DynamicPassiveEffect(name, snapshot, mainViewType)
-            : new DynamicActiveEffect(name, snapshot, mainViewType);
+            ? new DynamicPassiveEffect(name, snapshot, mainViewType, prefab.OneShot, prefab.DisposingTrigger.Hooks)
+            : new DynamicActiveEffect(name, snapshot, mainViewType, prefab.OneShot, prefab.DisposingTrigger.Hooks);
 
         object mainTrigger;
         try
@@ -136,21 +145,59 @@ internal static class DynamicEffectBuilder
             state.OtherTriggers.Add((otherTrigger, otherViewType));
         }
 
-        foreach (var moding in prefab.Modings)
+        foreach (var wrapper in prefab.Wrappers)
         {
-            if (!eventsById.TryGetValue(moding.TargetEventId, out var target))
+            if (!eventsById.TryGetValue(wrapper.TargetEventId, out var target))
             {
                 return DynamicEffectInstantiation.Fail(
-                    "moding-target", $"moding 目标事件 '{moding.TargetEventId}' 不在主触发器中。");
+                    "wrapper-target", $"包装器目标事件 '{wrapper.TargetEventId}' 不在主触发器中。");
             }
 
-            var resolution = manager.ResolveHandler(moding.Replacement, mainViewType);
+            var resolution = manager.ResolveHandler(wrapper.Handler, mainViewType);
             if (!resolution.Success)
             {
                 return DynamicEffectInstantiation.Fail(resolution.ErrorCategory!, resolution.Error!);
             }
 
-            TriggerReflection.RegisterModing(mainTrigger, mainViewType, target, resolution.Handler!);
+            try
+            {
+                TriggerReflection.RegisterWrapper(
+                    mainTrigger, mainViewType, target, wrapper.Phase, wrapper.SeamName, resolution.Handler!);
+            }
+            catch (ArgumentException ex)
+            {
+                return DynamicEffectInstantiation.Fail("wrapper-signature", ex.Message);
+            }
+        }
+
+        // E-D1：disposing 触发器的事件（作者销毁逻辑；普通注册，执行在默认 OnUnmount 之前）。
+        foreach (var ev in prefab.DisposingTrigger.Events)
+        {
+            var resolution = manager.ResolveHandler(ev, typeof(CardEventView));
+            if (!resolution.Success)
+            {
+                return DynamicEffectInstantiation.Fail(resolution.ErrorCategory!, resolution.Error!);
+            }
+
+            effect.DisposingTriggerInternal.Register(
+                ev.Id,
+                (Func<CardEventView, Context, CancellationToken, Task>)resolution.Handler!);
+        }
+
+        // E-D1：一次性效果——向业务主触发器保留槽注册"调用销毁"（恒在全部普通事件之后执行）。
+        if (prefab.OneShot)
+        {
+            TriggerReflection.RegisterDisposal(
+                mainTrigger,
+                mainViewType,
+                "一次性销毁",
+                () =>
+                {
+                    if (effect.HostOrNull is { } host)
+                    {
+                        effect.ExecuteDispose(host);
+                    }
+                });
         }
 
         Attach(effect, state);
@@ -174,8 +221,11 @@ internal static class DynamicEffectBuilder
                 return DynamicEffectInstantiation.Fail(resolution.ErrorCategory!, resolution.Error!);
             }
 
-            var registration = TriggerReflection.Register(
-                trigger, viewType, ev.EntryName == "HandleAsync" ? ev.Id : ev.Id, resolution.Handler!, ev.Downstream);
+            var registration = string.Equals(ev.Band, "disposing", StringComparison.Ordinal)
+                ? TriggerReflection.RegisterDisposalHandler(
+                    trigger, viewType, ev.Id, resolution.Handler!, ev.Downstream)
+                : TriggerReflection.Register(
+                    trigger, viewType, ev.Id, resolution.Handler!, ev.Downstream, ev.Seams);
             eventsById[ev.Id] = registration;
             state.Handlers[ev.Id] = resolution.Handler!; // S5：注入用的 handler 来源
         }
@@ -215,7 +265,7 @@ internal static class DynamicEffectBuilder
 internal static class TriggerReflection
 {
     private static readonly MethodInfo RegisterMethod = Get(nameof(RegisterCore));
-    private static readonly MethodInfo ModingMethod = Get(nameof(ModingCore));
+    private static readonly MethodInfo WrapperMethod = Get(nameof(WrapperCore));
     private static readonly MethodInfo MountMethod = Get(nameof(MountCore));
     private static readonly MethodInfo InvokeMethod = Get(nameof(InvokeCore));
 
@@ -241,15 +291,28 @@ internal static class TriggerReflection
     }
 
     internal static TriggerRegistration Register(
-        object trigger, Type viewType, string name, Delegate handler, IReadOnlyList<string> downstream)
+        object trigger, Type viewType, string name, Delegate handler,
+        IReadOnlyList<string> downstream, IReadOnlyList<string> seams)
         => (TriggerRegistration)RegisterMethod.MakeGenericMethod(viewType)
-            .Invoke(null, new object[] { trigger, name, handler, downstream })!;
+            .Invoke(null, new object[] { trigger, name, handler, downstream, seams })!;
 
     /// <summary>默认区段注册（S5 注入用：无 band、可带优先级）。</summary>
     internal static TriggerRegistration RegisterDefaultBand(
         object trigger, Type viewType, string name, Delegate handler, int priority)
         => (TriggerRegistration)RegisterBandMethod.MakeGenericMethod(viewType)
             .Invoke(null, new object[] { trigger, name, handler, priority })!;
+
+    /// <summary>保留槽注册（E-D1：销毁 handler；与视图泛型无关，动作型委托即可）。</summary>
+    internal static TriggerRegistration RegisterDisposal(
+        object trigger, Type viewType, string name, Action action, int priority = 0)
+        => (TriggerRegistration)RegisterDisposalMethod.MakeGenericMethod(viewType)
+            .Invoke(null, new object[] { trigger, name, action, priority })!;
+
+    /// <summary>保留槽注册（E-D1：带视图的完整 handler；供预制体 band=disposing 的事件落地）。</summary>
+    internal static TriggerRegistration RegisterDisposalHandler(
+        object trigger, Type viewType, string name, Delegate handler, IEnumerable<string>? downstream = null)
+        => (TriggerRegistration)RegisterDisposalHandlerMethod.MakeGenericMethod(viewType)
+            .Invoke(null, new object?[] { trigger, name, handler, downstream })!;
 
     /// <summary>撤销注册（S5 注入撤销用；目标触发器 <c>Unregister</c> 面）。</summary>
     /// <remarks>
@@ -275,12 +338,38 @@ internal static class TriggerReflection
 
     private static readonly MethodInfo RegisterBandMethod = Get(nameof(RegisterBandCore));
 
+    private static readonly MethodInfo RegisterDisposalMethod = Get(nameof(RegisterDisposalCore));
+
+    private static readonly MethodInfo RegisterDisposalHandlerMethod = Get(nameof(RegisterDisposalHandlerCore));
+
     private static TriggerRegistration RegisterBandCore<TView>(object trigger, string name, Delegate handler, int priority)
         where TView : class
         => ((Trigger<TView>)trigger).Register(name, (Func<TView, Context, CancellationToken, Task>)handler, priority);
 
-    internal static void RegisterModing(object trigger, Type viewType, TriggerRegistration target, Delegate moding)
-        => ModingMethod.MakeGenericMethod(viewType).Invoke(null, new object[] { trigger, target, moding });
+    private static TriggerRegistration RegisterDisposalHandlerCore<TView>(
+        object trigger, string name, Delegate handler, IEnumerable<string>? downstream) where TView : class
+        => ((Trigger<TView>)trigger).RegisterDisposal(
+            name,
+            (Func<TView, Context, CancellationToken, Task>)handler,
+            0,
+            downstream);
+
+    private static TriggerRegistration RegisterDisposalCore<TView>(
+        object trigger, string name, Action action, int priority) where TView : class
+        => ((Trigger<TView>)trigger).RegisterDisposal(
+            name,
+            (view, ctx, ct) =>
+            {
+                action();
+                return Task.CompletedTask;
+            },
+            priority);
+
+    internal static void RegisterWrapper(
+        object trigger, Type viewType, TriggerRegistration target,
+        string phase, string? seam, Delegate wrapper)
+        => WrapperMethod.MakeGenericMethod(viewType)
+            .Invoke(null, new object?[] { trigger, target, phase, seam, wrapper });
 
     internal static void Mount(Bus bus, Type viewType, object trigger)
         => MountMethod.MakeGenericMethod(viewType).Invoke(null, new object[] { bus, trigger });
@@ -291,11 +380,45 @@ internal static class TriggerReflection
             .Invoke(null, new object?[] { engine, trigger, data, ct })!;
 
     private static TriggerRegistration RegisterCore<TView>(
-        object trigger, string name, Delegate handler, IReadOnlyList<string> downstream) where TView : class
-        => ((Trigger<TView>)trigger).Register(name, (Func<TView, Context, CancellationToken, Task>)handler, 0, downstream);
+        object trigger, string name, Delegate handler,
+        IReadOnlyList<string> downstream, IReadOnlyList<string> seams) where TView : class
+        => ((Trigger<TView>)trigger).Register(
+            name, (Func<TView, Context, CancellationToken, Task>)handler, 0, downstream, seams);
 
-    private static void ModingCore<TView>(object trigger, TriggerRegistration target, Delegate moding) where TView : class
-        => ((Trigger<TView>)trigger).RegisterModing(target, (Func<TView, Context, CancellationToken, Task>)moding);
+    private static void WrapperCore<TView>(
+        object trigger, TriggerRegistration target, string phase, string? seam, Delegate wrapper)
+        where TView : class
+    {
+        var typed = (Func<TView, Context, CancellationToken, Task>)wrapper;
+        var typedTrigger = (Trigger<TView>)trigger;
+
+        switch ((phase ?? string.Empty).Trim().ToLowerInvariant())
+        {
+            case "before":
+                if (seam is null)
+                {
+                    typedTrigger.RegisterBeforeWrapper(target, typed);
+                }
+                else
+                {
+                    typedTrigger.RegisterBeforeWrapper(target, seam, typed);
+                }
+
+                break;
+
+            case "after":
+                typedTrigger.RegisterAfterWrapper(target, typed);
+                break;
+
+            case "replace":
+                typedTrigger.RegisterReplaceWrapper(target, typed);
+                break;
+
+            default:
+                throw new ArgumentException(
+                    $"包装器 phase '{phase}' 非法（须为 before／after／replace）。", nameof(phase));
+        }
+    }
 
     private static void MountCore<TView>(Bus bus, object trigger) where TView : class
         => bus.Mount((Trigger<TView>)trigger);
@@ -315,12 +438,20 @@ public sealed class DynamicPassiveEffect : PassiveEffect, ISerializableEffect
     private readonly Type _viewType;
     private DynamicBuildState? _state;
 
-    internal DynamicPassiveEffect(string name, EffectSnapshot snapshot, Type viewType)
-        : base(name)
+    internal DynamicPassiveEffect(
+        string name,
+        EffectSnapshot snapshot,
+        Type viewType,
+        bool oneShot,
+        IEnumerable<string> disposalHooks)
+        : base(name, oneShot, disposalHooks)
     {
         _snapshot = snapshot;
         _viewType = viewType;
     }
+
+    /// <summary>业务主触发器（动态触发器；纯注入型仍存在但不挂载——OneShot 由装载期校验拒绝）。</summary>
+    internal override ITriggerMetadata? MainTrigger => _state?.MainTrigger as ITriggerMetadata;
 
     /// <summary>本动态效果对应的效果快照（可再次序列化——往返）。</summary>
     public EffectSnapshot Snapshot => _snapshot;
@@ -338,8 +469,6 @@ public sealed class DynamicPassiveEffect : PassiveEffect, ISerializableEffect
 
     internal override void MountMainTrigger(Bus bus)
     {
-        base.MountMainTrigger(bus); // 生命周期触发器（owner=this）
-
         if (_state is null)
         {
             return;
@@ -358,12 +487,6 @@ public sealed class DynamicPassiveEffect : PassiveEffect, ISerializableEffect
             TriggerReflection.Mount(bus, viewType, trigger);
         }
     }
-
-    internal override void UnmountMainTrigger()
-    {
-        // owner＝本效果：UnmountOwner(this) 一次性移除生命周期触发器与全部动态触发器。
-        base.UnmountMainTrigger();
-    }
 }
 
 /// <summary>
@@ -376,8 +499,13 @@ public sealed class DynamicActiveEffect : Effect, ISerializableEffect
     private readonly Type _viewType;
     private DynamicBuildState? _state;
 
-    internal DynamicActiveEffect(string name, EffectSnapshot snapshot, Type viewType)
-        : base(name, TriggerKind.Active)
+    internal DynamicActiveEffect(
+        string name,
+        EffectSnapshot snapshot,
+        Type viewType,
+        bool oneShot,
+        IEnumerable<string> disposalHooks)
+        : base(name, TriggerKind.Active, oneShot, disposalHooks)
     {
         _snapshot = snapshot;
         _viewType = viewType;
@@ -403,14 +531,6 @@ public sealed class DynamicActiveEffect : Effect, ISerializableEffect
         return TriggerReflection.Invoke(engine, _state.MainViewType, _state.MainTrigger, data, ct);
     }
 
-    internal override void MountMainTrigger(Bus bus)
-    {
-        // 主动效果不装载（S3 约束：主动触发器不可挂载）。
-    }
-
-    internal override void UnmountMainTrigger()
-    {
-    }
 }
 
 /// <summary>动态效果工厂（S-C8；入口）：由效果快照在引擎上实例化动态效果。</summary>

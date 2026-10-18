@@ -31,8 +31,7 @@ public class Scenario2Tests
         await S4TestHelpers.Place(engine, defender);
 
         Assert.True(heal.IsMounted);
-        Assert.Contains("攻击时回血", engine.Bus.GetSubscribers(Updates.EffectRemoved)); // 主触发器挂载（运行时代表就位）
-        Assert.Contains("攻击时回血", engine.Bus.GetSubscribers(Updates.CardDestroyed));
+        Assert.Contains("攻击时回血/dispose", engine.Bus.GetSubscribers(Updates.CardDestroyed)); // disposing 触发器挂载（销毁兜底就位）
         Assert.Equal(1, heal.MountCount); // 放置驱动幂等：不重复装载/不重复 OnMount
 
         var initIdx = S4TestHelpers.IndexOfEntry(
@@ -73,7 +72,7 @@ public class Scenario2Tests
         Assert.True(heal.ExclusiveCleanupRan);          // 作者专属清理（OnUnmount）
         Assert.True(heal.InjectionRefCleared);
         Assert.DoesNotContain("攻击时回血", engine.Bus.GetSubscribers(Updates.EffectRemoved)); // 总线卸载
-        Assert.DoesNotContain("攻击时回血", engine.Bus.GetSubscribers(Updates.CardDestroyed));
+        Assert.DoesNotContain("攻击时回血/dispose", engine.Bus.GetSubscribers(Updates.CardDestroyed));
         Assert.Contains(
             engine.RootStream.Entries,
             e => e.Keywords.Contains("loadout") && e.Keywords.Contains("cleanup") && e.Keywords.Contains("攻击时回血"));

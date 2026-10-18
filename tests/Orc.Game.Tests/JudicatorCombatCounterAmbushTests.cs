@@ -215,7 +215,7 @@ public class JudicatorCombatCounterAmbushTests
 
         // ---------- 单例改写（combat.counter.eligibility → 恒真：无条件反击） ----------
 
-        var moding = match.Judicators.RegisterModing(
+        var moding = match.Judicators.RegisterReplaceWrapper(
             match.Judicators.Resolve(JudicatorNames.CombatCounterEligibility),
             _ => new object[] { true });
         Assert.NotNull(moding);
@@ -235,7 +235,7 @@ public class JudicatorCombatCounterAmbushTests
 
         // ---------- 注销回退 ----------
 
-        Assert.True(match.Judicators.UnregisterModing(moding!));
+        Assert.True(match.Judicators.UnregisterWrapper(moding!));
 
         // 回退（默认互伤区）：豁免恢复——炮兵不受反击。
         var restored = await CommandTestKit.RunCommandAsync(match, bridge, art5, infTarget3.Ref);
@@ -278,7 +278,7 @@ public class JudicatorCombatCounterAmbushTests
         Assert.Equal(6, ambusher1.GetData<UnitStateData>().Defense);
 
         // 单例改写（combat.ambush.condition → 恒假）：条目级即时可见。
-        var moding = match.Judicators.RegisterModing(
+        var moding = match.Judicators.RegisterReplaceWrapper(
             match.Judicators.Resolve(JudicatorNames.CombatAmbushCondition),
             _ => new object[] { false });
         Assert.NotNull(moding);
@@ -292,7 +292,7 @@ public class JudicatorCombatCounterAmbushTests
         Assert.True(weak2.GetData<UnitStateData>().IsDestroyed);
 
         // 注销回退：条目级恢复默认（命中）＋流程级恢复改写成立。
-        Assert.True(match.Judicators.UnregisterModing(moding!));
+        Assert.True(match.Judicators.UnregisterWrapper(moding!));
         Assert.Equal(new object[] { true }, entry.Invoke(new object[] { ambusher3, weak3 }));
         var restored = await CommandTestKit.RunCommandAsync(match, bridge, weak3, ambusher3.Ref);
         Assert.Equal(CommandResultStatus.Success, restored.Status);

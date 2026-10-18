@@ -76,7 +76,7 @@ public class JudicatorDeckTopTagTests
         DrainDeck(player);
         Assert.False(Evaluate(match, player, "navy")); // 空卡组基线（降级 false）
 
-        var moding = match.Judicators.RegisterModing(
+        var moding = match.Judicators.RegisterReplaceWrapper(
             match.Judicators.Resolve(JudicatorNames.DeckTopTag),
             _ => new object[] { true });
         Assert.NotNull(moding);
@@ -91,7 +91,7 @@ public class JudicatorDeckTopTagTests
         Assert.True(Evaluate(match, player, "navy"));     // 重复求值稳定
 
         // 注销回退（经同一路径）
-        Assert.True(match.Judicators.UnregisterModing(moding!));
+        Assert.True(match.Judicators.UnregisterWrapper(moding!));
         Assert.False(Evaluate(match, player, "navy"));    // 顶＝无特点卡 → false（默认逻辑恢复）
         player.Deck.DrawInstance();                       // 移掉顶卡（无特点卡）
         Assert.True(Evaluate(match, player, "navy"));     // 顶＝有特点卡 → true（回退后按真实底态求值）
@@ -110,7 +110,7 @@ public class JudicatorDeckTopTagTests
         await InsertTopAsync(match, player, TaggedId);
         Assert.True(Evaluate(match, player, "navy")); // 有特点卡基线（默认 true）
 
-        var moding = match.Judicators.RegisterModing(
+        var moding = match.Judicators.RegisterReplaceWrapper(
             match.Judicators.Resolve(JudicatorNames.DeckTopTag),
             _ => new object[] { false });
         Assert.NotNull(moding);
@@ -123,7 +123,7 @@ public class JudicatorDeckTopTagTests
         Assert.False(Evaluate(match, player, "navy"));
 
         // 注销回退（经同一路径）
-        Assert.True(match.Judicators.UnregisterModing(moding!));
+        Assert.True(match.Judicators.UnregisterWrapper(moding!));
         Assert.False(Evaluate(match, player, "navy")); // 空卡组 → false（降级恢复）
         await InsertTopAsync(match, player, TaggedId);
         Assert.True(Evaluate(match, player, "navy"));  // 有特点卡 → true（默认求值恢复）

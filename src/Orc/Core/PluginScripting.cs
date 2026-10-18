@@ -21,13 +21,13 @@ public sealed record PluginScriptRequest(
     int TimeoutMs = 0,
     string? CacheScope = null);
 
-/// <summary>moding 目标类别（S10）：插件声明改写哪一类注册条目的逻辑。</summary>
-public enum ModingTarget
+/// <summary>包装器目标类别：插件声明改写哪一类注册条目的逻辑。</summary>
+public enum WrapperTarget
 {
-    /// <summary>判定器（语义规则类 moding）。</summary>
+    /// <summary>判定器（语义规则类包装）。</summary>
     Judicator = 0,
 
-    /// <summary>资产服务（静态资产裁决/值域 moding）。</summary>
+    /// <summary>资产服务（静态资产裁决/值域包装）。</summary>
     AssetService = 1,
 }
 
@@ -65,12 +65,14 @@ public interface IPluginRegistrationContext
     /// </summary>
     string ReadAsset(string assetName);
 
-    /// <summary>
-    /// 声明一条 **moding**（逻辑替换；栈语义——后声明者胜）：改写某注册条目（判定器／资产服务）的逻辑。
-    /// 声明即登记；实际应用由宿主在**该包注册完成后**执行（<c>ApplyModings</c>），使同包内注册项可见。
-    /// 目标名须为已注册条目（未注册＝应用期 fail-fast）。
-    /// </summary>
-    void DeclareModing(ModingTarget target, string name, Func<object[]?, object[]?> moding);
+    /// <summary>声明前置包装器（目标条目核心之前 LIFO 执行）。</summary>
+    void DeclareBeforeWrapper(WrapperTarget target, string name, Action<object[]?> wrapper);
+
+    /// <summary>声明后置包装器（目标条目核心之后 FIFO 执行）。</summary>
+    void DeclareAfterWrapper(WrapperTarget target, string name, Func<object[]?, object[]?, object[]?> wrapper);
+
+    /// <summary>声明替换包装器（只替换核心段；最后一个未注销者生效）。</summary>
+    void DeclareReplaceWrapper(WrapperTarget target, string name, Func<object[]?, object[]?> wrapper);
 }
 
 /// <summary>

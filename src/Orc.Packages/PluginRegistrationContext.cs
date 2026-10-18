@@ -32,7 +32,7 @@ public sealed class PluginRegistrationContext : IPluginRegistrationContext, IMat
     private readonly LoadedPackage _package;
     private readonly PluginRegistrationTargets _targets;
     private readonly List<string> _dependencies = new();
-    private readonly List<(ModingTarget Target, string Name, Func<object[]?, object[]?> Moding)> _modings = new();
+    private readonly List<(WrapperTarget Target, string Name, WrapperPhase Phase, Delegate Wrapper)> _wrappers = new();
 
     /// <summary>创建注册上下文。</summary>
     /// <exception cref="ArgumentNullException">package 或 targets 为 null。</exception>
@@ -83,42 +83,81 @@ public sealed class PluginRegistrationContext : IPluginRegistrationContext, IMat
     }
 
     /// <inheritdoc />
-    /// <exception cref="ArgumentException">target 未定义／name 为 null 空白／moding 为 null。</exception>
-    public void DeclareModing(ModingTarget target, string name, Func<object[]?, object[]?> moding)
+    public void DeclareBeforeWrapper(WrapperTarget target, string name, Action<object[]?> wrapper)
+    {
+        ValidateDeclaration(target, name, wrapper);
+        _wrappers.Add((target, name, WrapperPhase.Before, wrapper));
+    }
+
+    /// <inheritdoc />
+    public void DeclareAfterWrapper(WrapperTarget target, string name, Func<object[]?, object[]?, object[]?> wrapper)
+    {
+        ValidateDeclaration(target, name, wrapper);
+        _wrappers.Add((target, name, WrapperPhase.After, wrapper));
+    }
+
+    /// <inheritdoc />
+    public void DeclareReplaceWrapper(WrapperTarget target, string name, Func<object[]?, object[]?> wrapper)
+    {
+        ValidateDeclaration(target, name, wrapper);
+        _wrappers.Add((target, name, WrapperPhase.Replace, wrapper));
+    }
+
+    private static void ValidateDeclaration(WrapperTarget target, string name, Delegate wrapper)
     {
         if (!Enum.IsDefined(target))
         {
-            throw new ArgumentOutOfRangeException(nameof(target), target, "未定义的 moding 目标类别。");
+            throw new ArgumentOutOfRangeException(nameof(target), target, "未定义的包装器目标类别。");
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentNullException.ThrowIfNull(moding);
-        _modings.Add((target, name, moding));
+        ArgumentNullException.ThrowIfNull(wrapper);
     }
 
-    /// <summary>本包声明的 moding（声明序；由宿主在注册完成后应用）。</summary>
-    public IReadOnlyList<(ModingTarget Target, string Name, Func<object[]?, object[]?> Moding)> DeclaredModings
-        => _modings;
+    /// <summary>本包声明的包装器（声明序；由宿主在注册完成后应用）。</summary>
+    public IReadOnlyList<(WrapperTarget Target, string Name, WrapperPhase Phase, Delegate Wrapper)> DeclaredWrappers
+        => _wrappers;
 
-    /// <summary>
-    /// 应用本包声明的全部 moding（声明序；**栈语义**——后应用者胜）。目标名须已注册（未注册＝
-    /// <see cref="KeyNotFoundException"/> fail-fast）。
-    /// </summary>
-    public void ApplyModings()
+    public void ApplyWrappers()
     {
-        foreach (var (target, name, moding) in _modings)
+        foreach (var (target, name, phase, wrapper) in _wrappers)
         {
             switch (target)
             {
-                case ModingTarget.Judicator:
-                    _targets.Judicators.RegisterModing(_targets.Judicators.Resolve(name), moding);
+                case WrapperTarget.Judicator:
+                    ApplyWrapper(_targets.Judicators, _targets.Judicators.Resolve(name), phase, wrapper);
                     break;
-                case ModingTarget.AssetService:
-                    _targets.AssetServices.RegisterModing(_targets.AssetServices.Resolve(name), moding);
+                case WrapperTarget.AssetService:
+                    ApplyWrapper(_targets.AssetServices, _targets.AssetServices.Resolve(name), phase, wrapper);
                     break;
                 default:
-                    throw new ArgumentOutOfRangeException(nameof(target), target, "未定义的 moding 目标类别。");
+                    throw new ArgumentOutOfRangeException(nameof(target), target, "未定义的包装器目标类别。");
             }
+        }
+    }
+
+    private static void ApplyWrapper<TService, THandle, TWrapperHandle>(
+        ServiceRegistry<TService, THandle, TWrapperHandle> registry,
+        THandle handle,
+        WrapperPhase phase,
+        Delegate wrapper)
+        where TService : class, IUnifiedService
+        where THandle : ServiceRegistration<TService>
+        where TWrapperHandle : ServiceWrapperRegistration<TService>
+    {
+        switch (phase)
+        {
+            case WrapperPhase.Before:
+                registry.RegisterBeforeWrapper(handle, (Action<object[]?>)wrapper);
+                break;
+            case WrapperPhase.After:
+                registry.RegisterAfterWrapper(handle, (Func<object[]?, object[]?, object[]?>)wrapper);
+                break;
+            case WrapperPhase.Replace:
+                registry.RegisterReplaceWrapper(handle, (Func<object[]?, object[]?>)wrapper);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(phase), phase, "未定义的包装器类别。");
         }
     }
 

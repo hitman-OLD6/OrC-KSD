@@ -394,7 +394,7 @@ public class PrefabSaveTests
             Assert.False(text.EndsWith("\n\n", StringComparison.Ordinal), "尾随换行应为单个 \\n。");
 
             // 2 空格缩进多行。
-            Assert.Contains("{\n  \"schemaVersion\": 2,\n  \"root\": {", text, StringComparison.Ordinal);
+            Assert.Contains("{\n  \"schemaVersion\": 3,\n  \"root\": {", text, StringComparison.Ordinal);
             Assert.Contains("\n    \"mainTrigger\": {", text, StringComparison.Ordinal);
             Assert.Contains("\n      \"hooks\": [", text, StringComparison.Ordinal);
             Assert.DoesNotContain("\n\t", text);
@@ -404,7 +404,7 @@ public class PrefabSaveTests
             AssertOrdered(
                 text,
                 "\n    \"id\"", "\n    \"version\"", "\n    \"mainTrigger\"",
-                "\n    \"otherTriggers\"", "\n    \"modings\"", "\n    \"injects\"");
+                "\n    \"otherTriggers\"", "\n    \"wrappers\"", "\n    \"injects\"");
             AssertOrdered(
                 text,
                 "\n      \"id\"", "\n      \"stableKey\"", "\n      \"kind\"", "\n      \"viewType\"",
@@ -552,9 +552,9 @@ public class PrefabSaveTests
                     hooks: new[] { "turn.start" },
                     events: new[] { new EventPrefab("e2", csxSource: PlaceholderCsx) }),
             },
-            modings: new[]
+            wrappers: new[]
             {
-                new ModingPrefab("e1", new EventPrefab("m1", assemblyKey: id + ".moding")),
+                new WrapperPrefab("replace", "e1", null, new EventPrefab("m1", assemblyKey: id + ".moding")),
             },
             injects: new[]
             {

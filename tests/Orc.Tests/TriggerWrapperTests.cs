@@ -13,7 +13,7 @@ namespace Orc.Tests;
 /// ⑥快照语义（进行中不打断、下一次解析点生效、机制静默）；⑦构造期项可寻址（InitialRegistrations）；
 /// ⑧用途代表场景（流程内置处理器屏蔽替换）；⑨异常隔离（沿用既有语义）。
 /// </summary>
-public class TriggerModingTests
+public class TriggerWrapperTests
 {
     private static Task Nop(CounterView view, Context ctx, CancellationToken ct) => Task.CompletedTask;
 
@@ -44,12 +44,12 @@ public class TriggerModingTests
     /// <summary>子类：装配期（构造）经基类持有句柄注册 moding，替换模板逻辑。</summary>
     private sealed class SubclassTrigger : TemplateTrigger
     {
-        public TriggerModingRegistration ModingHandle { get; }
+        public TriggerWrapperRegistration ModingHandle { get; }
 
         public SubclassTrigger(List<string> trace)
             : base(trace)
         {
-            ModingHandle = RegisterModing(TemplateHandler, OnModing)!;
+            ModingHandle = RegisterReplaceWrapper(TemplateHandler, OnModing)!;
         }
 
         private Task OnModing(CounterView view, Context ctx, CancellationToken ct)
@@ -78,7 +78,7 @@ public class TriggerModingTests
         Assert.Equal(new[] { "moding" }, traceSubclass); // 仅 moding 逻辑（模板逻辑无痕）
 
         // 装配期注册的 moding 亦可被任意持有句柄者运行时注销（句柄即权限）→ 回退模板逻辑
-        Assert.True(subclass.UnregisterModing(subclass.ModingHandle));
+        Assert.True(subclass.UnregisterWrapper(subclass.ModingHandle));
         await subclass.InvokeAsync(engine);
         Assert.Equal(new[] { "moding", "template" }, traceSubclass);
     }
@@ -96,25 +96,25 @@ public class TriggerModingTests
         await trigger.InvokeAsync(engine);
         Assert.Equal(new[] { "原" }, trace); // 无 moding：原逻辑
 
-        var m1 = trigger.RegisterModing(target, (v, c, t) => { trace.Add("m1"); return Task.CompletedTask; });
+        var m1 = trigger.RegisterReplaceWrapper(target, (v, c, t) => { trace.Add("m1"); return Task.CompletedTask; });
         Assert.NotNull(m1);
         await trigger.InvokeAsync(engine);
         Assert.Equal(new[] { "原", "m1" }, trace); // 注册 m1：替换生效（对下一次执行立即生效）
 
-        var m2 = trigger.RegisterModing(target, (v, c, t) => { trace.Add("m2"); return Task.CompletedTask; });
+        var m2 = trigger.RegisterReplaceWrapper(target, (v, c, t) => { trace.Add("m2"); return Task.CompletedTask; });
         Assert.NotNull(m2);
         await trigger.InvokeAsync(engine);
         Assert.Equal(new[] { "原", "m1", "m2" }, trace); // 最后者胜（m1 不执行）
 
-        Assert.True(trigger.UnregisterModing(m2!));
+        Assert.True(trigger.UnregisterWrapper(m2!));
         await trigger.InvokeAsync(engine);
         Assert.Equal(new[] { "原", "m1", "m2", "m1" }, trace); // 注销 m2：回退 m1
 
-        Assert.True(trigger.UnregisterModing(m1!));
+        Assert.True(trigger.UnregisterWrapper(m1!));
         await trigger.InvokeAsync(engine);
         Assert.Equal(new[] { "原", "m1", "m2", "m1", "原" }, trace); // 全部注销：回退原逻辑
 
-        var m3 = trigger.RegisterModing(target, (v, c, t) => { trace.Add("m3"); return Task.CompletedTask; });
+        var m3 = trigger.RegisterReplaceWrapper(target, (v, c, t) => { trace.Add("m3"); return Task.CompletedTask; });
         Assert.NotNull(m3);
         await trigger.InvokeAsync(engine);
         Assert.Equal(new[] { "原", "m1", "m2", "m1", "原", "m3" }, trace); // 注销后重新注册：按新注册序入栈顶
@@ -128,22 +128,22 @@ public class TriggerModingTests
         var trigger = new Trigger<CounterView>(name: "栈语义");
         var target = trigger.Register("目标", (v, c, t) => { trace.Add("原"); return Task.CompletedTask; });
 
-        var m1 = trigger.RegisterModing(target, (v, c, t) => { trace.Add("m1"); return Task.CompletedTask; })!;
-        var m2 = trigger.RegisterModing(target, (v, c, t) => { trace.Add("m2"); return Task.CompletedTask; })!;
-        var m3 = trigger.RegisterModing(target, (v, c, t) => { trace.Add("m3"); return Task.CompletedTask; })!;
+        var m1 = trigger.RegisterReplaceWrapper(target, (v, c, t) => { trace.Add("m1"); return Task.CompletedTask; })!;
+        var m2 = trigger.RegisterReplaceWrapper(target, (v, c, t) => { trace.Add("m2"); return Task.CompletedTask; })!;
+        var m3 = trigger.RegisterReplaceWrapper(target, (v, c, t) => { trace.Add("m3"); return Task.CompletedTask; })!;
 
         await trigger.InvokeAsync(engine);
         Assert.Equal(new[] { "m3" }, trace); // 最后者胜（m1、m2 完全不执行）
 
-        Assert.True(trigger.UnregisterModing(m1)); // 注销中间项（栈底）
+        Assert.True(trigger.UnregisterWrapper(m1)); // 注销中间项（栈底）
         await trigger.InvokeAsync(engine);
         Assert.Equal(new[] { "m3", "m3" }, trace); // 解析＝剩余项中最后注册者
 
-        Assert.True(trigger.UnregisterModing(m3));
+        Assert.True(trigger.UnregisterWrapper(m3));
         await trigger.InvokeAsync(engine);
         Assert.Equal(new[] { "m3", "m3", "m2" }, trace); // 回退 m2
 
-        Assert.True(trigger.UnregisterModing(m2));
+        Assert.True(trigger.UnregisterWrapper(m2));
         await trigger.InvokeAsync(engine);
         Assert.Equal(new[] { "m3", "m3", "m2", "原" }, trace); // 全部注销＝回退原逻辑
     }
@@ -159,7 +159,7 @@ public class TriggerModingTests
 
         var trigger = new Trigger<CounterView>(name: "纯替换");
         var target = trigger.Register("目标", (v, c, t) => { originalRuns++; return Task.CompletedTask; });
-        var m = trigger.RegisterModing(target, (v, c, t) => { modingRuns++; return Task.CompletedTask; });
+        var m = trigger.RegisterReplaceWrapper(target, (v, c, t) => { modingRuns++; return Task.CompletedTask; });
         Assert.NotNull(m);
 
         await trigger.InvokeAsync(engine);
@@ -171,7 +171,7 @@ public class TriggerModingTests
     // ---------- 无效句柄：幂等无操作、不抛错、不生效 ----------
 
     [Fact]
-    public async Task RegisterModing_On_Invalid_Handle_Is_Silent_Noop()
+    public async Task RegisterReplaceWrapper_On_Invalid_Handle_Fails_Fast()
     {
         var engine = new LogicEngine();
         var trace = new List<string>();
@@ -183,16 +183,14 @@ public class TriggerModingTests
         t2.Register("B", (v, c, t) => { trace.Add("t2-B原逻辑"); return Task.CompletedTask; });
 
         // ① 跨触发器句柄：无操作、不抛错、不生效（对 t1 的 A 无影响）
-        var cross = t2.RegisterModing(targetA, (v, c, t) => { trace.Add("不该执行-跨触发器"); return Task.CompletedTask; });
-        Assert.Null(cross);
+        Assert.Throws<ArgumentException>(() => t2.RegisterReplaceWrapper(targetA, (v, c, t) => { trace.Add("不该执行-跨触发器"); return Task.CompletedTask; }));
 
         await t1.InvokeAsync(engine);
         Assert.Equal(new[] { "t1-A原逻辑" }, trace); // A 仍原逻辑
 
         // ② 已撤销条目的句柄：无操作、不抛错、不生效
         Assert.True(t1.Unregister(targetA));
-        var ghost = t1.RegisterModing(targetA, (v, c, t) => { trace.Add("不该执行-已撤销"); return Task.CompletedTask; });
-        Assert.Null(ghost);
+        Assert.Throws<ArgumentException>(() => t1.RegisterReplaceWrapper(targetA, (v, c, t) => { trace.Add("不该执行-已撤销"); return Task.CompletedTask; }));
 
         // 行为核对：t1 已无条目（空执行）；t2 的 B 不受跨触发器注册影响
         await t1.InvokeAsync(engine);
@@ -201,25 +199,25 @@ public class TriggerModingTests
     }
 
     [Fact]
-    public async Task UnregisterModing_Is_Idempotent_And_Handle_Scoped()
+    public async Task UnregisterWrapper_Is_Idempotent_And_Handle_Scoped()
     {
         var engine = new LogicEngine();
         var trigger = new Trigger<CounterView>(name: "注销幂等");
         var target = trigger.Register("目标", Nop);
 
-        var m = trigger.RegisterModing(target, Nop);
+        var m = trigger.RegisterReplaceWrapper(target, Nop);
         Assert.NotNull(m);
 
-        Assert.True(trigger.UnregisterModing(m!));
-        Assert.False(trigger.UnregisterModing(m!)); // 重复注销：无操作、不抛错
+        Assert.True(trigger.UnregisterWrapper(m!));
+        Assert.False(trigger.UnregisterWrapper(m!)); // 重复注销：无操作、不抛错
 
-        var m2 = trigger.RegisterModing(target, Nop)!;
+        var m2 = trigger.RegisterReplaceWrapper(target, Nop)!;
         var other = new Trigger<CounterView>(name: "他者");
-        Assert.False(other.UnregisterModing(m2)); // 句柄不属：无操作、不抛错
+        Assert.False(other.UnregisterWrapper(m2)); // 句柄不属：无操作、不抛错
 
         // 目标注册项撤销后其 moding 随之失效：注销＝无操作
         Assert.True(trigger.Unregister(target));
-        Assert.False(trigger.UnregisterModing(m2));
+        Assert.False(trigger.UnregisterWrapper(m2));
         await trigger.InvokeAsync(engine); // 空执行（无条目、无异常）
     }
 
@@ -240,7 +238,7 @@ public class TriggerModingTests
             return Task.CompletedTask;
         });
         target = trigger.Register("目标", (v, c, t) => { trace.Add("目标原逻辑"); return Task.CompletedTask; });
-        trigger.RegisterModing(target, (v, c, t) => { trace.Add("目标moding"); return Task.CompletedTask; });
+        trigger.RegisterReplaceWrapper(target, (v, c, t) => { trace.Add("目标moding"); return Task.CompletedTask; });
 
         await trigger.InvokeAsync(engine);
 
@@ -249,7 +247,7 @@ public class TriggerModingTests
         Assert.Equal(new[] { "先行", "目标原逻辑" }, trace);
 
         // 后续轮：目标条目不再参与；向已撤销句柄再注册 moding＝无操作（不生效）
-        Assert.Null(trigger.RegisterModing(target, (v, c, t) => { trace.Add("幽灵moding"); return Task.CompletedTask; }));
+        Assert.Throws<ArgumentException>(() => trigger.RegisterReplaceWrapper(target, (v, c, t) => { trace.Add("幽灵moding"); return Task.CompletedTask; }));
         await trigger.InvokeAsync(engine);
         Assert.Equal(new[] { "先行", "目标原逻辑", "先行" }, trace); // 仅「先行」（目标不再参与、幽灵注册无痕）
     }
@@ -267,7 +265,7 @@ public class TriggerModingTests
         var entered = new TaskCompletionSource();
         var gate = new TaskCompletionSource();
 
-        var m1 = trigger.RegisterModing(target, async (v, c, t) =>
+        var m1 = trigger.RegisterReplaceWrapper(target, async (v, c, t) =>
         {
             trace.Add("m1 开始");
             entered.SetResult();
@@ -279,8 +277,8 @@ public class TriggerModingTests
         Assert.True(entered.Task.IsCompleted); // 执行已进入 m1 并挂起（已解析选择＝m1）
 
         // 进行中介入：注销 m1 ＋ 注册 m2（既解析选择不被打断）
-        Assert.True(trigger.UnregisterModing(m1));
-        var m2 = trigger.RegisterModing(target, (v, c, t) => { trace.Add("m2"); return Task.CompletedTask; })!;
+        Assert.True(trigger.UnregisterWrapper(m1));
+        var m2 = trigger.RegisterReplaceWrapper(target, (v, c, t) => { trace.Add("m2"); return Task.CompletedTask; })!;
 
         gate.SetResult(); // 放行 m1
         await execution;
@@ -303,7 +301,7 @@ public class TriggerModingTests
         {
             trace.Add("先行");
             // 「目标」尚未执行（尚未解析）：此刻注册的 moding 自其下一次解析点（＝临执行前）生效
-            trigger.RegisterModing(target!, (v2, c2, t2) => { trace.Add("moding"); return Task.CompletedTask; });
+            trigger.RegisterReplaceWrapper(target!, (v2, c2, t2) => { trace.Add("moding"); return Task.CompletedTask; });
             return Task.CompletedTask;
         });
         target = trigger.Register("目标", (v, c, t) => { trace.Add("原逻辑"); return Task.CompletedTask; });
@@ -330,7 +328,7 @@ public class TriggerModingTests
         var handle = trigger.InitialRegistrations[0];
         Assert.Equal("初始", handle.Name);
 
-        var m = trigger.RegisterModing(handle, (v, c, t) => { trace.Add("初始moding"); return Task.CompletedTask; });
+        var m = trigger.RegisterReplaceWrapper(handle, (v, c, t) => { trace.Add("初始moding"); return Task.CompletedTask; });
         Assert.NotNull(m);
 
         var stream = await trigger.InvokeAsync(engine);
@@ -350,7 +348,7 @@ public class TriggerModingTests
         defender.AddData(new HealthData { Hp = 10 });
 
         // 屏蔽「伤害生效」：经句柄把伤害结算流程的默认处理器替换为无操作（不新增前后 handler）
-        var applyM = engine.DamageFlow.Trigger.RegisterModing(
+        var applyM = engine.DamageFlow.Trigger.RegisterReplaceWrapper(
             engine.DamageFlow.ApplyRegistration,
             (view, ctx, ct) => Task.CompletedTask);
         Assert.NotNull(applyM);
@@ -359,12 +357,12 @@ public class TriggerModingTests
         Assert.Equal(10, defender.GetData<HealthData>().Hp); // 替换生效：伤害不生效
 
         // 注销 → 回退原逻辑：伤害照常
-        Assert.True(engine.DamageFlow.Trigger.UnregisterModing(applyM!));
+        Assert.True(engine.DamageFlow.Trigger.UnregisterWrapper(applyM!));
         await engine.AttackFlow.ExecuteAsync(attacker, defender, 5);
         Assert.Equal(5, defender.GetData<HealthData>().Hp);
 
         // 屏蔽「伤害结算」调用：经攻击流程内置句柄替换为无操作 → 攻击不再引发伤害结算
-        var resolveM = engine.AttackFlow.Trigger.RegisterModing(
+        var resolveM = engine.AttackFlow.Trigger.RegisterReplaceWrapper(
             engine.AttackFlow.ResolveRegistration,
             (view, ctx, ct) => Task.CompletedTask);
         Assert.NotNull(resolveM);
@@ -384,7 +382,7 @@ public class TriggerModingTests
         var first = trigger.Register("条目甲", (v, c, t) => { trace.Add("甲原"); return Task.CompletedTask; }, priority: 0);
         trigger.Register("条目乙", (v, c, t) => { trace.Add("乙"); return Task.CompletedTask; }, priority: 10);
 
-        var m = trigger.RegisterModing(first, (v, c, t) => { trace.Add("甲改"); return Task.CompletedTask; });
+        var m = trigger.RegisterReplaceWrapper(first, (v, c, t) => { trace.Add("甲改"); return Task.CompletedTask; });
         Assert.NotNull(m);
         Assert.Equal("条目甲", first.Name); // 句柄可读标识不变（替换仅作用处理回调本身）
 
@@ -402,7 +400,7 @@ public class TriggerModingTests
         var trigger = new Trigger<CounterView>(name: "异常隔离");
         var first = trigger.Register("一", Nop);
         trigger.Register("二", (v, c, t) => { trace.Add("二"); return Task.CompletedTask; });
-        var m = trigger.RegisterModing(first, (v, c, t) => throw new InvalidOperationException("moding 故意爆炸"));
+        var m = trigger.RegisterReplaceWrapper(first, (v, c, t) => throw new InvalidOperationException("moding 故意爆炸"));
         Assert.NotNull(m);
 
         var stream = await trigger.InvokeAsync(engine);

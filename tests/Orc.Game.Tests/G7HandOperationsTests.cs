@@ -342,7 +342,7 @@ public class G7HandOperationsTests
         playerA.Hand.Add(card);
 
         Assert.True(effect.IsMounted); // 加载时点装载完成
-        Assert.Contains(effect.Name, match.Engine.Bus.GetSubscribers(Updates.EffectRemoved));
+        Assert.Contains($"{effect.Name}/dispose", match.Engine.Bus.GetSubscribers(Updates.CardDestroyed));
 
         await match.PlayerManager.DiscardCardAsync(playerA, card);
 

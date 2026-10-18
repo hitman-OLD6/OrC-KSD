@@ -22,12 +22,12 @@ public class JudicatorBindingTests
         Assert.True(trigger.Validate(Array.Empty<Ref<Entity>>())); // 默认逻辑
 
         // moding 改写（统一面）→ 绑定调用生效（同一条目——全局生效）
-        var m = registry.RegisterModing(handle, _ => new object[] { ValidationVerdict.Invalid() });
+        var m = registry.RegisterReplaceWrapper(handle, _ => new object[] { ValidationVerdict.Invalid() });
         Assert.NotNull(m);
         Assert.False(trigger.Validate(Array.Empty<Ref<Entity>>()));
 
         // 注销回退（全部注销＝回退默认逻辑）
-        Assert.True(registry.UnregisterModing(m!));
+        Assert.True(registry.UnregisterWrapper(m!));
         Assert.True(trigger.Validate(Array.Empty<Ref<Entity>>()));
     }
 

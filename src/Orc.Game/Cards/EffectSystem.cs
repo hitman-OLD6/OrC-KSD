@@ -388,7 +388,7 @@ internal static class CardEffectLoader
     /// 该效果施加的全部修饰器/光环声明。
     /// </summary>
     internal static void RegisterManagedCleanup(CardBase card, LogicEngine engine, Effect effect)
-        => effect.AddUnmountCleanup(() => RunManagedCleanup(card, engine, effect));
+        => effect.AddTeardownRegistration(() => RunManagedCleanup(card, engine, effect));
 
     /// <summary>
     /// 托管清理执行（引擎卸载链中同步调用）：按来源收口该效果的落地物——

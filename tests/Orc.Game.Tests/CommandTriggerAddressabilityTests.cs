@@ -27,7 +27,7 @@ public class CommandTriggerAddressabilityTests
         Assert.Equal("防御归零检查", handle.Name);
 
         var trace = new List<string>();
-        var m = trigger.RegisterModing(handle, (view, ctx, ct) =>
+        var m = trigger.RegisterReplaceWrapper(handle, (view, ctx, ct) =>
         {
             trace.Add("moding-防御归零");
             return Task.CompletedTask;
@@ -57,7 +57,7 @@ public class CommandTriggerAddressabilityTests
         Assert.Equal("HQ 归零检查", handle.Name);
 
         var trace = new List<string>();
-        var m = trigger.RegisterModing(handle, (view, ctx, ct) =>
+        var m = trigger.RegisterReplaceWrapper(handle, (view, ctx, ct) =>
         {
             trace.Add("moding-HQ归零");
             return Task.CompletedTask;

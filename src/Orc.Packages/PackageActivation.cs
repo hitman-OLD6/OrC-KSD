@@ -75,7 +75,7 @@ public static class PackageActivation
                     script.Register(context);
                 }
 
-                context.ApplyModings();
+                context.ApplyWrappers();
                 activated.Add(label);
                 dependencies.AddRange(context.DeclaredDependencies);
                 continue;
@@ -88,7 +88,7 @@ public static class PackageActivation
                     script.Register(context);
                 }
 
-                context.ApplyModings();
+                context.ApplyWrappers();
 
                 activated.Add(label);
                 dependencies.AddRange(context.DeclaredDependencies);

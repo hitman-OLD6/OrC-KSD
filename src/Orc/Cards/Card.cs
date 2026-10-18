@@ -10,7 +10,7 @@ namespace Orc.Cards;
 /// 生命周期（驱动信号＝更新；响应＝装载链处理器/效果主触发器）：
 /// 放置（card.placed）→ 初始化＋效果装载幂等兜底（被动：挂载＋OnMount；装载不再以放置状态为前提——三入口：加载时点/放置驱动/Add 即时）；
 /// 加载时点装载（MountPassiveEffects）→ 挂主触发器＋OnMount（幂等；与放置驱动/Add 即时共用同一装载链——重复驱动幂等跳过）；
-/// 移除（RemoveEffect）/ 效果移除更新（effect.removed）→ 容器面移除＋卸载链（成功事务实际移除命中恰发射一次 effect.removed）；销毁（<see cref="LogicEngine.DestroyCard"/>）＝杀＋card.destroyed 驱动清理。
+/// 移除（RemoveEffect）/ 效果移除更新（effect.removed）→ disposing 触发器统一销毁（容器移除＋恰一次 effect.removed）；销毁（<see cref="LogicEngine.DestroyCard"/>）＝杀＋card.destroyed（各效果 disposing 默认兜底）。
 /// </summary>
 public class Card : Entity
 {
@@ -122,6 +122,8 @@ public class Card : Entity
                 $"效果 '{effect.Name}' 已属于另一张卡牌（须先移除再添加）。");
         }
 
+        effect.ValidateForUse(); // E-D1：一次性效果必须有可执行的业务主触发器（装配期 fail-fast）
+
         _effects.Add(effect);
         effect.SetHost(this);
 
@@ -129,11 +131,16 @@ public class Card : Entity
         {
             CardLoadout.MountEffect(this, effect); // 即时装载（幂等：未装载才执行；失败＝记录＋回滚为未生效、不阻断容器添加）
         }
+        else
+        {
+            // 主动效果不装载钩子，但 disposing 触发器照常挂载（随卡销毁/兜底时机清理额外副作用）。
+            effect.MountDisposal(Engine.Bus);
+        }
     }
 
     /// <summary>
-    /// 移除效果（规范入口）：容器面移除；已装载 → 卸载链（OnUnmount → 撤销登记 → 总线卸载 → 清引用）；
-    /// 未装载 → 仅容器面移除（无运行态清理动作）。
+    /// 移除效果（规范入口）：E-D1 销毁唯一入口——进入即停用 → disposing 事件链 → 最终 teardown → 容器移除 → 发射；
+    /// 未装载 → 仅容器面移除（无运行态销毁动作）。
     /// 发射（W3-A3）：实际移除命中＝恰发射一次 effect.removed（载荷＝{Card, Effect}；先清理〔落定〕、后发射〔对外通知〕）；
     /// 幂等无操作（不存在/已移除/非本卡）＝不发射。
     /// 幂等：移除不存在/已移除的效果＝无操作、不抛错；重复移除＝幂等。
@@ -142,20 +149,34 @@ public class Card : Entity
     public void RemoveEffect(Effect effect)
     {
         ArgumentNullException.ThrowIfNull(effect);
-        CardLoadout.CleanupEffect(this, effect);
+        CardLoadout.DisposeEffect(this, effect);
     }
 
     /// <summary>
-    /// 移除效果（静默清理路径；W3-A3 加性面——未成功事务的回滚专用）：与 <see cref="RemoveEffect"/> 行为一致
-    /// （容器移除＋已装载卸载链；幂等），但**不发射** effect.removed 更新（「无痕」回滚语义——装载失败/授予失败等
-    /// 未成功事务中的卸载不得对外发移除信号）。使用约定：正常（成功事务）路径一律使用 <see cref="RemoveEffect"/>；
-    /// 本面仅限回滚路径（及「源头即信号」类场景）使用。
+    /// 移除效果（静默回滚路径；E-D1 收窄）：**仅限未成功事务的回滚**（装载失败/动态回滚）——
+    /// 只做容器面移除＋清宿主引用，**不执行 disposing、不发射** effect.removed。
+    /// 正常（成功事务）路径一律使用 <see cref="RemoveEffect"/>（完整销毁）。
     /// </summary>
     /// <exception cref="ArgumentNullException">effect 为 null。</exception>
     public void RemoveEffectSilently(Effect effect)
     {
         ArgumentNullException.ThrowIfNull(effect);
-        CardLoadout.CleanupEffect(this, effect, emitRemoved: false);
+
+        if (!ContainsEffect(effect) && !ReferenceEquals(effect.HostOrNull, this))
+        {
+            return; // 幂等
+        }
+
+        if (effect.IsMounted)
+        {
+            // 已装载的静默销毁：执行完整销毁链但不发射 effect.removed（回滚/无痕场景）。
+            CardLoadout.DisposeEffect(this, effect, DisposalSource.Early, emitRemoved: false);
+            return;
+        }
+
+        // 未装载（装载失败/回滚后的残留）：仅容器面移除——不执行 disposing。
+        RemoveEffectCore(effect);
+        effect.ClearHost();
     }
 
     /// <summary>
@@ -172,6 +193,10 @@ public class Card : Entity
             {
                 CardLoadout.MountEffect(this, effect);
             }
+            else
+            {
+                effect.MountDisposal(Engine.Bus); // 主动效果：disposing 照常挂载（幂等）
+            }
         }
     }
 
@@ -180,7 +205,7 @@ public class Card : Entity
     /// <summary>置放置标记（装载链处理器放置处理调用；幂等）。</summary>
     internal void MarkPlaced() => IsPlaced = true;
 
-    /// <summary>从列表移除（不清算；清理模板调用）。返回是否命中。</summary>
+    /// <summary>从列表移除（不清算；销毁链调用）。返回是否命中。</summary>
     internal bool RemoveEffectCore(Effect effect) => _effects.Remove(effect);
 
     /// <summary>列表是否含该效果（归属校验用）。</summary>

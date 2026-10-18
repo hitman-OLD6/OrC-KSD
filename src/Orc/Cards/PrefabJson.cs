@@ -7,9 +7,9 @@ namespace Orc.Cards;
 
 /// <summary>
 /// 效果快照 JSON 序列化器（S-C5/S-C10）：把 <see cref="EffectSnapshot"/>（嵌套三层预制体）导出/读回。
-/// 形态：{ schemaVersion, root: { id, version, mainTrigger, otherTriggers[], modings[] } }；
+/// 形态：{ schemaVersion, root: { id, version, mainTrigger, otherTriggers[], wrappers[] } }；
 /// 触发器＝{ id, stableKey, kind("active"/"passive"), viewType, hooks[], events[] }；
-/// 事件＝{ id, entry, csx?, assemblyKey?, downstream[], version }；moding＝{ target, replacement }。
+/// 事件＝{ id, entry, csx?, assemblyKey?, downstream[], version }；wrapper＝{ target, replacement }。
 /// 版本（S-C10）：读出时 <c>schemaVersion</c> 与本版不符＝结构化失败（不静默降级）。
 /// 明文约定：输入输出均为 UTF-8 文本（社区明文储存）。
 /// </summary>
@@ -87,13 +87,14 @@ public static class PrefabJson
             throw new FormatException("效果快照缺少 root。");
         }
 
-        if (dto.SchemaVersion != EffectSnapshot.SchemaVersion)
+        // E-D1：接受 2（旧版：缺 disposingTrigger/oneShot/band）并按默认补齐；内存快照归一化为 3，写出恒为 3。
+        if (dto.SchemaVersion is not (2 or EffectSnapshot.SchemaVersion))
         {
             throw new FormatException(
-                $"效果快照 schema 版本不符：期望 {EffectSnapshot.SchemaVersion}，实际 {dto.SchemaVersion}（不静默降级）。");
+                $"效果快照 schema 版本不符：期望 2 或 {EffectSnapshot.SchemaVersion}，实际 {dto.SchemaVersion}（不静默降级）。");
         }
 
-        return new EffectSnapshot(FromDto(dto.Root), dto.SchemaVersion);
+        return new EffectSnapshot(FromDto(dto.Root), EffectSnapshot.SchemaVersion);
     }
 
     /// <summary>读回效果快照（结构化：失败不抛）。</summary>
@@ -143,10 +144,12 @@ public static class PrefabJson
         Version = prefab.Version,
         MainTrigger = ToDto(prefab.MainTrigger),
         OtherTriggers = prefab.OtherTriggers.Select(ToDto).ToList(),
-        Modings = prefab.Modings.Select(m => new ModingDto
+        Wrappers = prefab.Wrappers.Select(w => new WrapperDto
         {
-            Target = m.TargetEventId,
-            Replacement = ToDto(m.Replacement),
+            Phase = w.Phase,
+            Target = w.TargetEventId,
+            Seam = w.SeamName,
+            Handler = ToDto(w.Handler),
         }).ToList(),
         Injects = prefab.Injects.Select(i => new InjectPrefabDto
         {
@@ -155,6 +158,8 @@ public static class PrefabJson
             Event = i.EventId,
             Priority = i.Priority,
         }).ToList(),
+        DisposingTrigger = ToDto(prefab.DisposingTrigger),
+        OneShot = prefab.OneShot,
     };
 
     private static TriggerPrefabDto ToDto(TriggerPrefab prefab) => new()
@@ -175,7 +180,9 @@ public static class PrefabJson
         Csx = prefab.CsxSource,
         AssemblyKey = prefab.AssemblyKey,
         Downstream = prefab.Downstream.ToList(),
+        Seams = prefab.Seams.ToList(),
         Version = prefab.Version,
+        Band = prefab.Band,
     };
 
     // ---------- DTO → 领域 ----------
@@ -188,14 +195,19 @@ public static class PrefabJson
         }
 
         var others = (dto.OtherTriggers ?? new List<TriggerPrefabDto>()).Select(FromDto).ToList();
-        var modings = (dto.Modings ?? new List<ModingDto>()).Select(m =>
+        var wrappers = (dto.Wrappers ?? new List<WrapperDto>()).Select(w =>
         {
-            if (m.Replacement is null)
+            if (w.Handler is null)
             {
-                throw new FormatException("moding 缺少 replacement。");
+                throw new FormatException("包装器缺少 handler。");
             }
 
-            return new ModingPrefab(m.Target, FromDto(m.Replacement));
+            if (string.IsNullOrWhiteSpace(w.Phase))
+            {
+                throw new FormatException("包装器缺少 phase（before／after／replace）。");
+            }
+
+            return new WrapperPrefab(w.Phase!, w.Target ?? string.Empty, w.Seam, FromDto(w.Handler));
         }).ToList();
 
         List<InjectPrefab> injects;
@@ -215,9 +227,11 @@ public static class PrefabJson
             dto.Id ?? string.Empty,
             FromDto(dto.MainTrigger),
             others,
-            modings,
+            wrappers,
             dto.Version <= 0 ? 1 : dto.Version,
-            injects);
+            injects,
+            dto.DisposingTrigger is null ? null : FromDto(dto.DisposingTrigger),
+            dto.OneShot);
     }
 
     private static TriggerPrefab FromDto(TriggerPrefabDto dto)
@@ -247,7 +261,9 @@ public static class PrefabJson
         dto.Csx,
         dto.AssemblyKey,
         dto.Downstream,
-        dto.Version <= 0 ? 1 : dto.Version);
+        dto.Version <= 0 ? 1 : dto.Version,
+        dto.Band,
+        dto.Seams);
 
     // ---------- DTO 定义（可空字段容忍缺项，结构校验在领域构造期完成） ----------
 
@@ -263,8 +279,10 @@ public static class PrefabJson
         public int Version { get; set; }
         public TriggerPrefabDto? MainTrigger { get; set; }
         public List<TriggerPrefabDto>? OtherTriggers { get; set; }
-        public List<ModingDto>? Modings { get; set; }
+        public List<WrapperDto>? Wrappers { get; set; }
         public List<InjectPrefabDto>? Injects { get; set; }
+        public TriggerPrefabDto? DisposingTrigger { get; set; }
+        public bool OneShot { get; set; }
     }
 
     private sealed class TriggerPrefabDto
@@ -285,13 +303,17 @@ public static class PrefabJson
         public string? Csx { get; set; }
         public string? AssemblyKey { get; set; }
         public List<string>? Downstream { get; set; }
+        public List<string>? Seams { get; set; }
         public int Version { get; set; }
+        public string? Band { get; set; }
     }
 
-    private sealed class ModingDto
+    private sealed class WrapperDto
     {
-        public string Target { get; set; } = string.Empty;
-        public EventPrefabDto? Replacement { get; set; }
+        public string? Phase { get; set; }
+        public string? Target { get; set; }
+        public string? Seam { get; set; }
+        public EventPrefabDto? Handler { get; set; }
     }
 
     private sealed class InjectPrefabDto

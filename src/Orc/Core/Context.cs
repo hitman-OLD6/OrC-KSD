@@ -45,6 +45,12 @@ public sealed class Context
     public void Stop() => _frame?.RequestStop();
 
     /// <summary>
+    /// 静默停止（框架内部；E-D2）：语义同 <see cref="Stop"/>，但不写事件流条目——
+    /// 供 disposing 守卫在"载荷不指向本效果/宿主"时直接结束本轮，避免每张卡销毁都产生 N 条 stop 噪音。
+    /// </summary>
+    internal void StopSilent() => _frame?.RequestStopSilent();
+
+    /// <summary>
     /// 请求中断动作链（链级）：所在层及全部祖先层在各自下一事件边界停止；已中断状态下新发起的执行空转。
     /// 中断行为写入事件流（Interrupt 取级高于 Stop）。
     /// </summary>
@@ -56,6 +62,22 @@ public sealed class Context
     /// 不占数据载体键名、不改变 ctx 数据语义。
     /// </summary>
     public LogicEngine? Engine => _frame?.Engine;
+
+    /// <summary>
+    /// 调用当前 handler 的具名动作缝（管道式）：按该缝的前置包装器列表 LIFO 依次执行。
+    /// 仅在触发器 handler 执行期间可用；未关联执行帧、未处于 handler 内、或缝未声明均 fail-fast。
+    /// </summary>
+    /// <exception cref="ArgumentException">name 为 null/空白。</exception>
+    /// <exception cref="InvalidOperationException">不在 handler 执行期间（无执行帧或帧未注入缝执行器）。</exception>
+    /// <exception cref="KeyNotFoundException">缝未在目标 handler 上声明。</exception>
+    public Task SeamAsync(string name, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        var executor = _frame?.SeamExecutor
+            ?? throw new InvalidOperationException("动作缝只能在触发器 handler 执行期间调用。");
+        return executor(name, ct);
+    }
 
     /// <summary>关联执行会话（框架内部流程调用；状态查询与检查点共用该帧的状态）。</summary>
     internal void AttachFrame(ExecutionFrame frame) => _frame = frame;

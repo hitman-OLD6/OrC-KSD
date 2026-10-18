@@ -18,8 +18,8 @@ public class DynamicEffectTests
     private static TriggerPrefab ActiveMain(params EventPrefab[] events) =>
         new("t.cast", "dyn.cast", TriggerKind.Active, events: events);
 
-    private static EffectSnapshot Snapshot(TriggerPrefab main, IEnumerable<TriggerPrefab>? others = null, IEnumerable<ModingPrefab>? modings = null) =>
-        new(new EffectPrefab("prefab.dyn", main, others, modings));
+    private static EffectSnapshot Snapshot(TriggerPrefab main, IEnumerable<TriggerPrefab>? others = null, IEnumerable<WrapperPrefab>? wrappers = null) =>
+        new(new EffectPrefab("prefab.dyn", main, others, wrappers));
 
     // ---------- S-C7 预制体管理器 ----------
 
@@ -99,7 +99,7 @@ public class DynamicEffectTests
         var other = new TriggerPrefab("t.watch", "dyn.watch", TriggerKind.Passive, hooks: new[] { "dyn.turn.end" },
             events: new[] { new EventPrefab("watch", csxSource: "Func<CardEventView, Context, CancellationToken, Task> watch = (v,c,t) => Task.CompletedTask;") });
         var snapshot = Snapshot(main, new[] { other },
-            new[] { new ModingPrefab("onHook", new EventPrefab("onHookOverride", assemblyKey: "test.override")) });
+            new[] { new WrapperPrefab("replace", "onHook", null, new EventPrefab("onHookOverride", assemblyKey: "test.override")) });
 
         var json = PrefabJson.Serialize(snapshot, indented: true);
         var read = PrefabJson.Deserialize(json);
@@ -113,7 +113,7 @@ public class DynamicEffectTests
         Assert.Equal("Orc.Cards.CardEventView", read.Root.MainTrigger.ViewTypeName);
         Assert.Equal("dyn.watch", read.Root.OtherTriggers[0].StableKey);
         Assert.True(read.Root.OtherTriggers[0].Events[0].IsInline);
-        Assert.Equal("onHookOverride", read.Root.Modings[0].Replacement.Id);
+        Assert.Equal("onHookOverride", read.Root.Wrappers[0].Handler.Id);
         Assert.Equal(read.Root.MountedHooks, new[] { Hook, "dyn.turn.end" });
     }
 
@@ -179,7 +179,7 @@ public class DynamicEffectTests
 
         var snapshot = Snapshot(
             PassiveMain(new EventPrefab("onHook", assemblyKey: "test.base")),
-            modings: new[] { new ModingPrefab("onHook", new EventPrefab("override", assemblyKey: "test.override")) });
+            wrappers: new[] { new WrapperPrefab("replace", "onHook", null, new EventPrefab("override", assemblyKey: "test.override")) });
 
         var instantiation = DynamicEffectFactory.Instantiate(engine, snapshot);
         Assert.True(instantiation.Success, instantiation.Error);

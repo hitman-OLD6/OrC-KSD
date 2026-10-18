@@ -38,7 +38,8 @@ public sealed class AttackHealEffect : PassiveEffect
     protected override void OnMount()
     {
         MountCount++;
-        MountSawTriggerOnBus = _engine.Bus.GetSubscribers(Updates.EffectRemoved).Contains(Name);
+        // E-D1：销毁兜底由 disposing 触发器承载（订阅 card.destroyed、名称为 "{效果名}/dispose"）。
+        MountSawTriggerOnBus = _engine.Bus.GetSubscribers(Updates.CardDestroyed).Contains($"{Name}/dispose");
         SawPlacedAtMount = Host.IsPlaced;
         MountHp = Host.GetData<HealthData>().Hp;
         _lastInjection = Inject(
@@ -49,7 +50,8 @@ public sealed class AttackHealEffect : PassiveEffect
     {
         UnmountCount++;
         ExclusiveCleanupRan = true;
-        UnmountSawTriggerOnBus = _engine.Bus.GetSubscribers(Updates.EffectRemoved).Contains(Name);
+        // E-D1：进入即停用——OnUnmount 执行时该效果的总线挂载已先卸载（本断言预期为 false）。
+        UnmountSawTriggerOnBus = _engine.Bus.GetSubscribers(Updates.CardDestroyed).Contains($"{Name}/dispose");
         UnmountHostName = Host.Name;
         _lastInjection = null; // 专属清理：清除引用登记
     }

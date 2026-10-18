@@ -29,7 +29,7 @@ public class JudicatorRegistryTests
         Assert.Equal(new object[] { "ok" }, registered.Invoke(null));
 
         // 解析所得句柄用于 moding 锚定 → 按名调用生效（解析口与 moding 口不错位）
-        var m = registry.RegisterModing(resolved, _ => new object[] { "改写" });
+        var m = registry.RegisterReplaceWrapper(resolved, _ => new object[] { "改写" });
         Assert.NotNull(m);
         Assert.Equal(new object[] { "改写" }, registry.Invoke(JudicatorTestData.ProbeName, null));
     }

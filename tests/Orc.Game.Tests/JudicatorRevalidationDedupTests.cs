@@ -520,7 +520,7 @@ public class JudicatorRevalidationDedupTests
         Assert.Same(rejectedSlot, rejected.GetData<UnitStateData>().Position);
 
         // ---------- 改写：move leg → 「移动无视被压制」（局部豁免——其余条件复刻） ----------
-        var moding = match.Judicators.RegisterModing(
+        var moding = match.Judicators.RegisterReplaceWrapper(
             match.Judicators.Resolve(JudicatorNames.MoveLegEligibility),
             args => MoveLegDefaultExceptSuppressed(match, args));
         Assert.NotNull(moding);
@@ -558,7 +558,7 @@ public class JudicatorRevalidationDedupTests
         Assert.Equal(CommandBlockReason.PointShortage, preciseAvailability.Move.BlockReason);
 
         // ---------- 注销回退 ----------
-        Assert.True(match.Judicators.UnregisterModing(moding!));
+        Assert.True(match.Judicators.UnregisterWrapper(moding!));
 
         // 回退后恢复原行为（可用性＋复验）：
         var restoredAvailability = match.CommandManager.GetCommandAvailability(probed);
@@ -614,7 +614,7 @@ public class JudicatorRevalidationDedupTests
         Assert.Equal(5, victim.GetData<UnitStateData>().Defense); // 零副作用：未结算伤害
 
         // ---------- 改写：attack leg → 「攻击无视被压制」（局部豁免——其余条件复刻） ----------
-        var moding = match.Judicators.RegisterModing(
+        var moding = match.Judicators.RegisterReplaceWrapper(
             match.Judicators.Resolve(JudicatorNames.AttackLegEligibility),
             args => AttackLegDefaultExceptSuppressed(match, args));
         Assert.NotNull(moding);
@@ -642,7 +642,7 @@ public class JudicatorRevalidationDedupTests
         Assert.False(MoveRecheck(match, probed, probedSlot, match.Battlefield.FrontLine[1]));
 
         // ---------- 注销回退 ----------
-        Assert.True(match.Judicators.UnregisterModing(moding!));
+        Assert.True(match.Judicators.UnregisterWrapper(moding!));
 
         // 回退后恢复原行为（可用性＋复验）：
         var restoredAvailability = match.CommandManager.GetCommandAvailability(probed);
@@ -701,7 +701,7 @@ public class JudicatorRevalidationDedupTests
         Assert.Same(match.Battlefield.GetSupportLine(playerA)[4], rejected.GetData<UnitStateData>().Position);
 
         // ---------- 改写：move.frontline-enemy → 恒假（「前线无敌人」——C8 豁免） ----------
-        var moding = match.Judicators.RegisterModing(
+        var moding = match.Judicators.RegisterReplaceWrapper(
             match.Judicators.Resolve(JudicatorNames.MoveFrontlineEnemy),
             _ => new object[] { false });
         Assert.NotNull(moding);
@@ -719,7 +719,7 @@ public class JudicatorRevalidationDedupTests
         Assert.Same(match.Battlefield.FrontLine[1], succeeded.GetData<UnitStateData>().Position);
 
         // ---------- 注销回退 ----------
-        Assert.True(match.Judicators.UnregisterModing(moding!));
+        Assert.True(match.Judicators.UnregisterWrapper(moding!));
 
         // ---------- 态三（回退后）：恢复不可通过（换用空槽位观察——succeeded 已占前线槽 1） ----------
         var restoredAvailability = match.CommandManager.GetCommandAvailability(probed);

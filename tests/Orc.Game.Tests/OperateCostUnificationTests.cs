@@ -181,7 +181,7 @@ public class OperateCostUnificationTests
         Assert.False(MoveRecheck(match, unit, supportSlot, frontSlot));
 
         // ---------- 改写：move leg → 「行动费条件豁免」（局部豁免——其余条件复刻） ----------
-        var moding = match.Judicators.RegisterModing(
+        var moding = match.Judicators.RegisterReplaceWrapper(
             match.Judicators.Resolve(JudicatorNames.MoveLegEligibility),
             args => MoveLegDefaultExceptCostShortage(match, args));
         Assert.NotNull(moding);
@@ -206,7 +206,7 @@ public class OperateCostUnificationTests
         Assert.Equal(CommandBlockReason.Suppressed, suppressedAvailability.Move.BlockReason);
 
         // ---------- 注销回退 ----------
-        Assert.True(match.Judicators.UnregisterModing(moding!));
+        Assert.True(match.Judicators.UnregisterWrapper(moding!));
 
         // 回退后恢复原行为（可用性＋复验）：
         var restoredAvailability = match.CommandManager.GetCommandAvailability(unit);

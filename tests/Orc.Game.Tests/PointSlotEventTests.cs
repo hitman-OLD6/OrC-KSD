@@ -94,7 +94,7 @@ public class PointSlotEventTests
         await match.Initialize();
         var handle = match.Judicators.Resolve(JudicatorNames.PointSlotIncrement);
 
-        var moding = match.Judicators.RegisterModing(
+        var moding = match.Judicators.RegisterReplaceWrapper(
             handle, (Func<object[]?, object[]?>)(_ => new object[] { 2 }));
         Assert.NotNull(moding);
 
@@ -102,7 +102,7 @@ public class PointSlotEventTests
         Assert.Equal(2, match.Players[1].PointSlots);
         Assert.Equal(2, match.Players[1].Points);
 
-        Assert.True(match.Judicators.UnregisterModing(moding!));
+        Assert.True(match.Judicators.UnregisterWrapper(moding!));
         await match.EndTurn(); // 回合 3：先手 1 → 2（注销回退默认增量 1）
         Assert.Equal(2, match.Players[0].PointSlots);
     }
@@ -115,14 +115,14 @@ public class PointSlotEventTests
         var player = match.Players[0];
         var handle = match.Judicators.Resolve(JudicatorNames.PointSlotGain);
 
-        var moding = match.Judicators.RegisterModing(
+        var moding = match.Judicators.RegisterReplaceWrapper(
             handle, (Func<object[]?, object[]?>)(_ => new object[] { 5 }));
         Assert.NotNull(moding);
 
         Assert.True(await match.ResourceManager.GainSlotsAsync(player, 1)); // 请求 1 → 实际 5
         Assert.Equal(6, player.PointSlots);
 
-        Assert.True(match.Judicators.UnregisterModing(moding!));
+        Assert.True(match.Judicators.UnregisterWrapper(moding!));
         Assert.True(await match.ResourceManager.GainSlotsAsync(player, 1)); // 注销回退恒等（请求值即实际值）
         Assert.Equal(7, player.PointSlots);
     }

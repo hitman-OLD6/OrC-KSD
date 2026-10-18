@@ -18,7 +18,7 @@ public enum TriggerKind
 /// 注册表与挂载状态（MountedBus）为可变面——除事件注册与总线挂载（Mount/UnmountOwner）外无跨调用可变状态。
 /// 开放继承（额外注入 handler 途径的基座）：执行与流产出只经公共执行入口；注册/校验只经公共注册面；
 /// 子类不得引入新的跨调用可变状态面。
-/// moding（逻辑替换；加性扩展）：注册项可经 <see cref="RegisterModing"/> 以 delegate 直接替换其运行逻辑
+/// 包装器（管道式；加性扩展）：注册项可经 RegisterBeforeWrapper / RegisterAfterWrapper / RegisterReplaceWrapper 挂载包装逻辑
 /// （执行时动态解析「最后一个」、栈语义、纯替换）；构造期装配项的注册句柄经 <see cref="InitialRegistrations"/> 供给（使全部注册项可寻址）。
 /// 合法性验证（J2：判定器承载）：可选按名绑定「验证判定器」（<see cref="BindValidation"/>；基类默认未绑定＝恒合法）；每次执行固定先调用（空转豁免）。
 /// 不合法＝仅本次取消（不绑视图、不执行事件、留痕、不传染嵌套链）；验证通过后的结构性错误（含绑定失败）＝契约兜底（记录＋失败标记＋安全结束）。
@@ -38,9 +38,10 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
     private readonly int _mountPriority;
     private readonly object? _owner;
     private long _seq;
-    private long _modingSeq;
+    private long _wrapperSeq;
     private JudicatorBinding? _validationBinding;
     private Func<IReadOnlyList<Ref<Entity>>, Ref<Entity>?>? _validationSubjectProvider;
+    private Func<IReadOnlyList<Ref<Entity>>, int?>? _validationPlayerProvider;
 
     /// <summary>
     /// 以初始化形态构造触发器（名称〔可选〕、Kind〔默认主动〕、band 方案〔默认缺省〕、初始事件集合〔可选〕、
@@ -181,9 +182,9 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
     /// <exception cref="ArgumentException">事件名为空；默认方案下 band 校验不适用项；downstream 含 null/空白/重复项。</exception>
     /// <exception cref="ArgumentOutOfRangeException">优先级越界（须满足 0 ≤ 优先级 &lt; 1000）。</exception>
     /// <param name="downstream">声明的下游触发器稳定键（S-C2 加性；可选；不改运行行为，仅供审查链静态图取边）。</param>
-    public TriggerRegistration Register(string name, Func<TView, Context, CancellationToken, Task> handler, int priority = 0, IEnumerable<string>? downstream = null)
+    public TriggerRegistration Register(string name, Func<TView, Context, CancellationToken, Task> handler, int priority = 0, IEnumerable<string>? downstream = null, IEnumerable<string>? seams = null)
     {
-        var entry = AddEvent(name, handler, band: null, priority, downstream);
+        var entry = AddEvent(name, handler, band: null, priority, downstream, seams);
         return new TriggerRegistration(this, entry.Seq, name);
     }
 
@@ -192,10 +193,29 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
     /// <exception cref="ArgumentException">事件名为空；band 成员与已声明方案不一致（二选一保护）；downstream 含 null/空白/重复项。</exception>
     /// <exception cref="ArgumentOutOfRangeException">band 值或优先级越界（band 须为自然数且 ≤ 1,000,000）。</exception>
     /// <param name="downstream">声明的下游触发器稳定键（S-C2 加性；可选；不改运行行为，仅供审查链静态图取边）。</param>
-    public TriggerRegistration Register(string name, Func<TView, Context, CancellationToken, Task> handler, Enum band, int priority = 0, IEnumerable<string>? downstream = null)
+    public TriggerRegistration Register(string name, Func<TView, Context, CancellationToken, Task> handler, Enum band, int priority = 0, IEnumerable<string>? downstream = null, IEnumerable<string>? seams = null)
     {
         ArgumentNullException.ThrowIfNull(band);
-        var entry = AddEvent(name, handler, band, priority, downstream);
+        var entry = AddEvent(name, handler, band, priority, downstream, seams);
+        return new TriggerRegistration(this, entry.Seq, name);
+    }
+
+    /// <summary>
+    /// 注册一条**效果销毁 handler**（保留槽；E-D1）：保留槽与 band 方案无关，**默认存在**且排序恒在全部普通事件之后
+    /// （普通事件按 band 值/优先级排序，保留槽单独成段）；普通 <see cref="Register(string, Func{TView, Context, CancellationToken, Task}, int, IEnumerable{string}?)"/>
+    /// 没有入口可写入本槽，故其位置不可被覆写。槽内多事件按 `priority` 升序、注册序兜底；可用 <see cref="Unregister"/> 撤销。
+    /// 需要更早执行销毁 handler 的效果，请改用普通 band 注册（自选区段）。
+    /// </summary>
+    /// <exception cref="ArgumentNullException">handler 为 null。</exception>
+    /// <exception cref="ArgumentException">事件名为空；downstream 含 null/空白/重复项。</exception>
+    /// <exception cref="ArgumentOutOfRangeException">优先级越界（须满足 0 ≤ 优先级 &lt; 1000）。</exception>
+    public TriggerRegistration RegisterDisposal(
+        string name,
+        Func<TView, Context, CancellationToken, Task> handler,
+        int priority = 0,
+        IEnumerable<string>? downstream = null, IEnumerable<string>? seams = null)
+    {
+        var entry = AddEvent(name, handler, band: null, priority, downstream, isDisposalSlot: true);
         return new TriggerRegistration(this, entry.Seq, name);
     }
 
@@ -223,7 +243,7 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
 
         var entry = _events[index];
         _events.RemoveAt(index);
-        entry.ClearModings(); // 注册项撤销 ⇒ 其 moding 项随之失效（避免悬空）
+        entry.ClearWrappers(); // 注册项撤销 ⇒ 其包装器随之失效（避免悬空）
         return true;
     }
 
@@ -238,51 +258,67 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
     /// 快照语义：执行期间的增删不打断已开始的迭代与进行中 handler 的已解析选择；被注销项不再被选用、新增项自下一次解析点生效。
     /// </summary>
     /// <exception cref="ArgumentNullException">target 或 moding 为 null。</exception>
-    public TriggerModingRegistration? RegisterModing(
-        TriggerRegistration target, Func<TView, Context, CancellationToken, Task> moding)
+    /// <summary>注册前置包装器（挂到 handler 条目）：核心前 LIFO 执行；可就地改写 Context，不可替换入参引用、不可短路。</summary>
+    public TriggerWrapperRegistration RegisterBeforeWrapper(
+        TriggerRegistration target, Func<TView, Context, CancellationToken, Task> wrapper)
+        => RegisterWrapperCore(target, WrapperPhase.Before, seam: null, wrapper);
+
+    /// <summary>注册前置包装器（挂到 handler 的具名动作缝）：该缝被 Context.SeamAsync 调用时按 LIFO 执行。</summary>
+    public TriggerWrapperRegistration RegisterBeforeWrapper(
+        TriggerRegistration target, string seam, Func<TView, Context, CancellationToken, Task> wrapper)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(seam);
+        return RegisterWrapperCore(target, WrapperPhase.Before, seam, wrapper);
+    }
+
+    /// <summary>注册后置包装器（挂到 handler 条目）：核心后 FIFO 执行；触发器侧为尾部副作用。</summary>
+    public TriggerWrapperRegistration RegisterAfterWrapper(
+        TriggerRegistration target, Func<TView, Context, CancellationToken, Task> wrapper)
+        => RegisterWrapperCore(target, WrapperPhase.After, seam: null, wrapper);
+
+    /// <summary>注册替换包装器：与 handler 同签名；只替换核心段，最后一个未注销者生效。</summary>
+    public TriggerWrapperRegistration RegisterReplaceWrapper(
+        TriggerRegistration target, Func<TView, Context, CancellationToken, Task> wrapper)
+        => RegisterWrapperCore(target, WrapperPhase.Replace, seam: null, wrapper);
+
+    private TriggerWrapperRegistration RegisterWrapperCore(
+        TriggerRegistration target, WrapperPhase phase, string? seam,
+        Func<TView, Context, CancellationToken, Task> wrapper)
     {
         ArgumentNullException.ThrowIfNull(target);
-        ArgumentNullException.ThrowIfNull(moding);
+        ArgumentNullException.ThrowIfNull(wrapper);
 
         if (!ReferenceEquals(target.TriggerRef, this))
         {
-            return null; // 跨触发器句柄：幂等无操作
+            throw new ArgumentException("包装器目标句柄不属于本触发器（跨触发器挂载被拒绝）。", nameof(target));
         }
 
-        var entry = FindEntry(target.Seq);
-        if (entry is null)
+        var entry = FindEntry(target.Seq)
+            ?? throw new ArgumentException("包装器目标注册项已撤销（不存在）。", nameof(target));
+
+        if (seam is not null && !entry.HasSeam(seam))
         {
-            return null; // 目标注册项已撤销：幂等无操作
+            throw new ArgumentException(
+                $"动作缝 '{seam}' 未在注册项 '{target.Name}' 上声明（未声明缝的挂载被拒绝）。", nameof(seam));
         }
 
-        var modingSeq = _modingSeq++;
-        entry.AddModing(moding, modingSeq);
-        return new TriggerModingRegistration(this, target.Seq, modingSeq);
+        var seq = _wrapperSeq++;
+        entry.AddWrapper(phase, seam, wrapper, seq);
+        return new TriggerWrapperRegistration(this, target.Seq, seq, phase, seam);
     }
 
-    /// <summary>
-    /// 注销一条 moding（逻辑替换）项：以句柄为准（任意持有句柄者均可注销，无注册者身份校验）。
-    /// 语义：句柄指向本触发器且对应 moding 项仍存在 → 移除并返回 true（解析随即回退上一项；全部注销＝回退原逻辑）；
-    /// 重复注销/moding 项已不存在/目标注册项已撤销/句柄不属本触发器 → 幂等无操作、返回 false、不抛错。
-    /// 快照语义：执行期间的注销不打断进行中 handler 的已解析选择；被注销项不再被选用（自下一次解析点起）。
-    /// </summary>
-    /// <exception cref="ArgumentNullException">registration 为 null。</exception>
-    public bool UnregisterModing(TriggerModingRegistration registration)
+    /// <summary>注销一条包装器（句柄即权限）；句柄无效/已撤销＝幂等无操作。</summary>
+    public bool UnregisterWrapper(TriggerWrapperRegistration registration)
     {
         ArgumentNullException.ThrowIfNull(registration);
 
         if (!ReferenceEquals(registration.TriggerRef, this))
         {
-            return false; // 非本触发器句柄：幂等无操作
+            return false;
         }
 
         var entry = FindEntry(registration.TargetSeq);
-        if (entry is null)
-        {
-            return false; // 目标注册项已撤销（其 moding 项随之失效）：幂等无操作
-        }
-
-        return entry.RemoveModing(registration.ModingSeq);
+        return entry is not null && entry.RemoveWrapper(registration.WrapperSeq);
     }
 
     /// <summary>
@@ -319,7 +355,7 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
         }
 
         var subject = _validationSubjectProvider?.Invoke(refs);
-        return _validationBinding.InvokeValidation(refs, subject);
+        return _validationBinding.InvokeValidation(refs, subject, _validationPlayerProvider?.Invoke(refs));
     }
 
     /// <summary>
@@ -336,7 +372,8 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
     /// <exception cref="InvalidOperationException">重复绑定被拒绝（绑定＝装配期一次性声明动作——fail-fast，不幂等宽容）。</exception>
     public void BindValidation(
         JudicatorBinding binding,
-        Func<IReadOnlyList<Ref<Entity>>, Ref<Entity>?>? subjectProvider = null)
+        Func<IReadOnlyList<Ref<Entity>>, Ref<Entity>?>? subjectProvider = null,
+        Func<IReadOnlyList<Ref<Entity>>, int?>? playerProvider = null)
     {
         ArgumentNullException.ThrowIfNull(binding);
 
@@ -348,6 +385,7 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
 
         _validationBinding = binding;
         _validationSubjectProvider = subjectProvider;
+        _validationPlayerProvider = playerProvider;
     }
 
     /// <summary>
@@ -496,42 +534,82 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
 
     private async Task RunEventsAsync(TView view, Context ctx, ExecutionFrame frame, CancellationToken ct)
     {
-        var snapshot = SnapshotSorted(); // 执行时点的稳定视图；执行期间的注册变化不影响本次迭代
+        var snapshot = SnapshotSorted();
         foreach (var item in snapshot)
         {
             if (frame.Stopped || frame.Interrupted)
             {
-                break; // 事件边界＝唯一检查点（in-flight 事件必跑完才停）
+                break;
             }
 
             frame.CurrentEventName = item.Name;
+            var before = item.SnapshotBefore();
+            var after = item.SnapshotAfter();
+            var replace = item.LastReplaceWrapper;
+
             try
             {
-                // 逻辑替换（moding）解析点：执行 handler 时动态解析「当前最后一个未注销的 moding 项」；
-                // 无 moding＝原逻辑；解析后即固定（执行期间的增删不打断本次已解析选择）。
-                var effectiveHandler = item.LastModing ?? item.Handler;
-                await effectiveHandler(view, ctx, ct);
+                frame.SeamExecutor = (seam, seamCt) => item.RunSeamAsync(view, ctx, seam, seamCt);
+
+                foreach (var wrapper in before)
+                {
+                    await wrapper(view, ctx, ct);
+                }
+
+                if (replace is not null)
+                {
+                    await replace(view, ctx, ct);
+                }
+                else
+                {
+                    await item.Handler(view, ctx, ct);
+                }
             }
             catch (OperationCanceledException)
             {
-                throw; // 取消类异常不隔离、穿透上抛（途经各层同此）
+                throw;
             }
             catch (Exception ex)
             {
-                // 异常隔离：记录并继续后续事件（已发生的 ctx 改写保留；隔离≠回滚）
-                frame.Stream.Write(
-                    LogEntryKind.Log,
-                    LogLevel.Error,
-                    ExecutionFrame.BuildSource(frame.TriggerLabel, item.Name),
-                    ex.Message,
-                    new[] { $"exception:{ex.GetType().Name}" },
-                    new Dictionary<string, object?>
-                    {
-                        ["exceptionType"] = ex.GetType().FullName,
-                        ["message"] = ex.Message,
-                    });
+                WriteEventFailure(frame, item.Name, ex);
+                continue;
+            }
+            finally
+            {
+                frame.SeamExecutor = null;
+            }
+
+            foreach (var wrapper in after)
+            {
+                try
+                {
+                    await wrapper(view, ctx, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    WriteEventFailure(frame, item.Name, ex);
+                }
             }
         }
+    }
+
+    private static void WriteEventFailure(ExecutionFrame frame, string eventName, Exception ex)
+    {
+        frame.Stream.Write(
+            LogEntryKind.Log,
+            LogLevel.Error,
+            ExecutionFrame.BuildSource(frame.TriggerLabel, eventName),
+            ex.Message,
+            new[] { $"exception:{ex.GetType().Name}" },
+            new Dictionary<string, object?>
+            {
+                ["exceptionType"] = ex.GetType().FullName,
+                ["message"] = ex.Message,
+            });
     }
 
     /// <summary>按事件注册序查找注册项；不存在＝null（已撤销/非本触发器句柄的静默判定依据）。</summary>
@@ -541,7 +619,14 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
         return index < 0 ? null : _events[index];
     }
 
-    private EventEntry AddEvent(string name, Func<TView, Context, CancellationToken, Task> handler, Enum? band, int priority, IEnumerable<string>? downstream = null)
+    private EventEntry AddEvent(
+        string name,
+        Func<TView, Context, CancellationToken, Task> handler,
+        Enum? band,
+        int priority,
+        IEnumerable<string>? downstream = null,
+        IEnumerable<string>? seams = null,
+        bool isDisposalSlot = false)
     {
         ArgumentNullException.ThrowIfNull(handler);
 
@@ -556,13 +641,47 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
                 nameof(priority), priority, $"事件内优先级须满足 0 ≤ 优先级 < {PriorityUpperBound}。");
         }
 
-        var bandValue = ResolveBandValue(band);
-        var entry = new EventEntry(name, handler, bandValue, priority, _seq++, ValidateDownstream(downstream));
+        var bandValue = isDisposalSlot ? 0 : ResolveBandValue(band);
+        var entry = new EventEntry(
+            name, handler, bandValue, priority, _seq++, ValidateDownstream(downstream),
+            ValidateSeams(seams), isDisposalSlot);
         _events.Add(entry);
         return entry;
     }
 
     /// <summary>downstream 声明校验与拷贝（S-C2；每项非空、非纯空白、不重复；null＝空）。</summary>
+    /// <summary>动作缝声明校验与拷贝：每项非空、非纯空白、不重复；null＝空。</summary>
+    private static string[] ValidateSeams(IEnumerable<string>? seams)
+    {
+        if (seams is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        var list = new List<string>();
+        foreach (var seam in seams)
+        {
+            if (seam is null)
+            {
+                throw new ArgumentException("seams 不能包含 null 元素。", nameof(seams));
+            }
+
+            if (string.IsNullOrWhiteSpace(seam))
+            {
+                throw new ArgumentException("seam 不能为空或纯空白字符串。", nameof(seams));
+            }
+
+            if (list.Contains(seam))
+            {
+                throw new ArgumentException($"seams 列表包含重复项 '{seam}'。", nameof(seams));
+            }
+
+            list.Add(seam);
+        }
+
+        return list.ToArray();
+    }
+
     private static string[] ValidateDownstream(IEnumerable<string>? downstream)
     {
         if (downstream is null)
@@ -679,7 +798,14 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
         var snapshot = _events.ToArray();
         Array.Sort(snapshot, static (a, b) =>
         {
-            var c = a.SortKey.CompareTo(b.SortKey);
+            // E-D1：保留槽单独成段、恒在普通事件之后（与 band 数值无关——位置不可被普通注册覆写）。
+            var c = a.IsDisposalSlot.CompareTo(b.IsDisposalSlot);
+            if (c != 0)
+            {
+                return c;
+            }
+
+            c = a.SortKey.CompareTo(b.SortKey);
             return c != 0 ? c : a.Seq.CompareTo(b.Seq);
         });
         return snapshot;
@@ -707,7 +833,10 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
 
     private sealed class EventEntry
     {
-        private readonly List<ModingEntry> _modings = new();
+        private readonly List<WrapperEntry> _beforeWrappers = new();
+        private readonly List<WrapperEntry> _afterWrappers = new();
+        private readonly List<WrapperEntry> _replaceWrappers = new();
+        private readonly Dictionary<string, SeamEntry> _seams;
 
         internal EventEntry(
             string name,
@@ -715,7 +844,9 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
             int bandValue,
             int priority,
             long seq,
-            string[] downstream)
+            string[] downstream,
+            string[] seams,
+            bool isDisposalSlot = false)
         {
             Name = name;
             Handler = handler;
@@ -723,6 +854,13 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
             Priority = priority;
             Seq = seq;
             Downstream = downstream;
+            IsDisposalSlot = isDisposalSlot;
+
+            _seams = new Dictionary<string, SeamEntry>(StringComparer.Ordinal);
+            foreach (var seam in seams)
+            {
+                _seams.Add(seam, new SeamEntry(seam));
+            }
         }
 
         internal string Name { get; }
@@ -732,8 +870,15 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
         /// <summary>声明的下游触发器稳定键（S-C2；空数组＝未声明）。</summary>
         internal string[] Downstream { get; }
 
+        /// <summary>是否位于保留槽（效果销毁 handler；恒在普通事件之后执行）。</summary>
+        internal bool IsDisposalSlot { get; }
+
         /// <summary>投影为只读审阅信息（S-C2；含当前 moding 项数）。</summary>
-        internal TriggerEventInfo ToInfo() => new(Name, BandValue, Priority, Seq, Downstream, _modings.Count);
+        internal TriggerEventInfo ToInfo() => new(
+            Name, BandValue, Priority, Seq, Downstream,
+            _beforeWrappers.Count + _afterWrappers.Count + _replaceWrappers.Count,
+            _beforeWrappers.Count, _afterWrappers.Count, _replaceWrappers.Count,
+            _seams.Count, SumSeamWrapperCount(), IsDisposalSlot);
 
         internal int BandValue { get; }
 
@@ -748,31 +893,126 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
         /// 当前生效的 moding（逻辑替换）逻辑：最后一个注册且未注销者；无＝null（回退原 handler）。
         /// 列表按 moding 注册序追加（尾＝最后注册者）；执行时点解析，不做注册期换绑。
         /// </summary>
-        internal Func<TView, Context, CancellationToken, Task>? LastModing
-            => _modings.Count == 0 ? null : _modings[^1].Handler;
+        /// <summary>是否声明了指定动作缝。</summary>
+        internal bool HasSeam(string seam) => _seams.ContainsKey(seam);
 
-        internal void AddModing(Func<TView, Context, CancellationToken, Task> handler, long seq)
-            => _modings.Add(new ModingEntry(handler, seq));
+        internal Func<TView, Context, CancellationToken, Task>? LastReplaceWrapper
+            => _replaceWrappers.Count == 0 ? null : _replaceWrappers[^1].Handler;
+
+        internal void AddWrapper(WrapperPhase phase, string? seam, Func<TView, Context, CancellationToken, Task> handler, long seq)
+            => AddWrapperCore(phase, seam, new WrapperEntry(handler, seq));
 
         /// <summary>按 moding 注册序移除一项；不存在＝false（幂等）。</summary>
-        internal bool RemoveModing(long seq)
+        private void AddWrapperCore(WrapperPhase phase, string? seam, WrapperEntry entry)
         {
-            var index = _modings.FindIndex(m => m.Seq == seq);
+            switch (phase)
+            {
+                case WrapperPhase.Before:
+                    if (seam is null)
+                    {
+                        _beforeWrappers.Add(entry);
+                    }
+                    else
+                    {
+                        _seams[seam].Add(entry);
+                    }
+
+                    break;
+
+                case WrapperPhase.After:
+                    _afterWrappers.Add(entry);
+                    break;
+
+                case WrapperPhase.Replace:
+                    _replaceWrappers.Add(entry);
+                    break;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(phase), phase, "未定义的包装器类别。");
+            }
+        }
+
+        internal bool RemoveWrapper(long seq)
+        {
+            if (RemoveFrom(_beforeWrappers, seq)
+                || RemoveFrom(_afterWrappers, seq)
+                || RemoveFrom(_replaceWrappers, seq))
+            {
+                return true;
+            }
+
+            foreach (var seam in _seams.Values)
+            {
+                if (seam.Remove(seq))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>清空全部 moding（注册项撤销时调用：moding 随之失效、避免悬空）。</summary>
+        internal void ClearWrappers()
+        {
+            _beforeWrappers.Clear();
+            _afterWrappers.Clear();
+            _replaceWrappers.Clear();
+            foreach (var seam in _seams.Values)
+            {
+                seam.Clear();
+            }
+        }
+
+        internal Func<TView, Context, CancellationToken, Task>[] SnapshotBefore()
+        {
+            var snapshot = _beforeWrappers.ToArray();
+            Array.Reverse(snapshot);
+            return Array.ConvertAll(snapshot, static w => w.Handler);
+        }
+
+        internal Func<TView, Context, CancellationToken, Task>[] SnapshotAfter()
+            => Array.ConvertAll(_afterWrappers.ToArray(), static w => w.Handler);
+
+        internal async Task RunSeamAsync(TView view, Context ctx, string seam, CancellationToken ct)
+        {
+            if (!_seams.TryGetValue(seam, out var entry))
+            {
+                throw new KeyNotFoundException($"动作缝 '{seam}' 未在注册项 '{Name}' 上声明（调用被拒绝）。");
+            }
+
+            foreach (var wrapper in entry.SnapshotBefore())
+            {
+                await wrapper(view, ctx, ct);
+            }
+        }
+
+        private int SumSeamWrapperCount()
+        {
+            var total = 0;
+            foreach (var seam in _seams.Values)
+            {
+                total += seam.Count;
+            }
+
+            return total;
+        }
+
+        private static bool RemoveFrom(List<WrapperEntry> list, long seq)
+        {
+            var index = list.FindIndex(w => w.Seq == seq);
             if (index < 0)
             {
                 return false;
             }
 
-            _modings.RemoveAt(index);
+            list.RemoveAt(index);
             return true;
         }
 
-        /// <summary>清空全部 moding（注册项撤销时调用：moding 随之失效、避免悬空）。</summary>
-        internal void ClearModings() => _modings.Clear();
-
-        private sealed class ModingEntry
+        private sealed class WrapperEntry
         {
-            internal ModingEntry(Func<TView, Context, CancellationToken, Task> handler, long seq)
+            internal WrapperEntry(Func<TView, Context, CancellationToken, Task> handler, long seq)
             {
                 Handler = handler;
                 Seq = seq;
@@ -780,8 +1020,45 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
 
             internal Func<TView, Context, CancellationToken, Task> Handler { get; }
 
-            /// <summary>moding 注册序（触发器内唯一，作 moding 项身份）。</summary>
+            /// <summary>包装器注册序（触发器内唯一，作包装器项身份）。</summary>
             internal long Seq { get; }
+        }
+
+        private sealed class SeamEntry
+        {
+            private readonly List<WrapperEntry> _wrappers = new();
+
+            internal SeamEntry(string name)
+            {
+                Name = name;
+            }
+
+            internal string Name { get; }
+
+            internal int Count => _wrappers.Count;
+
+            internal void Add(WrapperEntry entry) => _wrappers.Add(entry);
+
+            internal bool Remove(long seq)
+            {
+                var index = _wrappers.FindIndex(w => w.Seq == seq);
+                if (index < 0)
+                {
+                    return false;
+                }
+
+                _wrappers.RemoveAt(index);
+                return true;
+            }
+
+            internal void Clear() => _wrappers.Clear();
+
+            internal Func<TView, Context, CancellationToken, Task>[] SnapshotBefore()
+            {
+                var snapshot = _wrappers.ToArray();
+                Array.Reverse(snapshot);
+                return Array.ConvertAll(snapshot, static w => w.Handler);
+            }
         }
     }
 }
@@ -811,45 +1088,72 @@ public sealed class TriggerRegistration
 }
 
 /// <summary>
-/// moding（逻辑替换）注册句柄：<see cref="Trigger{TView}.RegisterModing"/> 成功时返回，
-/// 标识某注册项上的一条 moding 项，可用作 <see cref="Trigger{TView}.UnregisterModing"/> 的注销依据。
+/// moding（逻辑替换）注册句柄：<see cref="Trigger{TView}.RegisterReplaceWrapper"/> 成功时返回，
+/// 标识某注册项上的一条 moding 项，可用作 <see cref="Trigger{TView}.UnregisterWrapper"/> 的注销依据。
 /// 仅由注册面创建；不含可变状态。
 /// </summary>
-public sealed class TriggerModingRegistration
+/// <summary>
+/// 包装器注册句柄：标识某注册项（或某动作缝）上的一条包装器项，可用作 Trigger.UnregisterWrapper 的注销依据。
+/// 仅由注册面创建；不含可变状态。
+/// </summary>
+public sealed class TriggerWrapperRegistration
 {
-    internal TriggerModingRegistration(object triggerRef, long targetSeq, long modingSeq)
+    internal TriggerWrapperRegistration(
+        object triggerRef, long targetSeq, long wrapperSeq, WrapperPhase phase, string? seam)
     {
         TriggerRef = triggerRef;
         TargetSeq = targetSeq;
-        ModingSeq = modingSeq;
+        WrapperSeq = wrapperSeq;
+        Phase = phase;
+        Seam = seam;
     }
 
-    /// <summary>所属触发器引用（注销时按引用相等匹配；内部使用）。</summary>
     internal object TriggerRef { get; }
 
-    /// <summary>目标注册项的事件注册序（内部使用）。</summary>
     internal long TargetSeq { get; }
 
-    /// <summary>moding 注册序（触发器内唯一，作 moding 项身份；内部使用）。</summary>
-    internal long ModingSeq { get; }
+    internal long WrapperSeq { get; }
+
+    /// <summary>包装器类别（前置／后置／替换）。</summary>
+    public WrapperPhase Phase { get; }
+    /// <summary>动作缝名（仅前置挂到缝上时非 null）。</summary>
+    public string? Seam { get; }
+
 }
 
 /// <summary>
 /// 事件注册项的只读审阅信息（S-C2；审查链与枚举面用）：
-/// 事件名、band 值与 band 内优先级、注册序（句柄）、声明的下游触发器稳定键、当前 moding 项数。
+/// 事件名、band 值与 band 内优先级、注册序（句柄）、声明的下游触发器稳定键、包装器与动作缝计数。
 /// 不含 handler 委托本体（委托无稳定身份，身份＝(所属触发器 Id, <see cref="Seq"/>)）。
 /// </summary>
 public sealed class TriggerEventInfo
 {
     internal TriggerEventInfo(
-        string name, int bandValue, int priority, long seq, IReadOnlyList<string> downstream, int modingCount)
+        string name,
+        int bandValue,
+        int priority,
+        long seq,
+        IReadOnlyList<string> downstream,
+        int wrapperCount,
+        int beforeWrapperCount,
+        int afterWrapperCount,
+        int replaceWrapperCount,
+        int seamCount,
+        int seamWrapperCount,
+        bool isDisposalSlot = false)
     {
         Name = name;
         BandValue = bandValue;
         Priority = priority;
         Seq = seq;
         Downstream = downstream;
-        ModingCount = modingCount;
+        WrapperCount = wrapperCount;
+        BeforeWrapperCount = beforeWrapperCount;
+        AfterWrapperCount = afterWrapperCount;
+        ReplaceWrapperCount = replaceWrapperCount;
+        SeamCount = seamCount;
+        SeamWrapperCount = seamWrapperCount;
+        IsDisposalSlot = isDisposalSlot;
     }
 
     /// <summary>事件名（日志/定位用；不承担唯一键职责）。</summary>
@@ -868,7 +1172,26 @@ public sealed class TriggerEventInfo
     public IReadOnlyList<string> Downstream { get; }
 
     /// <summary>当前生效的 moding（逻辑替换）项数（0＝原逻辑）。</summary>
-    public int ModingCount { get; }
+    /// <summary>当前挂载的包装器总数（前置＋后置＋替换）。</summary>
+    public int WrapperCount { get; }
+
+    /// <summary>前置包装器数量。</summary>
+    public int BeforeWrapperCount { get; }
+
+    /// <summary>后置包装器数量。</summary>
+    public int AfterWrapperCount { get; }
+
+    /// <summary>替换包装器数量（&gt;0 时核心 handler 被最后一个替换）。</summary>
+    public int ReplaceWrapperCount { get; }
+
+    /// <summary>声明的动作缝数量。</summary>
+    public int SeamCount { get; }
+
+    /// <summary>全部动作缝上的前置包装器总数。</summary>
+    public int SeamWrapperCount { get; }
+
+    /// <summary>是否位于保留槽（效果销毁 handler；恒在普通事件之后执行）。</summary>
+    public bool IsDisposalSlot { get; }
 }
 
 /// <summary>
@@ -913,6 +1236,8 @@ internal sealed class ExecutionFrame
     /// <summary>当前正在执行的事件名（source 构成用；未进入事件时为 null）。</summary>
     internal string? CurrentEventName { get; set; }
 
+    internal Func<string, CancellationToken, Task>? SeamExecutor { get; set; }
+
     /// <summary>本级停止（Stop）标记。</summary>
     internal bool Stopped { get; set; }
 
@@ -937,6 +1262,17 @@ internal sealed class ExecutionFrame
             "执行被停止（Stop）：本级剩余事件不再执行。",
             new[] { "stop" },
             data: null);
+    }
+
+    /// <summary>静默停止（仅本级；不写事件流条目——disposing 守卫过滤专用）。</summary>
+    internal void RequestStopSilent()
+    {
+        if (_context is null)
+        {
+            return;
+        }
+
+        Stopped = true;
     }
 
     /// <summary>

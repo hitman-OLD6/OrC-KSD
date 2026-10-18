@@ -72,7 +72,7 @@ Action<IPluginRegistrationContext> Register = ctx =>
         Assert.Throws<InvalidOperationException>(() => context.RegisterJudicator("x", null!));
         Assert.Throws<InvalidOperationException>(() => context.RegisterAssetService("x", null!));
         Assert.Throws<InvalidOperationException>(() => context.RegisterHandler("x", null!));
-        Assert.Throws<InvalidOperationException>(() => context.DeclareModing(ModingTarget.Judicator, "x", null!));
+        Assert.Throws<InvalidOperationException>(() => context.DeclareReplaceWrapper(WrapperTarget.Judicator, "x", null!));
     }
 
     private const string WaitForId = "global";

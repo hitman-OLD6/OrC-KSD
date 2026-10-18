@@ -17,7 +17,7 @@ public class PackageActivationTests
         var package = Package("p1", PackageKind.Plugin, context =>
         {
             context.RegisterJudicator("test.j", new AddOne());
-            context.DeclareModing(ModingTarget.Judicator, "test.j", _ => [999]);
+            context.DeclareReplaceWrapper(WrapperTarget.Judicator, "test.j", _ => [999]);
         });
 
         var judicators = new JudicatorRegistry();
@@ -36,8 +36,8 @@ public class PackageActivationTests
         var package = Package("p1", PackageKind.Plugin, context =>
         {
             context.RegisterJudicator("test.j", new AddOne());
-            context.DeclareModing(ModingTarget.Judicator, "test.j", _ => [111]);
-            context.DeclareModing(ModingTarget.Judicator, "test.j", _ => [222]);
+            context.DeclareReplaceWrapper(WrapperTarget.Judicator, "test.j", _ => [111]);
+            context.DeclareReplaceWrapper(WrapperTarget.Judicator, "test.j", _ => [222]);
         });
 
         var judicators = new JudicatorRegistry();
@@ -82,7 +82,7 @@ public class PackageActivationTests
         var package = Package("p1", PackageKind.Plugin, context =>
         {
             context.RegisterJudicator("test.j", new AddOne());
-            context.DeclareModing(ModingTarget.Judicator, "test.j", _ => [999]);
+            context.DeclareReplaceWrapper(WrapperTarget.Judicator, "test.j", _ => [999]);
         });
         var snapshot = AssetCatalogSnapshot.FromPackages(new[] { package });
 

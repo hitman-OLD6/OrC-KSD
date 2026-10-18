@@ -194,11 +194,13 @@ public static class GameHooksJson
             ["Managers/ResourceManager.cs·ChangePointsAsync / GainPointsAsync / LosePointsAsync"], []),
     };
 
-    /// <summary>22 条判定器的权威描述表（与 03-hook定义 S3-3 对齐；E1-25 补齐 effect.target.resolve 缺口并追加资源五条；S2：目标候选合法性提入生产内置段）。</summary>
+    /// <summary>23 条判定器的权威描述表（与 03-hook定义 S3-3 对齐；E1-25 补齐 effect.target.resolve 缺口并追加资源五条；S2：目标候选合法性提入生产内置段；R4：回合归属准入）。</summary>
     private static IReadOnlyList<JudicatorEntry> JudicatorMetadata { get; } = new[]
     {
         new JudicatorEntry(GameHooks.JudicatorActionInput,
             ["Judicators/ActionInputJudicator.cs"], true),
+        new JudicatorEntry(GameHooks.JudicatorActionTurnOwner,
+            ["Judicators/ActionTurnOwnerJudicator.cs"], true),
         new JudicatorEntry(GameHooks.JudicatorCostCheck,
             ["Judicators/CostCheckJudicator.cs"], true),
         new JudicatorEntry(GameHooks.JudicatorCounterUse,

@@ -161,7 +161,11 @@ internal static class Program
             return;
         }
 
-        var outcome = step.Outcome is { } o ? $"{o.Status}{(o.FailureCode is null ? "" : "/" + o.FailureCode)}" : "n/a";
+        var outcome = step.Outcome is { } o
+            ? o.Failed
+                ? $"failed{(o.FailureMessage is null ? "" : "/" + o.FailureMessage)}"
+                : o.IsTargeting ? "targeting" : "completed"
+            : "n/a";
         Console.WriteLine($"[AI] {step.Kind} → {outcome}{(step.Note is null ? "" : "：" + step.Note)}");
     }
 

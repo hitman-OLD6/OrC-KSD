@@ -1,6 +1,5 @@
 using Orc.Cards;
 using Orc.Core;
-using Orc.Game.Board;
 using Orc.Game.Cards;
 using Orc.Game.Effects;
 using Orc.Game.Players;
@@ -8,15 +7,10 @@ using Orc.Game.Players;
 namespace Orc.Game.Judicators;
 
 /// <summary>
-/// 效果无头选靶判定器（效果运行期选择面）：把 <see cref="EffectSelector"/>（sel/side/zone/keyword/count）
-/// 求值为一组单位——**无头**（不排队、不等 UI 桥），供 csx handler 经 <see cref="EffectRuntime.SelectAsync"/> 调用。
-/// <para>形态＝「持有转发」：内部持有默认选择规则；moding 替换后整体更换（纯替换）。</para>
-/// <para>无状态：只读枚举战场；不持有对局状态。名称＝<see cref="JudicatorNames.EffectTargetResolve"/>。</para>
-/// <para>默认规则范围：side（friendly/enemy/both，按相对视角）＋ zone（frontline/support）＋ <b>unitType 过滤</b>
-/// ＋ keyword 过滤 ＋ sel/count；<c>random</c> 经对局随机服务<b>真随机</b>取样（不可用＝确定性取首个）。</para>
-/// <para>S2 加性（隐蔽机制·豁免剔除）：候选基底统一剔除「隐蔽」单位（R2——隐蔽单位无法被卡牌效果影响）；
-/// 剔除在候选收集层（all 结果集与 random 取样池同为剔除后集合——random 在剔除后池取样）；
-/// <c>self</c> 分支（视角卡自身/自指效果）不受剔除影响（既有语义保持）；本判定器不设请求级覆盖。</para>
+/// 效果无头选靶判定器（效果运行期选择面）：把 <see cref="EffectSelector"/> 求值为一组单位——**无头**（不排队、不等 UI 桥）。
+/// <para>形态＝「转发」：候选集合经目标候选名单判定器（<see cref="JudicatorNames.TargetCandidateEligibility"/>）产出
+/// （单真源——不复制过滤逻辑）；本判定器只负责 <c>sel/count/random</c> 的取样语义。</para>
+/// <para>无状态：只读枚举；不持有对局状态。名称＝<see cref="JudicatorNames.EffectTargetResolve"/>。</para>
 /// </summary>
 public sealed class EffectTargetResolveJudicator : Judicator<EffectTargetResolveJudicator.ResolveRule>
 {
@@ -28,16 +22,16 @@ public sealed class EffectTargetResolveJudicator : Judicator<EffectTargetResolve
 
     private readonly ResolveRule _rule;
 
-    /// <summary>创建判定器（持有默认选择规则——「持有转发」形态）。</summary>
-    /// <param name="battlefield">战场（枚举来源）。</param>
+    /// <summary>创建判定器（候选来源＝目标候选名单判定器）。</summary>
+    /// <param name="candidateList">候选名单提供面（名单判定器条目调用）。</param>
     /// <param name="randomServiceProvider">对局随机服务解析器（random 取样；缺省＝确定性取首个）。</param>
-    /// <exception cref="ArgumentNullException">battlefield 为 null。</exception>
+    /// <exception cref="ArgumentNullException">candidateList 为 null。</exception>
     public EffectTargetResolveJudicator(
-        Battlefield battlefield,
+        Func<Card, EffectSelector, IReadOnlyList<Ref<Entity>>> candidateList,
         Func<Card, MatchRandomService?>? randomServiceProvider = null)
     {
-        ArgumentNullException.ThrowIfNull(battlefield);
-        _rule = (viewer, selector) => DefaultRule(battlefield, viewer, selector, randomServiceProvider);
+        ArgumentNullException.ThrowIfNull(candidateList);
+        _rule = (viewer, selector) => Resolve(candidateList, randomServiceProvider, viewer, selector);
     }
 
     /// <inheritdoc />
@@ -47,63 +41,32 @@ public sealed class EffectTargetResolveJudicator : Judicator<EffectTargetResolve
     /// <inheritdoc />
     public override object[]? Invoke(object[]? args) => Adapt(_rule)(args);
 
-    private static IReadOnlyList<Card> DefaultRule(
-        Battlefield battlefield,
+    private static IReadOnlyList<Card> Resolve(
+        Func<Card, EffectSelector, IReadOnlyList<Ref<Entity>>> candidateList,
+        Func<Card, MatchRandomService?>? randomServiceProvider,
         Card viewer,
-        EffectSelector selector,
-        Func<Card, MatchRandomService?>? randomServiceProvider)
+        EffectSelector selector)
     {
-        ArgumentNullException.ThrowIfNull(battlefield);
         ArgumentNullException.ThrowIfNull(viewer);
         ArgumentNullException.ThrowIfNull(selector);
 
-        // E1-41：`self` ＝**视角卡自身**（自指效果——中文卡面省略主语时即"本单位"）。
-        // 修前无本分支 ⇒ `sel` 无目标时按 `one` 取"第一个单位"（A 支援线→B 支援线→前线），**打错人**。
-        if (string.Equals(selector.Sel, "self", StringComparison.Ordinal))
+        var references = candidateList(viewer, selector);
+        var cards = new List<Card>(references.Count);
+        foreach (var reference in references)
         {
-            return new[] { viewer };
-        }
-
-        var viewerOwner = OwnerOf(viewer);
-        var lines = SelectLines(battlefield, selector.Zone);
-
-        var candidates = new List<Card>();
-        foreach (var line in lines)
-        {
-            foreach (var slot in line)
+            if (reference.IsAlive && reference.Value is Card card)
             {
-                if (slot.Occupant is Hq hq && selector.Zone == "hq"
-                    && (selector.Side is null or "both" or "any"
-                        || viewerOwner is null
-                        || (selector.Side == "friendly" && hq.Owner.Index == viewerOwner.Index)
-                        || (selector.Side == "enemy" && hq.Owner.Index != viewerOwner.Index))
-                    && selector.UnitType is null && selector.Threshold is null
-                    && (string.IsNullOrWhiteSpace(selector.Keyword) || hq.Keywords.Has(selector.Keyword)))
-                {
-                    candidates.Add(hq);
-                    continue;
-                }
-                if (selector.Zone == "hq" || slot.Occupant is not UnitCard unit
-                    || !MatchesSide(unit, selector.Side, viewerOwner)
-                    || !MatchesUnitType(unit, selector.UnitType)
-                    || !MatchesKeyword(unit, selector.Keyword)
-                    || !MatchesThreshold(unit, selector.Threshold)
-                    || CovertRules.IsCovert(unit)) // S2：隐蔽剔除（全模式候选基底统一——all 结果集与 random 取样池；self 分支不受影响）
-                {
-                    continue;
-                }
-
-                candidates.Add(unit);
+                cards.Add(card);
             }
         }
 
-        if (selector.Sel == "all")
+        if (selector.Sel is "all" or "self")
         {
-            return candidates;
+            return cards;
         }
 
         var take = selector.Count is { } explicitCount && explicitCount > 0 ? explicitCount : 1;
-        take = Math.Min(take, candidates.Count);
+        take = Math.Min(take, cards.Count);
         if (take <= 0)
         {
             return Array.Empty<Card>();
@@ -114,106 +77,10 @@ public sealed class EffectTargetResolveJudicator : Judicator<EffectTargetResolve
             var random = randomServiceProvider?.Invoke(viewer);
             if (random is not null)
             {
-                return random.PickN(candidates, take);
+                return random.PickN(cards, take);
             }
         }
 
-        return candidates.GetRange(0, take);
+        return cards.GetRange(0, take);
     }
-
-    private static IEnumerable<BattleLine> SelectLines(Battlefield battlefield, string? zone)
-    {
-        if (zone is null or "support" or "hq")
-        {
-            yield return battlefield.PlayerASupportLine;
-            yield return battlefield.PlayerBSupportLine;
-        }
-
-        if (zone is null or "frontline")
-        {
-            yield return battlefield.FrontLine;
-        }
-    }
-
-    private static bool MatchesSide(UnitCard unit, string? side, Player? viewerOwner)
-    {
-        if (side is null or "both" or "any")
-        {
-            return true;
-        }
-
-        if (viewerOwner is null)
-        {
-            return true;
-        }
-
-        var unitIndex = unit.Owner?.Index;
-        return side switch
-        {
-            "friendly" => unitIndex == viewerOwner.Index,
-            "enemy" => unitIndex is { } index && index != viewerOwner.Index,
-            _ => true,
-        };
-    }
-
-    /// <summary>
-    /// **目标阈值过滤**（E1-57）：按目标卡**有效值**判定 `字段 算子 取值`（未知字段/算子 ⇒ 不匹配）。
-    /// </summary>
-    private static bool MatchesThreshold(UnitCard unit, EffectThreshold? threshold)
-    {
-        if (threshold is null)
-        {
-            return true;
-        }
-
-        var field = threshold.Field switch
-        {
-            "attack" => CardStatFields.Attack,
-            "defense" => CardStatFields.Defense,
-            "opCost" => CardStatFields.OperateCost,
-            "deployCost" => CardStatFields.DeployCost,
-            _ => null,
-        };
-        if (field is null)
-        {
-            return false;
-        }
-
-        var value = unit.Modifiers.GetEffectiveValue(field);
-        return threshold.Op switch
-        {
-            "gte" => value >= threshold.Value,
-            "lte" => value <= threshold.Value,
-            "gt" => value > threshold.Value,
-            "lt" => value < threshold.Value,
-            "eq" => value == threshold.Value,
-            _ => false,
-        };
-    }
-
-    private static bool MatchesKeyword(UnitCard unit, string? keyword) =>
-        string.IsNullOrWhiteSpace(keyword) || unit.Keywords.Has(keyword);
-
-    /// <summary>兵种过滤：选择器给的是词表键（如 <c>infantry</c>），按 <see cref="UnitType"/> 标识归一后比对单位类型清单。</summary>
-    private static bool MatchesUnitType(UnitCard unit, string? unitType)
-    {
-        if (string.IsNullOrWhiteSpace(unitType))
-        {
-            return true;
-        }
-
-        if (!UnitType.TryNormalize(unitType, out var parsed))
-        {
-            return false; // 未知兵种词：不匹配（保守——不静默放行）
-        }
-
-        return unit.GetData<UnitStateData>().UnitTypes.Contains(parsed);
-    }
-
-    private static Player? OwnerOf(Card card) => card switch
-    {
-        Hq hq => hq.Owner,
-        CardBase cardBase => cardBase.Owner,
-        _ => null,
-    };
 }

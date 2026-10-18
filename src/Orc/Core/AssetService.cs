@@ -178,10 +178,10 @@ public sealed class AssetServiceRegistration : ServiceRegistration<AssetService>
 }
 
 /// <summary>资产服务 moding 注册句柄（注销凭据）。</summary>
-public sealed class AssetServiceModingRegistration : ServiceModingRegistration<AssetService>
+public sealed class AssetServiceWrapperRegistration : ServiceWrapperRegistration<AssetService>
 {
-    internal AssetServiceModingRegistration(ServiceEntry<AssetService> target, long modingSeq)
-        : base(target, modingSeq)
+    internal AssetServiceWrapperRegistration(ServiceEntry<AssetService> target, long wrapperSeq)
+        : base(target, wrapperSeq)
     {
     }
 }
@@ -189,7 +189,7 @@ public sealed class AssetServiceModingRegistration : ServiceModingRegistration<A
 /// <summary>
 /// 资产服务注册表（对局级；与 <c>JudicatorRegistry</c> **并列、机制共用、名字域独立**）。
 /// </summary>
-public sealed class AssetServiceRegistry : ServiceRegistry<AssetService, AssetServiceRegistration, AssetServiceModingRegistration>
+public sealed class AssetServiceRegistry : ServiceRegistry<AssetService, AssetServiceRegistration, AssetServiceWrapperRegistration>
 {
     /// <summary>注册一枚资产服务条目（重复注册拒绝）。</summary>
     public AssetServiceRegistration Register(string name, AssetService service) => RegisterCore(name, service);
@@ -201,6 +201,6 @@ public sealed class AssetServiceRegistry : ServiceRegistry<AssetService, AssetSe
     protected override AssetServiceRegistration CreateHandle(ServiceEntry<AssetService> entry) => new(entry);
 
     /// <inheritdoc />
-    protected override AssetServiceModingRegistration CreateModingHandle(ServiceEntry<AssetService> entry, long modingSeq)
-        => new(entry, modingSeq);
+    protected override AssetServiceWrapperRegistration CreateWrapperHandle(ServiceEntry<AssetService> entry, long wrapperSeq)
+        => new(entry, wrapperSeq);
 }

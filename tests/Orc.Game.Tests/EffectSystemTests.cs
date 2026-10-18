@@ -63,8 +63,8 @@ public class EffectSystemTests
         Assert.Same(effect, Assert.Single(demo.Effects));
         Assert.True(Assert.Single(mountedAtBroadcast));
 
-        // 被动效果挂总线（主触发器＝生命周期触发器挂载于 effect.removed）
-        Assert.Contains(effect.Name, match.Engine.Bus.GetSubscribers(Updates.EffectRemoved));
+        // 被动效果挂总线（E-D1：disposing 触发器挂载于 card.destroyed 兜底）
+        Assert.Contains($"{effect.Name}/dispose", match.Engine.Bus.GetSubscribers(Updates.CardDestroyed));
     }
 
     [Fact]
@@ -279,8 +279,8 @@ public class EffectSystemTests
             e => e.Keywords.Contains("exception:InvalidOperationException") && e.Keywords.Contains("失败效果"));
 
         // 监听注册全部回退：失败效果主触发器未挂总线；注入的 handler 被撤销（真实流程驱动不执行）
-        Assert.DoesNotContain("失败效果", match.Engine.Bus.GetSubscribers(Updates.EffectRemoved));
-        Assert.Contains("顺常效果一", match.Engine.Bus.GetSubscribers(Updates.EffectRemoved));
+        Assert.DoesNotContain("失败效果/dispose", match.Engine.Bus.GetSubscribers(Updates.CardDestroyed));
+        Assert.Contains("顺常效果一/dispose", match.Engine.Bus.GetSubscribers(Updates.CardDestroyed));
         var (source, target) = CreateFlowCards(match.Engine);
         await match.Engine.AttackFlow.ExecuteAsync(source, target, 1);
         Assert.Equal(0, fail.HandlerCalls);

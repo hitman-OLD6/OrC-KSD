@@ -60,9 +60,33 @@ public abstract class Judicator : IUnifiedService
 /// 主方法覆写可复用本适配（如 Invoke ⇒ Adapt(默认逻辑)(载荷)），亦可自行书写——等价。
 /// </summary>
 /// <typeparam name="TDelegate">子类声明的强类型 delegate（该判定器的签名）。</typeparam>
-public abstract class Judicator<TDelegate> : Judicator, IStrongTypedService<TDelegate>
+public abstract class Judicator<TDelegate> : Judicator, IStrongTypedService<TDelegate>, IServiceSignature
     where TDelegate : Delegate
 {
+    private static readonly (Type[] Parameters, Type Return) Signature = ReadSignature();
+
+    /// <summary>强类型 delegate 的参数类型（包装器严格校验用）。</summary>
+    IReadOnlyList<Type> IServiceSignature.ParameterTypes => Signature.Parameters;
+
+    /// <summary>强类型 delegate 的返回类型（包装器严格校验用）。</summary>
+    Type IServiceSignature.ReturnType => Signature.Return;
+
+    private static (Type[] Parameters, Type Return) ReadSignature()
+    {
+        var invoke = typeof(TDelegate).GetMethod("Invoke")
+            ?? throw new InvalidOperationException(
+                $"强类型判定器 delegate '{typeof(TDelegate).Name}' 缺少 Invoke 方法（签名不可读）。");
+
+        var parameters = invoke.GetParameters();
+        var types = new Type[parameters.Length];
+        for (var i = 0; i < parameters.Length; i++)
+        {
+            types[i] = parameters[i].ParameterType;
+        }
+
+        return (types, invoke.ReturnType);
+    }
+
     /// <summary>
     /// 把强类型 delegate（该判定器签名的替换逻辑）适配为统一签名（拆包→强类型调用→组包）；子类实现。
     /// 适配错误（如载荷与强类型参数不符）＝fail-fast 族：明确失败、不静默容忍。

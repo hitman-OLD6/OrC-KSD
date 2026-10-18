@@ -181,6 +181,7 @@ public sealed class OrchestrationManager
             {
                 var host = $"效果:{effect.Name}@{card.Name}";
                 Consider(effect.MainTrigger, "effect", host);
+                Consider(effect.DisposalTriggerMetadata, "dispose", host); // E-D1：销毁触发器与主触发器并列进入审查图
 
                 foreach (var injection in effect.Injections)
                 {

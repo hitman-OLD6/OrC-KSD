@@ -352,11 +352,11 @@ public class PrefabRoundTripTests
             AssertTriggerEqual(expected.OtherTriggers[i], actual.OtherTriggers[i]);
         }
 
-        Assert.Equal(expected.Modings.Count, actual.Modings.Count);
-        for (var i = 0; i < expected.Modings.Count; i++)
+        Assert.Equal(expected.Wrappers.Count, actual.Wrappers.Count);
+        for (var i = 0; i < expected.Wrappers.Count; i++)
         {
-            Assert.Equal(expected.Modings[i].TargetEventId, actual.Modings[i].TargetEventId);
-            AssertEventEqual(expected.Modings[i].Replacement, actual.Modings[i].Replacement);
+            Assert.Equal(expected.Wrappers[i].TargetEventId, actual.Wrappers[i].TargetEventId);
+            AssertEventEqual(expected.Wrappers[i].Handler, actual.Wrappers[i].Handler);
         }
 
         Assert.Equal(expected.Injects.Count, actual.Injects.Count);
@@ -450,9 +450,9 @@ public class PrefabRoundTripTests
                     hooks: new[] { "turn.start" },
                     events: new[] { new EventPrefab("e2", assemblyKey: id + ".extra") }),
             },
-            modings: new[]
+            wrappers: new[]
             {
-                new ModingPrefab("e1", new EventPrefab("m1", csxSource: SampleCsxHandler)),
+                new WrapperPrefab("replace", "e1", null, new EventPrefab("m1", csxSource: SampleCsxHandler)),
             },
             injects: new[]
             {
@@ -477,9 +477,9 @@ public class PrefabRoundTripTests
                     hooks: new[] { "turn.start" },
                     events: new[] { new EventPrefab("e2", csxSource: SampleCsxHandler) }),
             },
-            modings: new[]
+            wrappers: new[]
             {
-                new ModingPrefab("e1", new EventPrefab("m1", assemblyKey: id + ".moding")),
+                new WrapperPrefab("replace", "e1", null, new EventPrefab("m1", assemblyKey: id + ".moding")),
             },
             injects: new[]
             {

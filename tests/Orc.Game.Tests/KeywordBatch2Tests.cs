@@ -278,10 +278,10 @@ public class KeywordBatch2Tests
         Assert.Empty(unit.Effects);
         Assert.Equal(1, TrackingEffect.UnmountedCount);
 
-        // 断言 4：防御复位（清空修饰器后上限 5 ＞ 当前 1 → 复位至上限、损伤清零）。
+        // 断言 4：抑制只重置上限（清修饰器后上限 5）；损伤量不碰（4）→ 当前值 5−4=1（不回血）。
         Assert.Equal(5, unit.GetEffectiveDefenseCap());
-        Assert.Equal(5, DefenseOf(unit));
-        Assert.Equal(0, unit.GetData<UnitStateData>().DefenseLoss);
+        Assert.Equal(1, DefenseOf(unit));
+        Assert.Equal(4, unit.GetData<UnitStateData>().DefenseLoss);
 
         // 断言 5：攻击力＝清空修饰器后的自然回落。
         Assert.Equal(2, AttackOf(unit));

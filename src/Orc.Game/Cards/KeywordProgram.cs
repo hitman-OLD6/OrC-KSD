@@ -26,15 +26,15 @@ public sealed record KeywordProgram
     {
         if(Schema!=1||DefaultValue is <0 or >10000||State is null||State.Count>64||Rules is null||Rules.Length>64||Handlers is null||Handlers.Length>64||Skills is null||Skills.Length>16)throw new InvalidDataException("词条程序结构或数量无效");
         foreach(var name in State.Keys)if(!ValidName(name))throw new InvalidDataException("状态名须使用字母、数字、下划线或点");
-        foreach(var r in Rules){if(r is null||!RuleNames.Contains(r.Rule)||r.When is null||!new[]{"self","linked","pair","friendly","enemy","all"}.Contains(r.Scope))throw new InvalidDataException("未知规则点或作用范围");Conditions(r.When);Number(r.Value);}
+        foreach(var r in Rules){if(r is null||!RuleNames.Contains(r.Rule)||r.When is null||!new[]{"self","linked","pair","friendly","enemy","all"}.Contains(r.Scope))throw new InvalidDataException("未知规则点或作用范围");if(r.Source is not("any" or "command" or "unit-effect"))throw new InvalidDataException("未知来源类型");Conditions(r.When);Number(r.Value);}
         foreach(var h in Handlers){if(h is null||!EventNames.Contains(h.Event)||!Subjects.Contains(h.Subject)||h.When is null||h.Actions is null)throw new InvalidDataException("未知事件或监听对象");Conditions(h.When);Actions(h.Actions,0);}
         if(Skills.Select(s=>s.Id).Distinct().Count()!=Skills.Length)throw new InvalidDataException("主动技能编号重复");
         foreach(var s in Skills){if(s is null||!ValidName(s.Id)||string.IsNullOrWhiteSpace(s.Name)||s.Name.Length>40||s.When is null||s.Actions is null)throw new InvalidDataException("主动技能字段无效");Number(s.Cost);Conditions(s.When);Actions(s.Actions,0);}
     }
-    public static readonly string[] RuleNames=["move.allowed","move.retreat","attack.allowed","combat.range","combat.counter.eligibility","combat.guard.eligibility","combat.interception","combat.ambush.condition","deploy.frontline","attack.limit"];
+    public static readonly string[] RuleNames=["move.allowed","move.retreat","attack.allowed","combat.range","combat.counter.eligibility","combat.guard.eligibility","combat.interception","combat.ambush.condition","deploy.frontline","attack.limit","targeting.forbid"];
     public static readonly string[] EventNames=["unit.acted","turn.start.before","turn.end.before","card.played","unit.deployed","unit.joined","card.placed","turn.start","turn.end","card.damaged","card.dying","card.leaving","unit.attack.before","unit.attack.after","unit.destroy.before","keyword.ready","keyword.consumed"];
     public static readonly string[] Subjects=["self","friendly","enemy","any","owner","opponent"];
-    public static readonly string[] Operations=["state.set","state.add","capture","link","unlink","move.set","attack.set","attack","replace","retreat","damage","buff","stat.add","stat.set","heal","kill","keyword.grant","keyword.remove","emit","death.cancel","health.set","copy.hand","return.hand","create.hand","develop","move","draw","points","attach.prefab","if"];
+    public static readonly string[] Operations=["state.set","state.add","capture","link","unlink","move.set","attack.set","attack","replace","retreat","damage","buff","stat.add","stat.set","heal","kill","keyword.grant","keyword.remove","emit","death.cancel","health.set","copy.hand","return.hand","create.hand","develop","move","draw","points","attach.prefab","targeting.forbid","targeting.allow","if"];
     public static readonly string[] Targets=["self","event","linked","attack.target","enemy.hq","friendly.hq","enemy.units","friendly.units","enemy.frontline","friendly.frontline","random.enemy.frontline","choose.unit","choose.enemy.unit","choose.friendly.unit"];
     private static bool ValidName(string? s)=>!string.IsNullOrEmpty(s)&&s.Length<=64&&s.All(c=>char.IsLetterOrDigit(c)||c is '_' or '.' or '-');
     private void Number(string s)
@@ -54,6 +54,7 @@ public sealed record KeywordProgram
             if(a.Op.StartsWith("state.",StringComparison.Ordinal)&&!State.ContainsKey(a.Key))throw new InvalidDataException("未声明状态："+a.Key);
             if(a.Op=="emit"&&a.Key is not("keyword.ready" or "keyword.consumed"))throw new InvalidDataException("不允许伪造引擎事件");
             if(a.Op is "keyword.grant" or "create.hand" or "attach.prefab"&&string.IsNullOrWhiteSpace(a.Key))throw new InvalidDataException("请填写引用编号");
+            if(a.Op is "targeting.forbid" or "targeting.allow"&&a.Key is not("any" or "command" or "unit-effect"))throw new InvalidDataException("请选择有效的来源类型");
         }
     }
 }
@@ -65,6 +66,8 @@ public sealed record KeywordRulePatch
     public string Value {get;init;}="0";
     public int Priority {get;init;}
     public KeywordCondition[] When {get;init;}=[];
+    /// <summary>来源卡类型限定（仅 targeting.forbid 使用）：command / unit-effect / any（缺省 any）。</summary>
+    public string Source {get;init;}="any";
 }
 public sealed record KeywordEventHandler
 {

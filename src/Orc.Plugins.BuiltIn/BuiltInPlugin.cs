@@ -4,6 +4,7 @@ using Orc.Game.Cards;
 using Orc.Game.Cards.Data;
 using Orc.Game.Cards.Data.Components;
 using Orc.Game.Judicators;
+using Orc.Game.Players;
 using Orc.Game.Plugins;
 using Orc.Game.Triggers;
 using Orc.Packages;
@@ -27,9 +28,16 @@ public static class BuiltInPlugin
         var match = context.Match
             ?? throw new InvalidOperationException("内置插件需要对局服务面（IMatchServices）。");
 
+        // ---------- R4：回合归属准入（打牌/移动攻击/反制三处同源） ----------
+        var turnOwnerEntry = context.RegisterJudicator(
+            JudicatorNames.ActionTurnOwner,
+            new ActionTurnOwnerJudicator(() => match.CurrentPlayer));
+        bool TurnOwner(Player player) =>
+            CombatJudicatorInvoker.InvokeBool(turnOwnerEntry, player.Index, new object[] { player });
+
         // ---------- J2：验证判定器（费用/反制） ----------
         context.RegisterJudicator(JudicatorNames.CostCheck, new CostCheckJudicator());
-        context.RegisterJudicator(JudicatorNames.CounterUse, new CounterUseJudicator());
+        context.RegisterJudicator(JudicatorNames.CounterUse, new CounterUseJudicator(TurnOwner));
 
         // ---------- K1：交战合法性判定族（组合器 ＋ 三条子规则） ----------
         var combatRange = new CombatRangeJudicator(match.Battlefield, owner => match.EnemyOf(owner));
@@ -67,10 +75,10 @@ public static class BuiltInPlugin
         // ---------- K3：复验消重（共享 leg 条目 ＋ 推进前置 ＋ 复验两条） ----------
         var moveLegEligibilityEntry = context.RegisterJudicator(
             JudicatorNames.MoveLegEligibility,
-            new LegEligibilityJudicator(() => match.CurrentPlayer, match.Battlefield, isMove: true));
+            new LegEligibilityJudicator(() => match.CurrentPlayer, match.Battlefield, isMove: true, TurnOwner));
         var attackLegEligibilityEntry = context.RegisterJudicator(
             JudicatorNames.AttackLegEligibility,
-            new LegEligibilityJudicator(() => match.CurrentPlayer, battlefield: null, isMove: false));
+            new LegEligibilityJudicator(() => match.CurrentPlayer, battlefield: null, isMove: false, TurnOwner));
         var moveFrontlineEnemyEntry = context.RegisterJudicator(
             JudicatorNames.MoveFrontlineEnemy,
             new MoveFrontlineEnemyJudicator(match.Battlefield, owner => match.EnemyOf(owner)));
@@ -84,12 +92,28 @@ public static class BuiltInPlugin
             unit => LegJudicatorInvoker.InvokeLeg(attackLegEligibilityEntry, unit, null),
             (attacker, targetRef) => match.IsAttackTargetLegal(attacker, targetRef)));
 
-        // ---------- S2/E1：目标候选合法性 ＋ 效果无头选靶 ----------
-        context.RegisterJudicator(JudicatorNames.TargetCandidateEligibility, new TargetEligibilityJudicator());
+        // ---------- S2/E1：目标候选名单 ＋ 效果无头选靶 ----------
+        // 名单判定器＝候选单真源；无头选靶经条目句柄转发（不复制过滤逻辑）。
+        var targetCandidateListEntry = context.RegisterJudicator(
+            JudicatorNames.TargetCandidateEligibility,
+            new TargetEligibilityJudicator(match.Battlefield));
         context.RegisterJudicator(
             JudicatorNames.EffectTargetResolve,
             new EffectTargetResolveJudicator(
-                match.Battlefield,
+                (viewer, selector) =>
+                {
+                    var ownerIndex = viewer switch
+                    {
+                        Hq hq => hq.Owner?.Index,
+                        CardBase card => card.Owner?.Index,
+                        _ => (int?)null,
+                    };
+                    var raw = targetCandidateListEntry.Invoke(new object[] { viewer, selector }, ownerIndex);
+                    return raw is { Length: 1 } && raw[0] is IReadOnlyList<Ref<Entity>> list
+                        ? list
+                        : throw new InvalidOperationException(
+                            $"判定器 '{JudicatorNames.TargetCandidateEligibility}' 输出契约不符：期望候选名单（fail-fast）。");
+                },
                 card => MatchRandomService.ResolveFor(card)));
 
         // ---------- E1-25：资源判定器（槽递增/包裹 ＋ 点数包裹） ----------
@@ -107,7 +131,7 @@ public static class BuiltInPlugin
     /// </summary>
     private static void DeclareKeywordRule(IMatchPluginContext context, string name, Judicator baseline)
     {
-        context.DeclareModing(ModingTarget.Judicator, name, args =>
+        context.DeclareReplaceWrapper(WrapperTarget.Judicator, name, args =>
         {
             var value = baseline.Invoke(args) is { Length: 1 } raw && raw[0] is bool flag
                 ? flag

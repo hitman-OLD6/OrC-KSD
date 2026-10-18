@@ -127,6 +127,14 @@ public sealed class LogicEngine
     /// </summary>
     public EngineReferences References { get; } = new();
 
+    /// <summary>
+    /// 引擎共享变量表（引擎实例级＝对局级）：跨效果/跨卡牌的 key→object 数据袋。
+    /// 与 <see cref="References"/> 并列且互不干扰——key 为自由字符串，值为任意对象（引用共享），
+    /// 不进快照、不发事件流、不参与回滚。供效果保存自身生命周期之外的数据
+    /// （如"所有友方已摧毁单位"的累积列表）；多引擎实例各自独立，随引擎实例丢弃而清空。
+    /// </summary>
+    public EngineVariables Variables { get; } = new();
+
     /// <summary>登记卡牌（S5；卡牌构造时调用；内部使用）。</summary>
     internal void RegisterCard(Card card)
     {

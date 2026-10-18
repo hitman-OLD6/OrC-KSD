@@ -268,7 +268,7 @@ public class JudicatorCombatLegalityTests
 
         // 单点改写子规则 C2（combat.range→恒真）：组合器「范围」环节经条目句柄消费——编排同步改判；
         // 候选链与复验链（共用同一 C1 条目）两链同步生效。
-        var moding = match.Judicators.RegisterModing(
+        var moding = match.Judicators.RegisterReplaceWrapper(
             match.Judicators.Resolve(JudicatorNames.CombatRange),
             _ => new object[] { true });
         Assert.NotNull(moding);
@@ -278,7 +278,7 @@ public class JudicatorCombatLegalityTests
         Assert.True(attackTrigger.Validate(refs));
 
         // 注销回退：两链同步回退默认（范围限制恢复）。
-        Assert.True(match.Judicators.UnregisterModing(moding!));
+        Assert.True(match.Judicators.UnregisterWrapper(moding!));
         var restored = match.CommandManager.GetCommandAvailability(attacker);
         Assert.DoesNotContain(enemyOnSupport.Ref, restored.Attack.Candidates);
         Assert.False(attackTrigger.Validate(refs));
@@ -305,7 +305,7 @@ public class JudicatorCombatLegalityTests
         Assert.False(attackTrigger.Validate(refs));
 
         // 单点改写 C3（combat.guard.eligibility→恒真）：组合器「守护资格」环节经条目句柄消费——穿透生效。
-        var moding = match.Judicators.RegisterModing(
+        var moding = match.Judicators.RegisterReplaceWrapper(
             match.Judicators.Resolve(JudicatorNames.CombatGuardEligibility),
             _ => new object[] { true });
         Assert.NotNull(moding);
@@ -313,7 +313,7 @@ public class JudicatorCombatLegalityTests
         Assert.True(attackTrigger.Validate(refs));
 
         // 注销回退。
-        Assert.True(match.Judicators.UnregisterModing(moding!));
+        Assert.True(match.Judicators.UnregisterWrapper(moding!));
         Assert.DoesNotContain(guarded.Ref, match.CommandManager.GetCommandAvailability(infantry).Attack.Candidates);
         Assert.False(attackTrigger.Validate(refs));
     }
@@ -340,7 +340,7 @@ public class JudicatorCombatLegalityTests
         Assert.False(attackTrigger.Validate(refs));
 
         // 单点改写 C4（combat.interception→恒假）：拦截解除（组合器「拦截」环节经条目句柄消费）。
-        var moding = match.Judicators.RegisterModing(
+        var moding = match.Judicators.RegisterReplaceWrapper(
             match.Judicators.Resolve(JudicatorNames.CombatInterception),
             _ => new object[] { false });
         Assert.NotNull(moding);
@@ -348,7 +348,7 @@ public class JudicatorCombatLegalityTests
         Assert.True(attackTrigger.Validate(refs));
 
         // 注销回退。
-        Assert.True(match.Judicators.UnregisterModing(moding!));
+        Assert.True(match.Judicators.UnregisterWrapper(moding!));
         Assert.DoesNotContain(enemyInfantry.Ref, match.CommandManager.GetCommandAvailability(bomber).Attack.Candidates);
         Assert.False(attackTrigger.Validate(refs));
     }
@@ -371,14 +371,14 @@ public class JudicatorCombatLegalityTests
         Assert.False(attackTrigger.Validate(refs));
 
         // 改写 C1 整体（恒真）：候选链与复验链同步受改写（共用同一条目——无独立副本）。
-        var moding = match.Judicators.RegisterModing(
+        var moding = match.Judicators.RegisterReplaceWrapper(
             match.Judicators.Resolve(JudicatorNames.CombatTargetLegal),
             _ => new object[] { true });
         Assert.NotNull(moding);
         Assert.Contains(enemyOnSupport.Ref, match.CommandManager.GetCommandAvailability(attacker).Attack.Candidates);
         Assert.True(attackTrigger.Validate(refs));
 
-        Assert.True(match.Judicators.UnregisterModing(moding!));
+        Assert.True(match.Judicators.UnregisterWrapper(moding!));
         Assert.DoesNotContain(enemyOnSupport.Ref, match.CommandManager.GetCommandAvailability(attacker).Attack.Candidates);
         Assert.False(attackTrigger.Validate(refs));
     }

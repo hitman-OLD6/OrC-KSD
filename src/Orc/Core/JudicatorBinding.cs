@@ -55,10 +55,10 @@ public sealed class JudicatorBinding
     /// 对局路径经条目统一解析点（每次调用解析栈顶一次并固定——moding 生效＝替换逻辑）；独立路径直接调用实例主方法。
     /// 输出契约不符（统一面输出非 <c>[ValidationVerdict]</c> 单元素）＝明确异常（fail-fast 族——运行期由触发路径契约兜底承接）。
     /// </summary>
-    internal ValidationVerdict InvokeValidation(IReadOnlyList<Ref<Entity>> refs, Ref<Entity>? subject)
+    internal ValidationVerdict InvokeValidation(IReadOnlyList<Ref<Entity>> refs, Ref<Entity>? subject, int? playerIndex = null)
     {
         var args = new object[] { refs, subject! }; // subject 可为 null（合法载荷值：无被判定对象——数组元素运行时承载 null）
-        var raw = _registration is not null ? _registration.Invoke(args) : _standalone!.Invoke(args);
+        var raw = _registration is not null ? _registration.Invoke(args, playerIndex) : _standalone!.Invoke(args);
         if (raw is { Length: 1 } && raw[0] is ValidationVerdict verdict)
         {
             return verdict;

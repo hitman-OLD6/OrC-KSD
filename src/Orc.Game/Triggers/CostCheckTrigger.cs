@@ -40,6 +40,6 @@ public sealed class CostCheckTrigger : Trigger<CardTriggerView>
         var binding = validationJudicatorResolver is not null
             ? validationJudicatorResolver(JudicatorNames.CostCheck)
             : BuiltInValidationJudicators.Resolve(JudicatorNames.CostCheck);
-        BindValidation(binding, _ => _card.Ref);
+        BindValidation(binding, _ => _card.Ref, _ => _card.Owner?.Index);
     }
 }

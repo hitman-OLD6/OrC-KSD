@@ -62,9 +62,78 @@ public sealed class ProgramKeywordComponent : KeywordComponent
     internal override void Mount(Card card,KeywordLoadContext? context)
     {
         _host=card;_context=context;
-        if(context is not null){_subscription=context.Engine.Subscribe(OnUpdate);KeywordProgramRuntime.Attach(card.Engine,this);}
+        if(context is not null)
+        {
+            _subscription=context.Engine.Subscribe(OnUpdate);
+            KeywordProgramRuntime.Attach(card.Engine,this);
+            AttachDeclarations();
+        }
     }
-    internal override void Unmount(){_subscription?.Dispose();_subscription=null;_context=null;_linked=null;if(_host is not null)KeywordProgramRuntime.Detach(_host.Engine,this);}
+    internal override void Unmount(){DetachDeclarations();_subscription?.Dispose();_subscription=null;_context=null;_linked=null;if(_host is not null)KeywordProgramRuntime.Detach(_host.Engine,this);}
+
+    // ---------- 目标可选性声明（S3：词条程序规则 → 包装目标候选名单判定器） ----------
+
+    private readonly List<TargetingDeclaration> _declarations = new();
+    private readonly Dictionary<(Card Target,string Kind),TargetingDeclaration> _dynamicDeclarations = new();
+
+    private void AttachDeclarations()
+    {
+        var match=KeywordProgramRuntime.TryMatchFor(_host.Engine);
+        var owner=Owner;
+        if(match is null||owner is null)return;
+        var opponent=match.Players.FirstOrDefault(player=>!ReferenceEquals(player,owner));
+        if(opponent is null)return;
+
+        foreach(var rule in _program.Rules)
+        {
+            if(rule.Rule!="targeting.forbid")continue;
+            if(NumberFor(rule.Value,_host)==0)continue;
+            var declaration=new TargetingDeclaration(
+                match.Judicators,
+                _host,
+                candidate=>Applies(rule.Scope,candidate),
+                ()=>OnBoard,
+                rule.Source);
+            declaration.Attach(opponent.Index);
+            _declarations.Add(declaration);
+        }
+    }
+
+    private void DetachDeclarations()
+    {
+        foreach(var declaration in _declarations)declaration.Detach();
+        _declarations.Clear();
+        foreach(var declaration in _dynamicDeclarations.Values)declaration.Detach();
+        _dynamicDeclarations.Clear();
+    }
+
+    /// <summary>运行期可选性声明（DSL 动作）：target 进入/退出「不可被指定来源指向」。</summary>
+    private void ApplyTargetingDeclaration(Card target,string kind,bool forbid)
+    {
+        var key=(target,kind);
+        if(!forbid)
+        {
+            if(_dynamicDeclarations.Remove(key,out var existing))existing.Detach();
+            return;
+        }
+
+        if(_dynamicDeclarations.ContainsKey(key))return;
+
+        var match=KeywordProgramRuntime.TryMatchFor(_host.Engine);
+        var owner=Owner;
+        if(match is null||owner is null)return;
+        var opponent=match.Players.FirstOrDefault(player=>!ReferenceEquals(player,owner));
+        if(opponent is null)return;
+
+        var declaration=new TargetingDeclaration(
+            match.Judicators,
+            _host,
+            candidate=>ReferenceEquals(candidate,target),
+            ()=>OnBoard,
+            kind);
+        declaration.Attach(opponent.Index);
+        _dynamicDeclarations.Add(key,declaration);
+    }
     private async Task OnUpdate(string kind,IReadOnlyDictionary<string,object?>? payload,CancellationToken ct)
     {
         var actor=payload?.GetValueOrDefault(GameUpdates.PayloadUnit) as Card??payload?.GetValueOrDefault(GameUpdates.PayloadCard) as Card;
@@ -140,6 +209,8 @@ public sealed class ProgramKeywordComponent : KeywordComponent
                     case "stat.add":case "stat.set":
                         var field=a.Key switch{"attack"=>CardStatFields.Attack,"defense"=>CardStatFields.Defense,"opCost"=>CardStatFields.OperateCost,"deployCost"=>CardStatFields.DeployCost,"hqHealth"=>CardStatFields.HqHealth,_=>throw new InvalidOperationException("未知属性")};
                         if(target is CardBase statCard)await statCard.Modifiers.AddModifierAsync(a.Op=="stat.add"?new AddModifier(field,n,this):new SetModifier(field,n,this),ct);break;
+                    case "targeting.forbid":ApplyTargetingDeclaration(target,a.Key,true);break;
+                    case "targeting.allow":ApplyTargetingDeclaration(target,a.Key,false);break;
                     case "link":if(target is UnitCard linked&&!ReferenceEquals(linked,_host))_linked=linked;break;
                     case "unlink":_linked=null;break;
                     case "attack":if(_host is UnitCard attacker)await KeywordProgramRuntime.MatchFor(_host.Engine).CommandManager.AttackByEffectAsync(attacker,target,ct,a.BypassRange);break;
@@ -420,6 +491,9 @@ public static class KeywordProgramRuntime
 
     internal static Match MatchFor(LogicEngine engine)
         => SessionFor(engine).Match ?? throw new InvalidOperationException("词条对局服务未装配");
+
+    /// <summary>取对局服务（未装配＝null；独立构造/装配早期场景的宽容读面）。</summary>
+    internal static Match? TryMatchFor(LogicEngine engine) => SessionFor(engine).Match;
 
     private sealed class DepthScope(Session session) : IDisposable
     {

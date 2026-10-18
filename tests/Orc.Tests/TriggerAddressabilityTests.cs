@@ -7,7 +7,7 @@ namespace Orc.Tests;
 /// <summary>
 /// 补全性佐证（X4「全部事件 handler 注册项可寻址」硬性要求）：全 src 构造期装配点的句柄获取路径 ＋ moding 替换生效。
 /// 覆盖：①卡牌放置处理器（engine.CardPlacedTrigger——懒创建）；②卡牌清理处理器（engine.CardCleanupTrigger——懒创建）；
-/// ③被动效果生命周期清理（PassiveEffect.LifecycleTrigger——protected，子类/装配方面）；④主动效果施放事件（ActiveEffect.CastTrigger——构造期 castEvents 项）。
+/// ③被动效果 disposing 触发器（Effect.DisposingTrigger——protected，子类/装配方面）；④主动效果施放事件（ActiveEffect.CastTrigger——构造期 castEvents 项）。
 /// 驱动方式：①经总线（card.placed）；②③直接执行目标触发器（隔离总线上的其它链、聚焦本事件替换）；④经 CastAsync。
 /// 约定：moding 逻辑与 handler 本体一致＝单一处理单元（记录）；禁止流程编排——本文件全部用例均以单一处理单元形态示范。
 /// </summary>
@@ -29,7 +29,7 @@ public class TriggerAddressabilityTests
         Assert.Equal("放置处理", handle.Name);
 
         var trace = new List<string>();
-        var m = trigger.RegisterModing(handle, (view, ctx, ct) =>
+        var m = trigger.RegisterReplaceWrapper(handle, (view, ctx, ct) =>
         {
             trace.Add("moding-放置");
             return Task.CompletedTask;
@@ -62,7 +62,7 @@ public class TriggerAddressabilityTests
         Assert.Equal("清理处理", handle.Name);
 
         var trace = new List<string>();
-        var m = trigger.RegisterModing(handle, (view, ctx, ct) =>
+        var m = trigger.RegisterReplaceWrapper(handle, (view, ctx, ct) =>
         {
             trace.Add("moding-清理");
             return Task.CompletedTask;
@@ -87,17 +87,18 @@ public class TriggerAddressabilityTests
         public ModedPassiveEffect(List<string> trace)
             : base("替换清理")
         {
-            // 装配期（子类构造）：经基类受保护触发器面 + 构造期项句柄注册 moding（替换「生命周期清理」）
-            LifecycleTrigger.RegisterModing(LifecycleTrigger.InitialRegistrations[0], (view, ctx, ct) =>
+            // 装配期（子类构造）：经基类受保护触发器面 + 构造期项句柄注册 moding（替换「disposing 兜底驱动」——
+            // 新架构下销毁入口是 ExecuteDispose，直接 Invoke 触发器不再等价于"执行完整清理"；本用例只验证可寻址性）。
+            DisposingTrigger.RegisterReplaceWrapper(DisposingTrigger.InitialRegistrations[1], (view, ctx, ct) =>
             {
                 trace.Add("moding-生命周期");
                 return Task.CompletedTask;
             });
         }
 
-        /// <summary>测试驱动：直接执行生命周期触发器（隔离总线上的其它链、聚焦本事件替换）。</summary>
+        /// <summary>测试驱动：直接执行 disposing 触发器（隔离总线上的其它链、聚焦本事件替换）。</summary>
         public Task InvokeLifecycleAsync(LogicEngine engine, Card card)
-            => LifecycleTrigger.InvokeAsync(engine, new Dictionary<string, object?>
+            => DisposingTrigger.InvokeAsync(engine, new Dictionary<string, object?>
             {
                 [PayloadKeys.Card] = card,
                 [PayloadKeys.Effect] = this,
@@ -139,7 +140,7 @@ public class TriggerAddressabilityTests
             })
         {
             // 构造期 castEvents 项句柄：经 CastTrigger.InitialRegistrations 供给——子类 moding 替换
-            CastTrigger.RegisterModing(CastTrigger.InitialRegistrations[0], (view, ctx, ct) =>
+            CastTrigger.RegisterReplaceWrapper(CastTrigger.InitialRegistrations[0], (view, ctx, ct) =>
             {
                 trace.Add("moding-施放");
                 return Task.CompletedTask;

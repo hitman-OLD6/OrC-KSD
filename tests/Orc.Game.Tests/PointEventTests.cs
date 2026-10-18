@@ -101,14 +101,14 @@ public class PointEventTests
         var player = match.Players[0];
         var handle = match.Judicators.Resolve(JudicatorNames.PointGain);
 
-        var moding = match.Judicators.RegisterModing(
+        var moding = match.Judicators.RegisterReplaceWrapper(
             handle, (Func<object[]?, object[]?>)(_ => new object[] { 5 }));
         Assert.NotNull(moding);
 
         Assert.True(await match.ResourceManager.GainPointsAsync(player, 1)); // 请求 1 → 实际 5
         Assert.Equal(6, player.Points);
 
-        Assert.True(match.Judicators.UnregisterModing(moding!));
+        Assert.True(match.Judicators.UnregisterWrapper(moding!));
         Assert.True(await match.ResourceManager.GainPointsAsync(player, 1)); // 注销回退恒等
         Assert.Equal(7, player.Points);
     }

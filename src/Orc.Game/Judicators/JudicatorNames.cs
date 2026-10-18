@@ -11,6 +11,9 @@ namespace Orc.Game.Judicators;
 public static class JudicatorNames
 {
     public const string ActionInput = "action.input.allowed";
+
+    /// <summary>回合归属准入（签名＝（玩家）→ bool）：该玩家是否为当前行动方；三处入口同源（打牌/移动攻击/反制）。</summary>
+    public const string ActionTurnOwner = "action.turn.owner";
     // ---------- J2（合法性验证替换）：默认验证判定器（四条；内置注册段固定注册——无条件可用） ----------
 
     /// <summary>费用检查（费用验证点专属；预打出/打出复用同一判定器——moding 改写即其全部引用点生效）。</summary>

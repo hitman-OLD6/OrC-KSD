@@ -56,13 +56,19 @@ internal sealed class LegEligibilityJudicator : Judicator<LegEligibilityJudicato
     private readonly Func<Player?> _currentPlayerProvider;
     private readonly Battlefield? _battlefield;
     private readonly bool _isMove;
+    private readonly Func<Player, bool>? _turnOwner;
 
     /// <summary>创建 leg 资格判定器（装配期注入对局级只读设施引用）。</summary>
-    /// <param name="currentPlayerProvider">当前行动方提供器（延迟读取——owner==current 条件）。</param>
+    /// <param name="currentPlayerProvider">当前行动方提供器（延迟读取——回合未就绪判定）。</param>
     /// <param name="battlefield">战场（布局读取——move 的位置条件〔源∈支援线〕；attack＝null）。</param>
     /// <param name="isMove">动作面（true＝move：含位置条件；false＝attack：位置不适用）。</param>
+    /// <param name="turnOwner">回合归属判定器（R4；缺省＝null＝按 currentPlayerProvider 引用比较）。</param>
     /// <exception cref="ArgumentNullException">currentPlayerProvider 为 null；isMove 时 battlefield 为 null。</exception>
-    internal LegEligibilityJudicator(Func<Player?> currentPlayerProvider, Battlefield? battlefield, bool isMove)
+    internal LegEligibilityJudicator(
+        Func<Player?> currentPlayerProvider,
+        Battlefield? battlefield,
+        bool isMove,
+        Func<Player, bool>? turnOwner = null)
     {
         ArgumentNullException.ThrowIfNull(currentPlayerProvider);
         if (isMove)
@@ -73,6 +79,7 @@ internal sealed class LegEligibilityJudicator : Judicator<LegEligibilityJudicato
         _currentPlayerProvider = currentPlayerProvider;
         _battlefield = battlefield;
         _isMove = isMove;
+        _turnOwner = turnOwner;
     }
 
     /// <inheritdoc />
@@ -106,9 +113,10 @@ internal sealed class LegEligibilityJudicator : Judicator<LegEligibilityJudicato
             return LegEligibilityFailure.OwnerInvalid; // 无归属单位不可被指挥
         }
 
-        if (!ReferenceEquals(owner, current))
+        var ownerTurn = _turnOwner is not null ? _turnOwner(owner) : ReferenceEquals(owner, current);
+        if (!ownerTurn)
         {
-            return LegEligibilityFailure.NonOwnerTurn; // 仅限己方回合操作己方单位
+            return LegEligibilityFailure.NonOwnerTurn; // 仅限己方回合操作己方单位（R4：判定器同源）
         }
 
         if (state.IsDestroyed)

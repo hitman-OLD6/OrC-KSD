@@ -83,9 +83,19 @@ public sealed class GlobalRegistrationContext : IGlobalPluginContext, IPackageLi
 
     /// <inheritdoc />
     /// <exception cref="InvalidOperationException">全局相不支持对局级注册（配置错误）。</exception>
-    public void DeclareModing(ModingTarget target, string name, Func<object[]?, object[]?> moding)
+    public void DeclareBeforeWrapper(WrapperTarget target, string name, Action<object[]?> wrapper)
         => throw new InvalidOperationException(
-            "全局（进程级）脚本不得声明对局级 moding——请改用 scope: match。");
+            "全局（进程级）脚本不得声明对局级包装器——请改用 scope: match。");
+
+    /// <inheritdoc />
+    public void DeclareAfterWrapper(WrapperTarget target, string name, Func<object[]?, object[]?, object[]?> wrapper)
+        => throw new InvalidOperationException(
+            "全局（进程级）脚本不得声明对局级包装器——请改用 scope: match。");
+
+    /// <inheritdoc />
+    public void DeclareReplaceWrapper(WrapperTarget target, string name, Func<object[]?, object[]?> wrapper)
+        => throw new InvalidOperationException(
+            "全局（进程级）脚本不得声明对局级包装器——请改用 scope: match。");
 
     /// <inheritdoc />
     public void DeclareDependency(string assetName) => ArgumentException.ThrowIfNullOrWhiteSpace(assetName);

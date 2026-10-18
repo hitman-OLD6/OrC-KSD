@@ -272,12 +272,17 @@ public sealed class Match
     /// <exception cref="InvalidOperationException">对局尚未进入"进行"态。</exception>
     public JudicatorRegistry Judicators => RequireReady(_judicators);
 
+    /// <summary>效果运行时门面（csx 唯一游戏层受控入口；对局装配期创建）。</summary>
+    /// <exception cref="InvalidOperationException">对局尚未进入"进行"态。</exception>
+    public EffectRuntime EffectRuntime => RequireReady(_effectRuntime);
+
     /// <summary>A.20：可选前端状态提供器（同步、只读）。null＝无头引擎运行（原生规则照常）。</summary>
     public Func<Player, ActionInteractionState?>? InteractionStateReader { get; set; }
 
     /// <summary>A.20：行动输入准入查询（每次读取前端状态；前端限制只能**收窄**原生合法性）。</summary>
     public bool CanAcceptInput(Player player, Entity? actor = null, Entity? target = null)
-        => CombatJudicatorInvoker.InvokeBool(Judicators.Resolve(JudicatorNames.ActionInput), player, actor!, target!);
+        => CombatJudicatorInvoker.InvokeBool(
+            Judicators.Resolve(JudicatorNames.ActionInput), player.Index, new object[] { player, actor!, target! });
 
     // ---------- 构筑外判定（W1-1 G12 加性面） ----------
 
@@ -716,7 +721,15 @@ public sealed class Match
         _turnManager.ActionStateRefresher = _commandManager.RefreshActionStates;
         // 打出管理器（2B 加性：随管理器群生成——打出链服务与交互入口；回合管理器为反制「仅己方回合」真源；
         // 后置项 B 加性：注入对局生命周期——终局门禁）
-        _playManager = new PlayManager(Engine, _targeterManager, _battlefieldManager.Battlefield, _turnManager, _lifecycle, CanAcceptInput);
+        var turnOwnerEntry = _judicators.Resolve(JudicatorNames.ActionTurnOwner);
+        _playManager = new PlayManager(
+            Engine,
+            _targeterManager,
+            _battlefieldManager.Battlefield,
+            _turnManager,
+            _lifecycle,
+            CanAcceptInput,
+            player => CombatJudicatorInvoker.InvokeBool(turnOwnerEntry, player.Index, new object[] { player }));
 
         // A1 加性：换牌管理器（开局换牌相位承载——特制槽位交互＋换牌执行；双方确认＝执行先手第 1 回合＋置"进行"）
         var turnManager = _turnManager!;

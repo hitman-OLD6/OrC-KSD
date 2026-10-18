@@ -17,14 +17,17 @@ namespace Orc.Game;
 /// </summary>
 internal static class OperateCosts
 {
-    /// <summary>行动费有效值（G5 有效值读取单源——判定与扣费共用；全库唯一取值表达式所在）。</summary>
+    /// <summary>
+    /// 行动费有效值（G5 有效值读取单源——判定与扣费共用；全库唯一取值表达式所在）。
+    /// 下限 0：减费修饰（效果/光环）叠加不得把行动花费压成负数——负费会反向加指挥点并可无限行动。
+    /// </summary>
     internal static int Effective(UnitCard unit)
-        => unit.Modifiers.GetEffectiveValue(CardStatFields.OperateCost);
+        => Math.Max(0, unit.Modifiers.GetEffectiveValue(CardStatFields.OperateCost));
 
     /// <summary>
     /// 行动费扣减（扣费动作单源——行动方扣除行动费有效值、恰一次；两写点〔FinalizeMove／FinalizeAttack〕共用本单元）。
-    /// 读值经 <see cref="Effective"/>（与判定读取同源）；扣减语义保持现状（无下限钳制等边界变化）。
-    /// 归口：资源管理器通用入口（<c>ChangePointsAsync</c>，增量取负）；不可达＝直写兜底。
+    /// 读值经 <see cref="Effective"/>（与判定读取同源，下限 0）；归口：资源管理器通用入口
+    /// （<c>ChangePointsAsync</c>，增量取负）；不可达＝直写兜底。
     /// </summary>
     internal static async Task DeductAsync(UnitCard unit, CancellationToken ct = default)
     {
