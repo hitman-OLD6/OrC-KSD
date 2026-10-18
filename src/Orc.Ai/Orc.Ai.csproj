@@ -10,7 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Orc.Mcp\Orc.Mcp.csproj" />
+    <ProjectReference Include="..\Orc.Game\Orc.Game.csproj" />
     <ProjectReference Include="..\Orc.UI.Contracts\Orc.UI.Contracts.csproj" />
   </ItemGroup>
 

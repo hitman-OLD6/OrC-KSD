@@ -1,4 +1,4 @@
-using Orc.Mcp.Match;
+using Orc.Game.Ai;
 
 namespace Orc.Ai;
 
@@ -11,7 +11,7 @@ namespace Orc.Ai;
 public sealed record AiStepResult(
     bool Performed,
     string Kind,
-    ActionOutcome? Outcome,
+    AiActionOutcome? Outcome,
     bool TurnEnded,
     string? Note = null)
 {
@@ -19,6 +19,5 @@ public sealed record AiStepResult(
     public static AiStepResult Idle(string note) => new(false, "idle", null, false, note);
 
     /// <summary>动作是否成功（完成/取消均算成功；失败才算失败）。</summary>
-    public bool Succeeded => Outcome is null
-        || Outcome.Status is ActionOutcome.StatusCompleted or ActionOutcome.StatusCancelled;
+    public bool Succeeded => Outcome is null || !Outcome.Failed;
 }

@@ -1,8 +1,6 @@
-using System.Text.Json.Nodes;
 using Orc.Game;
+using Orc.Game.Ai;
 using Orc.Game.Ui;
-using Orc.Mcp;
-using Orc.Mcp.Match;
 using Orc.UI.Contracts;
 
 namespace Orc.Ai;
@@ -15,7 +13,7 @@ namespace Orc.Ai;
 /// </para>
 /// <para>
 /// 视野＝座位过滤投影（不看对手手牌与卡组顺序）；待决请求只接管**自己动作链**引起的那些
-/// （发起前声明预期应答者，见 <see cref="McpService.ExpectClaimant"/>）。
+/// （发起前声明预期应答者，见 <see cref="IAiMatchGateway.ExpectClaimant"/>）。
 /// </para>
 /// </summary>
 public sealed class AiPilot
@@ -26,7 +24,7 @@ public sealed class AiPilot
     private const int MaxTargetingRounds = 8;
     private const int MaxMulliganAttempts = 3;
 
-    private readonly McpService _service;
+    private readonly IAiMatchGateway _gateway;
     private readonly IUiProjectionProvider _projection;
     private readonly HashSet<string> _failed = new(StringComparer.Ordinal);
 
@@ -34,19 +32,19 @@ public sealed class AiPilot
     private int _mulliganAttempts;
 
     /// <summary>创建 AI 玩家。</summary>
-    /// <param name="service">服务层（唯一门禁/唯一桥；同一实例亦承载人类与 agent）。</param>
+    /// <param name="gateway">对局操作面（唯一门禁/唯一桥；同一实例亦承载人类与 agent）。</param>
     /// <param name="projection">该对局的投影提供者（宿主在 <c>MatchChanged(Created)</c> 后创建）。</param>
     /// <param name="seat">AI 占用的座位（默认 1）。</param>
-    public AiPilot(McpService service, IUiProjectionProvider projection, int seat = 1)
+    public AiPilot(IAiMatchGateway gateway, IUiProjectionProvider projection, int seat = 1)
     {
-        ArgumentNullException.ThrowIfNull(service);
+        ArgumentNullException.ThrowIfNull(gateway);
         ArgumentNullException.ThrowIfNull(projection);
         if (seat is < 0 or > 1)
         {
             throw new ArgumentOutOfRangeException(nameof(seat), seat, "座位须为 0 或 1。");
         }
 
-        _service = service;
+        _gateway = gateway;
         _projection = projection;
         Seat = seat;
     }
@@ -57,7 +55,7 @@ public sealed class AiPilot
     /// <summary>执行一步（一个动作 ＋ 其待决应答）。</summary>
     public async Task<AiStepResult> StepAsync(CancellationToken ct = default)
     {
-        if (!_service.TryGetActiveMatch(out var match))
+        if (!_gateway.TryGetActiveMatch(out var match))
         {
             return AiStepResult.Idle("无活跃对局。");
         }
@@ -101,19 +99,19 @@ public sealed class AiPilot
         var outcome = intent.Kind switch
         {
             HeuristicPolicy.PlayUnit => await RunAsync(
-                () => _service.PlayUnitAsync(intent.Ref!, Seat, intent.Slot, ct), ct).ConfigureAwait(false),
+                () => _gateway.PlayUnitAsync(intent.Ref!, Seat, intent.Slot, ct), ct).ConfigureAwait(false),
             HeuristicPolicy.PlayCommand => await RunAsync(
-                () => _service.PlayCommandPreAsync(intent.Ref!, ct), ct).ConfigureAwait(false),
+                () => _gateway.PlayCommandPreAsync(intent.Ref!, ct), ct).ConfigureAwait(false),
             HeuristicPolicy.PlayCounter => await RunAsync(
-                () => _service.UseCounterAsync(intent.Ref!, ct), ct).ConfigureAwait(false),
+                () => _gateway.UseCounterAsync(intent.Ref!, ct), ct).ConfigureAwait(false),
             HeuristicPolicy.Attack => await RunAsync(
-                () => _service.BeginAttackAsync(intent.Ref!, ct), ct, intent.AttackPower).ConfigureAwait(false),
+                () => _gateway.BeginAttackAsync(intent.Ref!, ct), ct, intent.AttackPower).ConfigureAwait(false),
             HeuristicPolicy.Move => await RunAsync(
-                () => _service.BeginMoveAsync(intent.Ref!, ct), ct).ConfigureAwait(false),
-            _ => await RunAsync(() => _service.EndTurnAsync(ct), ct).ConfigureAwait(false),
+                () => _gateway.BeginMoveAsync(intent.Ref!, ct), ct).ConfigureAwait(false),
+            _ => await RunAsync(() => _gateway.EndTurnAsync(ct), ct).ConfigureAwait(false),
         };
 
-        if (outcome.Status == ActionOutcome.StatusFailed)
+        if (outcome.Failed)
         {
             _failed.Add(HeuristicPolicy.KeyOf(intent));
             return new AiStepResult(true, intent.Kind, outcome, false, outcome.FailureMessage);
@@ -130,8 +128,8 @@ public sealed class AiPilot
         }
 
         // 换牌策略＝不换：直接确认（`MulliganDone` 即「不换牌直接确认」入口，无需打开选择器）。
-        var done = await RunAsync(() => _service.MulliganDoneAsync(Seat, ct), ct).ConfigureAwait(false);
-        if (done.Status != ActionOutcome.StatusFailed)
+        var done = await RunAsync(() => _gateway.MulliganDoneAsync(Seat, ct), ct).ConfigureAwait(false);
+        if (!done.Failed)
         {
             _mulliganDone = true;
         }
@@ -145,8 +143,8 @@ public sealed class AiPilot
 
     private async Task<AiStepResult> EndTurnAsync(CancellationToken ct)
     {
-        var outcome = await RunAsync(() => _service.EndTurnAsync(ct), ct).ConfigureAwait(false);
-        if (outcome.Status == ActionOutcome.StatusFailed)
+        var outcome = await RunAsync(() => _gateway.EndTurnAsync(ct), ct).ConfigureAwait(false);
+        if (outcome.Failed)
         {
             return new AiStepResult(true, HeuristicPolicy.EndTurn, outcome, false, outcome.FailureMessage);
         }
@@ -159,12 +157,12 @@ public sealed class AiPilot
     /// <summary>
     /// 执行一个动作并接管它引起的待决请求（自己动作链）：声明预期应答者 → 动作 → 逐个应答选择器。
     /// </summary>
-    private async Task<ActionOutcome> RunAsync(
-        Func<Task<ActionOutcome>> action, CancellationToken ct, int? attackPower = null)
+    private async Task<AiActionOutcome> RunAsync(
+        Func<Task<AiActionOutcome>> action, CancellationToken ct, int? attackPower = null)
     {
         ArgumentNullException.ThrowIfNull(action);
 
-        _service.ExpectClaimant(Claimant);
+        _gateway.ExpectClaimant(Claimant);
         var outcome = await action().ConfigureAwait(false);
 
         var rounds = 0;
@@ -173,11 +171,11 @@ public sealed class AiPilot
             && rounds++ < MaxTargetingRounds)
         {
             var picks = await ChoosePickAsync(pending, attackPower, ct).ConfigureAwait(false);
-            outcome = await _service.Executor
+            outcome = await _gateway
                 .SubmitAsync(pending.SessionId, picks, cancel: false, ct, Claimant)
                 .ConfigureAwait(false);
 
-            if (outcome.Status == ActionOutcome.StatusFailed)
+            if (outcome.Failed)
             {
                 break;
             }
@@ -195,18 +193,14 @@ public sealed class AiPilot
 
         foreach (var unit in view.SelfLine)
         {
-            var outcome = await _service.GetCommandAvailabilityAsync(unit.Uid, ct).ConfigureAwait(false);
-            if (outcome.Payload is not JsonObject payload)
-            {
-                continue;
-            }
+            var availability = await _gateway.GetCommandAvailabilityAsync(unit.Uid, ct).ConfigureAwait(false);
 
-            if (IsTrue(payload["attackAvailable"]))
+            if (availability.AttackAvailable)
             {
                 attackable.Add(unit.Uid);
             }
 
-            if (IsTrue(payload["moveAvailable"]))
+            if (availability.MoveAvailable)
             {
                 movable.Add(unit.Uid);
             }
@@ -215,10 +209,7 @@ public sealed class AiPilot
         return (attackable, movable);
     }
 
-    private static bool IsTrue(JsonNode? node)
-        => node is JsonValue value && value.TryGetValue<bool>(out var flag) && flag;
-
-    private Task<IReadOnlyList<int>> ChoosePickAsync(PendingSelection pending, int? attackPower, CancellationToken ct)
+    private Task<IReadOnlyList<int>> ChoosePickAsync(AiPending pending, int? attackPower, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(pending);
 
@@ -256,7 +247,7 @@ public sealed class AiPilot
 
     private UiMatchView? TryProject()
     {
-        return _service.TryGetActiveMatch(out var match)
+        return _gateway.TryGetActiveMatch(out var match)
             ? _projection.Project(match, match.Players[Seat])
             : null;
     }
@@ -266,7 +257,7 @@ public sealed class AiPilot
     /// <paramref name="attackPower"/> 缺失时退化为「攻×血最高」。
     /// </summary>
     private static IReadOnlyList<int> PickAttackTarget(
-        PendingSelection pending, UiMatchView? view, int? attackPower)
+        AiPending pending, UiMatchView? view, int? attackPower)
     {
         var units = pending.Candidates
             .Where(c => string.Equals(c.Kind, "unit", StringComparison.Ordinal))
