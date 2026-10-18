@@ -323,3 +323,27 @@ _Avoid_: Flows
 - 护盾概念与 Shield 字样在 Orc／Orc.Tests 范围内零残留（换外衣保机制、机制无等价物）；S4/S5 决策文本中「护盾减伤用例可选」「护盾检查结算」等提法随删除失效。
 - 「法术」→「指令」、Spell→Order（类型/成员/字面值/文件名/展示名；施放/Cast 动作词保留）；Flows.cs→BaseFlows.cs（受控重命名）。
 - Orc「指令（Order）」与 Orc.Game「指令卡（CommandCard）」属同一 KARDS 概念，英文名统一列范围外待办。
+
+## E-D1 disposing 触发器（2026-10-18 grill）
+
+**disposing 触发器**：
+与效果业务主触发器并列、**默认必选**的独立 `Trigger`；`hooks`＝兜底时机（与主触发器同构的更新名字符串），事件链＝效果额外副作用清理；提前调用与兜底调用进入同一销毁入口。
+_Avoid_: 销毁钩子、清理触发器
+
+**销毁状态（DisposalState）**：
+`NotMounted`／`Mounted`／`Disposing`／`Disposed`；复装复位。
+_Avoid_: 死亡标志
+
+**保留 band**：
+Trigger 内部保留槽（非枚举成员）：构造期即存在、排序恒在全部普通事件之后、普通注册不可写入；只接受 `RegisterDisposal`。
+_Avoid_: 销毁区段
+
+**决策摘要**：
+- 调用即完整销毁：执行 disposing 事件链 → 最终 teardown → 容器移除 → 恰发一次 `effect.removed`；进入即停用（卸该效果全部总线挂载＋撤销注入）；重复/重入空转；异常仍完成终态。
+- 兜底 hooks：默认强制 `card.destroyed` 且不可移除；`effect.removed` 被拒绝（自指）；`match.ended` 后续待办。
+- 双层注销：核心句柄撤销（注入登记/托管清理）由框架最终层保证；手写 disposing 只处理额外副作用。
+- 生命周期触发器退场（disposing 取代）；C# 被动效果 `MainTrigger=null`（纯注入型）；动态效果业务主触发器保留并与 disposing 并列；主动效果 disposing 照常挂总线。
+- `OneShot`：仅在有可挂载业务主触发器时成立；纯注入型/无 hooks 明确失败；主动效果＝施放完成即销毁。
+- 预制体 schema 3：`root.disposingTrigger`/`root.oneShot`；`EventPrefab.band ∈ {default, disposing}`；接受 2 读入并归一化为 3，写出恒 3。
+- 破坏性整理：`ExecuteUnmount`→`ExecuteDispose`；`AddUnmountCleanup`→`AddTeardownRegistration`；`CleanupEffect`/`_lifecycleTrigger` 删除；`OnUnmount` 保留为 disposing 默认作者事件。
+- 偏差：`dispose:fallback` 未附更新名（Bus Emit 不向订阅者提供 updateType），后续待办。
