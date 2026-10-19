@@ -4,6 +4,7 @@
     <Project Path="src/Orc.UI.Contracts/Orc.UI.Contracts.csproj" />
     <Project Path="src/Orc.Script/Orc.Script.csproj" />
     <Project Path="src/Orc.Game/Orc.Game.csproj" />
+    <Project Path="src/Orc.Foundation.Actions/Orc.Foundation.Actions.csproj" />
     <Project Path="src/Orc.Packages/Orc.Packages.csproj" />
     <Project Path="src/Orc.Plugins.BuiltIn/Orc.Plugins.BuiltIn.csproj" />
     <Project Path="src/Orc.UI/Orc.UI.csproj" />
