@@ -77,9 +77,9 @@ public class KeywordComponentTests
             EmbedEffect(new DemoBehaviorEffect());
         }
 
-        protected override void OnGrant() => GrantRevokeLog.Add("grant");
+        protected internal override void OnGrant() => GrantRevokeLog.Add("grant");
 
-        protected override void OnRevoke() => GrantRevokeLog.Add("revoke");
+        protected internal override void OnRevoke() => GrantRevokeLog.Add("revoke");
     }
 
     /// <summary>装载爆炸词条组件：内嵌效果在装载链内（OnMount）抛异常——验证授予整体回滚。</summary>
@@ -111,7 +111,7 @@ public class KeywordComponentTests
             EmbedEffect(new DemoBehaviorEffect());
         }
 
-        protected override void OnGrant() => throw new InvalidOperationException("OnGrant 爆炸（测试）");
+        protected internal override void OnGrant() => throw new InvalidOperationException("OnGrant 爆炸（测试）");
     }
 
     /// <summary>撤销爆炸词条组件：OnRevoke（移除链第一步）抛异常——验证操作失败＝上抛、机制面未变更（无半态）。</summary>
@@ -123,7 +123,7 @@ public class KeywordComponentTests
             EmbedEffect(new DemoBehaviorEffect());
         }
 
-        protected override void OnRevoke() => throw new InvalidOperationException("OnRevoke 爆炸（测试）");
+        protected internal override void OnRevoke() => throw new InvalidOperationException("OnRevoke 爆炸（测试）");
     }
 
     // ---------- 注册面 ----------

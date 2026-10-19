@@ -8,7 +8,7 @@
         var targets = await runtime.SelectAsync(self!, new Orc.Game.Effects.EffectSelector({{sel}}, {{side}}, {{selZone}}, {{filterUnitType}}, {{filterKeyword}}, null, {{selThreshold}}));
         foreach (var target in targets)
         {
-            await runtime.GrantAsync(target, {{keyword}}{{value}}, ct);
+            await runtime.GrantAsync(target, {{keyword}}{{value}}, ct, self);
         }
     }
 }

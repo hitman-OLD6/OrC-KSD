@@ -1,0 +1,10 @@
+{
+  "kind": "plugin",
+  "id": "orc.foundation.actions",
+  "guid": "7f3c2a10-9b64-4d8e-a5c1-6e0f2b7d4a93",
+  "version": "1.0.0",
+  "dependsOn": [
+    { "id": "orc.builtin.core", "version": "1.*.*" }
+  ],
+  "assets": []
+}

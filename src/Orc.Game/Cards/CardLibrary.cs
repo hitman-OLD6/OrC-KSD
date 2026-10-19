@@ -6,7 +6,7 @@ namespace Orc.Game.Cards;
 
 /// <summary>
 /// 卡牌库：id → 卡牌定义的注册表（代码注册 API；本批无 JSON 载入）；
-/// 负责名单实例化时创建卡牌实例——按定义类别产出 <see cref="UnitCard"/> / <see cref="CommandCard"/> / <see cref="CounterCard"/> 之一
+/// 负责名单实例化时创建卡牌实例——按定义类别产出 <see cref="UnitCard"/> / <see cref="OrderCard"/> / <see cref="CounterCard"/> 之一
 /// （<see cref="CardBase"/> 子类；名称取自定义；实例化路径装配按类别差异化：全类别＝阵营〔国籍〕＋部署费合并组件、单位＝另加对战、反制＝另加激活状态）。
 /// 读面：存在性 <see cref="Contains"/>（不抛错、回答有无）、取得 <see cref="Get"/>（未注册抛错）、枚举 <see cref="Definitions"/>。
 /// 重复注册被拒绝（配置错误不吞；如需变更定义，重建库/对局）。
@@ -33,6 +33,7 @@ public sealed class CardLibrary
     private readonly Func<int>? _matchCardIdProvider;
     private readonly Func<string, CardEffectLoadContext?>? _effectLoadContextProvider;
     private readonly Func<string, JudicatorBinding>? _validationJudicatorResolver;
+    private readonly Func<Player, CardBase, Card?, CancellationToken, Task>? _discardCardAction;
 
     /// <summary>创建卡牌库（实例化所需引擎引用由构造注入；可选回合上下文提供器——2B 加性；可选词条装载上下文提供器——2C 加性；
     /// 可选对局级卡牌 ID 提供器——W1-1 加性；可选效果装载上下文提供器——X2 加性；可选部署逻辑装载语境提供器——A4 加性；
@@ -44,7 +45,8 @@ public sealed class CardLibrary
         Func<KeywordLoadContext?>? keywordLoadContextProvider = null,
         Func<int>? matchCardIdProvider = null,
         Func<string, CardEffectLoadContext?>? effectLoadContextProvider = null,
-        Func<string, JudicatorBinding>? validationJudicatorResolver = null)
+        Func<string, JudicatorBinding>? validationJudicatorResolver = null,
+        Func<Player, CardBase, Card?, CancellationToken, Task>? discardCardAction = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         _engine = engine;
@@ -53,6 +55,7 @@ public sealed class CardLibrary
         _matchCardIdProvider = matchCardIdProvider;
         _effectLoadContextProvider = effectLoadContextProvider;
         _validationJudicatorResolver = validationJudicatorResolver;
+        _discardCardAction = discardCardAction;
     }
 
     /// <summary>注册定义（id 为注册键）。</summary>
@@ -127,7 +130,7 @@ public sealed class CardLibrary
         CardBase card = definition.Category switch
         {
             CardCategory.Unit => new UnitCard(_engine, definition, _validationJudicatorResolver),
-            CardCategory.Command => new CommandCard(_engine, definition, _validationJudicatorResolver),
+            CardCategory.Command => new OrderCard(_engine, definition, _validationJudicatorResolver),
             CardCategory.Counter => new CounterCard(_engine, definition, _validationJudicatorResolver),
             _ => throw new InvalidOperationException($"卡牌 '{id}' 的类别 '{definition.Category}' 未支持（实例化被拒绝）。"),
         };
@@ -138,6 +141,7 @@ public sealed class CardLibrary
         card.EffectLoadContextProvider = _effectLoadContextProvider is null
             ? null
             : () => _effectLoadContextProvider(id);
+        card.DiscardCardProvider = _discardCardAction;
 
         if (card is UnitCard unitCard)
         {

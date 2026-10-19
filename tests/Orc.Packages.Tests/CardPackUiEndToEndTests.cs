@@ -1,4 +1,5 @@
-using Orc.Cards;
+﻿using Orc.Cards;
+using Orc.Foundation.Actions;
 using Orc.Game;
 using Orc.Game.Cards;
 using Orc.Game.Collections;
@@ -43,6 +44,7 @@ public sealed class CardPackUiEndToEndTests : IDisposable
         var pluginsRoot = WriteUiPluginPackage();
         // 夹具须含内置插件：卡数据组件（六项）与内置判定器均由它装配（产业进程级静态面）。
         BuiltInPlugin.RegisterProcessDefaults();
+        FoundationActions.Register();
 
         var host = EngineHost.FromDiscovery(
             PackageDiscovery.Discover(_root),
@@ -84,6 +86,7 @@ public sealed class CardPackUiEndToEndTests : IDisposable
         WriteCardPack(withKeywords: false);
         var pluginsRoot = WriteUiPluginPackage();
         BuiltInPlugin.RegisterProcessDefaults();
+        FoundationActions.Register();
 
         var host = EngineHost.FromDiscovery(
             PackageDiscovery.Discover(_root), evaluator: null,

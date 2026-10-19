@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Orc.Foundation.Actions</AssemblyName>
+    <RootNamespace>Orc.Foundation.Actions</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 底层逻辑集（R6/R17）：只依赖内核与宿主契约；**不设 InternalsVisibleTo**（纯 public 面）。 -->
+    <ProjectReference Include="..\Orc\Orc.csproj" />
+    <ProjectReference Include="..\Orc.Game\Orc.Game.csproj" />
+    <!-- 物理插件包（P5b）：清单/资产模型与包装载面（Orc.Packages → Orc.Game，无环）。 -->
+    <ProjectReference Include="..\Orc.Packages\Orc.Packages.csproj" />
+  </ItemGroup>
+
+  <!-- 物理插件包（P5b）：清单随程序集输出（package/plugins/orc.foundation.actions/manifest.json）。 -->
+  <ItemGroup>
+    <None Update="package/**/*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

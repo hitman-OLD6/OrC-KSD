@@ -1,5 +1,6 @@
 using Orc.Cards;
 using Orc.Core;
+using Orc.Game.Actions;
 using Orc.Game.Cards;
 using Orc.Game.Commanding;
 using Orc.Game.Effects;
@@ -121,18 +122,35 @@ public sealed class KeywordProgramTests
         await EffectRuntime.ResolveFor(u)!.DamageAsync(u,1);Assert.True(u.GetData<UnitStateData>().IsDestroyed);
     }
     [Fact]
-    public async Task DeathInterceptorIsConsultedBeforeTheKeywordProgramAndCanCancel()
+    public async Task DeathRewriteSlotIsConsultedBeforeTheKeywordProgramAndCanCancel()
     {
-        var (m, u, _) = await Create(new());
+        // S8：旧的两个并列取消口（DeathInterceptor 属性 / 词条 death.cancel）收敛为死亡处理端 Rewrite 段的 handler；
+        // 次序＝注册面（priority 0）先、内置词条 handler（priority 100）后——任一取消即终止，且都在置毁之前。
+        var (m, u, _) = await Create(new()
+        {
+            State = new() { { "consulted", 0 } },
+            Handlers = [new() { Event = "unit.destroy.before", Actions = [A("state.add", "1", "consulted")] }],
+        });
         await m.PlayManager.PlayUnitAsync(u, m.Battlefield.PlayerASupportLine[1]);
         var calls = 0;
-        m.CommandManager.DeathInterceptor = (_, _, _) => { calls++; return Task.FromResult(true); };
+        m.CommandManager.DeathAction.Handle.Register(
+            "测试拦截器",
+            (view, ctx, _) =>
+            {
+                calls++;
+                view.ShouldDie = false;
+                ctx.Stop();
+                return Task.CompletedTask;
+            },
+            ActionHandleBands.Rewrite);
 
         await EffectRuntime.ResolveFor(u)!.DamageAsync(u, 100);
 
         Assert.Equal(1, calls);
         Assert.False(u.GetData<UnitStateData>().IsDestroyed);
         Assert.Same(m.Battlefield.PlayerASupportLine[1], u.GetData<UnitStateData>().Position);
+        // 拦截器先于内置词条 handler：取消后词条程序全程未被咨询（「任一取消即终止」次序保持）。
+        Assert.Equal(0, Assert.Single(KeywordProgramRuntime.Components(u)).State["consulted"]);
 
         // 无拦截时的正常死亡路径由 PreventDeathOnceRetainsOneDefenseAndLaterDeathStillExecutes 覆盖
         // （该用例验证 death.cancel 后再次致死仍会消灭）。
@@ -147,12 +165,15 @@ public sealed class KeywordProgramTests
         var support = m.Battlefield.PlayerASupportLine.First(s => s.IsEmpty);
         var points = m.Players[0].Points;
 
-        Assert.True(await m.CommandManager.MoveByEffectAsync(u, support));
+        // S6/R16：压制只影响「能否被指挥」，不阻断效果移动。
+        Assert.True(await SuppressRules.ApplyAsync(u));
+
+        Assert.True(await m.CommandManager.MoveUnitAsync(u, support));
 
         Assert.Same(support, u.GetData<UnitStateData>().Position);
         Assert.Equal(points, m.Players[0].Points);
         Assert.True(u.GetData<CommandData>().CanMove);
-        Assert.False(await m.CommandManager.MoveByEffectAsync(u, m.Battlefield.FrontLine[1]));
+        Assert.False(await m.CommandManager.MoveUnitAsync(u, m.Battlefield.FrontLine[1]));
     }
 
     [Fact]
@@ -329,8 +350,8 @@ public sealed class KeywordProgramTests
         await match.Initialize();
         var source=await CommandTestKit.PrepareOnSupportAsync(match,match.Players[0],CommandTestKit.InfantryId,1);
         var enemy=await CommandTestKit.PrepareOnFrontAsync(match,match.Players[1],CommandTestKit.MegaId,0);
-        var loaderCard=await PlayChainTestKit.InstantiateLoadedAsync<CommandCard>(match,match.Players[0],loader);
-        var play=match.PlayManager.BeginCommandPrePlayAsync(loaderCard);
+        var loaderCard=await PlayChainTestKit.InstantiateLoadedAsync<OrderCard>(match,match.Players[0],loader);
+        var play=match.PlayManager.BeginOrderPrePlayAsync(loaderCard);
         var pending=await bridge.WaitForNextBeginAsync();
         pending.Responder.Complete(pending.Description.RequestId,TargeterTestKit.Selection(TargetSlot.DefaultName,source.Ref));
         Assert.Equal(PlayResultStatus.Success,(await play).Status);
@@ -342,7 +363,7 @@ public sealed class KeywordProgramTests
         var recorded=Assert.Single(launchCard.GetData<KeywordProgramData>().Values);
         Assert.Equal("damage",recorded.Key);Assert.Equal(source.Modifiers.GetEffectiveValue(CardStatFields.Attack),recorded.Value);
         var before=enemy.Modifiers.GetEffectiveValue(CardStatFields.Defense);
-        var second=match.PlayManager.BeginCommandPrePlayAsync((CommandCard)launchCard);
+        var second=match.PlayManager.BeginOrderPrePlayAsync((OrderCard)launchCard);
         var secondPending=await bridge.WaitForNextBeginAsync();
         secondPending.Responder.Complete(secondPending.Description.RequestId,TargeterTestKit.Selection(TargetSlot.DefaultName,enemy.Ref));
         Assert.Equal(PlayResultStatus.Success,(await second).Status);

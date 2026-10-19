@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using Orc.Core;
 
 namespace Orc.Cards;
@@ -287,20 +287,35 @@ internal static class TriggerReflection
             UpdatePriorities.Normal,
             owner,
             prefab.StableKey,
+            owner, // R9：注册者＝效果实例（反射 Invoke 需补齐全部形参——可选参数不被反射识别）
         });
     }
 
     internal static TriggerRegistration Register(
         object trigger, Type viewType, string name, Delegate handler,
-        IReadOnlyList<string> downstream, IReadOnlyList<string> seams)
+        IReadOnlyList<string> downstream, IReadOnlyList<string> seams, object? registrant = null)
         => (TriggerRegistration)RegisterMethod.MakeGenericMethod(viewType)
-            .Invoke(null, new object[] { trigger, name, handler, downstream, seams })!;
+            .Invoke(null, new object?[] { trigger, name, handler, downstream, seams, registrant })!;
 
     /// <summary>默认区段注册（S5 注入用：无 band、可带优先级）。</summary>
     internal static TriggerRegistration RegisterDefaultBand(
-        object trigger, Type viewType, string name, Delegate handler, int priority)
+        object trigger, Type viewType, string name, Delegate handler, int priority, object? registrant = null)
         => (TriggerRegistration)RegisterBandMethod.MakeGenericMethod(viewType)
-            .Invoke(null, new object[] { trigger, name, handler, priority })!;
+            .Invoke(null, new object?[] { trigger, name, handler, priority, registrant })!;
+
+    /// <summary>按 band 注册（S11：预制体注入的 band 名落地；band 成员须属目标触发器声明的方案）。</summary>
+    internal static TriggerRegistration RegisterBand(
+        object trigger, Type viewType, string name, Delegate handler, Enum band, int priority,
+        object? registrant = null)
+        => (TriggerRegistration)RegisterWithBandMethod.MakeGenericMethod(viewType)
+            .Invoke(null, new object?[] { trigger, name, handler, band, priority, registrant })!;
+
+    /// <summary>目标触发器声明的 band 方案（S11；null＝默认方案）。</summary>
+    internal static Type? GetBandType(object trigger)
+    {
+        ArgumentNullException.ThrowIfNull(trigger);
+        return trigger.GetType().GetProperty(nameof(Trigger<object>.BandType))?.GetValue(trigger) as Type;
+    }
 
     /// <summary>保留槽注册（E-D1：销毁 handler；与视图泛型无关，动作型委托即可）。</summary>
     internal static TriggerRegistration RegisterDisposal(
@@ -338,13 +353,23 @@ internal static class TriggerReflection
 
     private static readonly MethodInfo RegisterBandMethod = Get(nameof(RegisterBandCore));
 
+    private static readonly MethodInfo RegisterWithBandMethod = Get(nameof(RegisterWithBandCore));
+
     private static readonly MethodInfo RegisterDisposalMethod = Get(nameof(RegisterDisposalCore));
 
     private static readonly MethodInfo RegisterDisposalHandlerMethod = Get(nameof(RegisterDisposalHandlerCore));
 
-    private static TriggerRegistration RegisterBandCore<TView>(object trigger, string name, Delegate handler, int priority)
+    private static TriggerRegistration RegisterBandCore<TView>(
+        object trigger, string name, Delegate handler, int priority, object? registrant)
         where TView : class
-        => ((Trigger<TView>)trigger).Register(name, (Func<TView, Context, CancellationToken, Task>)handler, priority);
+        => ((Trigger<TView>)trigger).Register(
+            name, (Func<TView, Context, CancellationToken, Task>)handler, priority, registrant: registrant);
+
+    private static TriggerRegistration RegisterWithBandCore<TView>(
+        object trigger, string name, Delegate handler, Enum band, int priority, object? registrant)
+        where TView : class
+        => ((Trigger<TView>)trigger).Register(
+            name, (Func<TView, Context, CancellationToken, Task>)handler, band, priority, registrant: registrant);
 
     private static TriggerRegistration RegisterDisposalHandlerCore<TView>(
         object trigger, string name, Delegate handler, IEnumerable<string>? downstream) where TView : class
@@ -381,9 +406,9 @@ internal static class TriggerReflection
 
     private static TriggerRegistration RegisterCore<TView>(
         object trigger, string name, Delegate handler,
-        IReadOnlyList<string> downstream, IReadOnlyList<string> seams) where TView : class
+        IReadOnlyList<string> downstream, IReadOnlyList<string> seams, object? registrant) where TView : class
         => ((Trigger<TView>)trigger).Register(
-            name, (Func<TView, Context, CancellationToken, Task>)handler, 0, downstream, seams);
+            name, (Func<TView, Context, CancellationToken, Task>)handler, 0, downstream, seams, registrant: registrant);
 
     private static void WrapperCore<TView>(
         object trigger, TriggerRegistration target, string phase, string? seam, Delegate wrapper)

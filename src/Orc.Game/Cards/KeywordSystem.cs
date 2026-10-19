@@ -1,4 +1,4 @@
-using Orc.Cards;
+﻿using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Board;
 using Orc.Game.Commanding;
@@ -161,7 +161,9 @@ public sealed class KeywordLoadContext
         Func<UnitCard, UnitCard, bool>? counterEligibility = null,
         Func<UnitCard, UnitCard, bool>? ambushCondition = null,
         Action? keywordChangeObserver = null,
-        KeywordSnapshot? keywordSnapshot = null)
+        KeywordSnapshot? keywordSnapshot = null,
+        Orc.Game.Actions.IDamageAction? damageAction = null,
+        Orc.Game.Actions.IDeathAction? deathAction = null)
     {
         Engine = engine;
         AttackDamageTrigger = attackDamageTrigger;
@@ -173,6 +175,8 @@ public sealed class KeywordLoadContext
         AmbushCondition = ambushCondition;
         KeywordChangeObserver = keywordChangeObserver;
         Keywords = keywordSnapshot;
+        DamageAction = damageAction;
+        DeathAction = deathAction;
     }
 
     /// <summary>对局引擎（发射更新 / 触发子触发器所需）。</summary>
@@ -215,6 +219,18 @@ public sealed class KeywordLoadContext
     /// 可空＝无对局上下文（独立构造/部分装配）＝跳过、不抛错（操作不失败）。
     /// </summary>
     public Action? KeywordChangeObserver { get; }
+
+    /// <summary>
+    /// 伤害动作（R11/P5b 接口化）：重甲挂 <c>combat.damage</c>、免疫单位侧挂 <c>damage.apply</c>；
+    /// 可空＝无对局伤害面（独立构造）＝不注册（防御、不抛错）。
+    /// </summary>
+    public Orc.Game.Actions.IDamageAction? DamageAction { get; }
+
+    /// <summary>
+    /// 死亡动作（S11 加性）：伏击改写经它走**完整两端**（触发端 → 处理端）执行「以死代伤」；
+    /// 可空＝无对局死亡面（独立构造）＝伏击效果不注册（防御、不抛错）。
+    /// </summary>
+    public Orc.Game.Actions.IDeathAction? DeathAction { get; }
 }
 
 /// <summary>

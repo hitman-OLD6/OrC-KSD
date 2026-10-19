@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "diy.volley",
+  "name": "齐射",
+  "components": [
+    {
+      "component": "typeCategory",
+      "type": [
+        "order"
+      ]
+    },
+    {
+      "component": "factionCost",
+      "faction": "Germany",
+      "kredits": 2
+    },
+    {
+      "component": "tagData",
+      "rarity": "Standard"
+    },
+    {
+      "component": "effects",
+      "prefabs": [
+        "diy.volley.effect"
+      ]
+    }
+  ]
+}

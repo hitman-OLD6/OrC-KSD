@@ -16,6 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Orc\Orc.csproj" />
     <ProjectReference Include="..\Orc.Game\Orc.Game.csproj" />
+    <ProjectReference Include="..\Orc.Foundation.Actions\Orc.Foundation.Actions.csproj" />
     <ProjectReference Include="..\Orc.Script\Orc.Script.csproj" />
     <ProjectReference Include="..\Orc.Packages\Orc.Packages.csproj" />
     <ProjectReference Include="..\Orc.Plugins.BuiltIn\Orc.Plugins.BuiltIn.csproj" />

@@ -2,5 +2,5 @@
 var runtime = self is null ? null : Orc.Game.Effects.EffectRuntime.ResolveFor(self);
 if (runtime is not null)
 {
-    await runtime.LosePointSlotsAsync(self!, {{amount}}, ct);
+    await runtime.LosePointSlotsAsync(self!, {{amount}}, ct, self);
 }

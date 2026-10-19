@@ -1,3 +1,4 @@
+using Orc.Cards;
 using Orc.Core;
 
 namespace Orc.Game.Commanding;
@@ -40,12 +41,12 @@ public class CommandTriggerView
 
     /// <summary>
     /// 触发者卡牌引用（X1 加性；可选）：引发本次操作的效果宿主卡——非空＝效果引发（且知来源卡）；空＝玩家主动操作（非效果引发）。
-    /// 值＝<c>Ref&lt;Entity&gt;</c>（效果宿主卡实例的引用；判等以引用同一性为准——同一实体在链路上以同一引用实例承载）；
+    /// 值＝<see cref="Card"/> 对象引用（R9 起为归一化后的卡对象；判等以对象同一性为准）；
     /// 缺省调用（未携带）＝空（向后兼容）。
     /// </summary>
     [Optional]
     [Read]
-    public virtual Ref<Entity>? TriggerCard { get; set; }
+    public virtual Card? TriggerCard { get; set; }
 }
 
 /// <summary>
@@ -73,11 +74,11 @@ public class UnitMoveTriggerView
 
     /// <summary>
     /// 触发者卡牌引用（X1 加性；可选）：引发本次操作的效果宿主卡——非空＝效果引发（且知来源卡）；空＝玩家主动操作（非效果引发）。
-    /// 值＝<c>Ref&lt;Entity&gt;</c>（效果宿主卡实例的引用；判等以引用同一性为准）；缺省调用（未携带）＝空（向后兼容）。
+    /// 值＝<see cref="Card"/> 对象引用（R9 起归一化为卡对象；判等以对象同一性为准）；缺省调用（未携带）＝空（向后兼容）。
     /// </summary>
     [Optional]
     [Read]
-    public virtual Ref<Entity>? TriggerCard { get; set; }
+    public virtual Card? TriggerCard { get; set; }
 }
 
 /// <summary>
@@ -109,11 +110,16 @@ public class UnitAttackTriggerView
 
     /// <summary>
     /// 触发者卡牌引用（X1 加性；可选）：引发本次攻击的效果宿主卡——非空＝效果引发（且知来源卡）；空＝玩家主动操作（非效果引发）。
-    /// 值＝<c>Ref&lt;Entity&gt;</c>（效果宿主卡实例的引用；判等以引用同一性为准）；缺省调用（未携带）＝空（向后兼容）。
+    /// 值＝<see cref="Card"/> 对象引用（R9 起归一化为卡对象；判等以对象同一性为准）；缺省调用（未携带）＝空（向后兼容）。
     /// </summary>
     [Optional]
     [Read]
-    public virtual Ref<Entity>? TriggerCard { get; set; }
+    public virtual Card? TriggerCard { get; set; }
+
+    /// <summary>本次执行的结果载体（S11 加性；框架内部——入口只读结局，作者不读写）。</summary>
+    [Optional]
+    [Read]
+    public virtual Orc.Game.Actions.ActionTargetResult? Result { get; set; }
 }
 
 /// <summary>
@@ -141,10 +147,15 @@ public class AttackDamageTriggerView
 
     /// <summary>
     /// 触发者卡牌引用（X1 加性；可选）：引发本次操作的效果宿主卡——非空＝效果引发（且知来源卡）；空＝玩家主动操作（非效果引发）。
-    /// 值＝<c>Ref&lt;Entity&gt;</c>（效果宿主卡实例的引用；判等以引用同一性为准）；缺省调用（未携带）＝空（向后兼容）；
+    /// 值＝<see cref="Card"/> 对象引用（R9 起归一化为卡对象；判等以对象同一性为准）；缺省调用（未携带）＝空（向后兼容）；
     /// 同一效果引发的「攻击→伤害」链中触发者随链路传递（伤害链路读数＝攻击链读数）。
     /// </summary>
     [Optional]
     [Read]
-    public virtual Ref<Entity>? TriggerCard { get; set; }
+    public virtual Card? TriggerCard { get; set; }
+
+    /// <summary>本次执行的结果载体（S11 加性；框架内部——默认结算回填结局，作者不读写）。</summary>
+    [Optional]
+    [Read]
+    public virtual Orc.Game.Actions.ActionTargetResult? Result { get; set; }
 }

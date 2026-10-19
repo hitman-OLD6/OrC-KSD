@@ -60,10 +60,10 @@ internal static class S9Kit
             bridge, seed, effectRegistry, extraDefinitions: CreateDefinitions());
 
     /// <summary>实例化发射源＋装载（含效果桩），返回（卡，效果桩）；测试装配引用（Engine / CommandManager）随配置。</summary>
-    public static async Task<(CommandCard Card, CardServiceSceneEffect Effect)> PrepareEmitterAsync(
+    public static async Task<(OrderCard Card, CardServiceSceneEffect Effect)> PrepareEmitterAsync(
         Match match, Player owner)
     {
-        var card = (CommandCard)match.CardLibrary.Instantiate(EmitterId);
+        var card = (OrderCard)match.CardLibrary.Instantiate(EmitterId);
         await card.LoadAsync(owner);
         var effect = Assert.IsType<CardServiceSceneEffect>(Assert.Single(card.Effects));
         effect.Engine = match.Engine;

@@ -78,13 +78,43 @@ public class TriggerRegistryTests
         var match = GameTestData.CreateStandardMatch(seed: 42);
         await match.Initialize();
 
-        // 2C：内置流程触发器注册为底层（指挥 / 单位移动 / 单位攻击 / 造成攻击伤害——分层可查询、测试可断言）
+        // S15：动作目录按八个动作的两端触发器装配（加入手牌 2 / 抽牌 3 / 伤害 4 / 死亡 2 /
+        // 攻击 2 / 移动 2 / 加入战场 3 / 指令 2＝20 项），全部登记为底层；指挥触发器不属动作、不再登记。
         var lowLevel = match.TriggerRegistry.GetByLayer(TriggerLayer.LowLevel);
-        Assert.Equal(4, lowLevel.Count);
-        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.CommandTrigger));
-        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.UnitMoveTrigger));
+        Assert.Equal(20, lowLevel.Count);
+        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.AddToHandAction.Trigger));
+        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.AddToHandAction.Handle));
+        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.DrawAction.Top));
+        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.DrawAction.Specific));
+        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.DrawAction.Handle));
+        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.DamagePipeline.CombatDamage));
+        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.DamagePipeline.EffectDamage));
+        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.DamagePipeline.BattleDamage));
+        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.DamagePipeline.Apply));
+        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.DeathAction.Trigger));
+        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.DeathAction.Handle));
         Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.UnitAttackTrigger));
         Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.AttackDamageTrigger));
+        // P5b：移动动作已迁出宿主程序集，两端由实现自报（ActionTriggerEnd，类型擦除）。
+        var moveEnds = match.CommandManager.MoveAction.Ends;
+        Assert.Contains(lowLevel, entry => moveEnds.Any(end => end.Role == "触发端" && ReferenceEquals(entry.Trigger, end.Trigger)));
+        Assert.Contains(lowLevel, entry => moveEnds.Any(end => end.Role == "处理端" && ReferenceEquals(entry.Trigger, end.Trigger)));
+        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.JoinBattlefieldAction.Deploy));
+        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.JoinBattlefieldAction.Join));
+        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.JoinBattlefieldAction.Handle));
+        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.Engine.OrderFlow.Trigger));
+        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.Engine.OrderFlow.FinalizeTrigger));
+        Assert.DoesNotContain(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.CommandTrigger));
+
+        // 「底层触发器＝8 个动作的 20 个端」不是硬编码清单碰巧相等：与动作目录逐条展开完全一致
+        // （8 条 entry × 各自两端；目录是装配真源，注册表只是按目录登记）。
+        var expectedEnds = match.CommandManager.Actions.Entries
+            .SelectMany(entry => entry.Ends)
+            .Select(end => end.Trigger)
+            .ToArray();
+        Assert.Equal(20, expectedEnds.Length);
+        Assert.Equal(expectedEnds, lowLevel.Select(entry => entry.Trigger));
+
         Assert.Empty(match.TriggerRegistry.GetByLayer(TriggerLayer.External));
 
         // 对局级：每对局一份，互不相通（另一对局未初始化＝注册表为空）

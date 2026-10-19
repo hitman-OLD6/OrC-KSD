@@ -37,6 +37,7 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
     private readonly string[] _hooks;
     private readonly int _mountPriority;
     private readonly object? _owner;
+    private readonly object? _registrant;
     private long _seq;
     private long _wrapperSeq;
     private JudicatorBinding? _validationBinding;
@@ -46,7 +47,8 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
     /// <summary>
     /// 以初始化形态构造触发器（名称〔可选〕、Kind〔默认主动〕、band 方案〔默认缺省〕、初始事件集合〔可选〕、
     /// hooks 声明〔S3；可选〕、挂载优先级〔S3；默认 Normal〕、所有者〔S3；可选〕、
-    /// 稳定键〔S-C1；可选，定义级身份来源，未声明回退派生〕）。
+    /// 稳定键〔S-C1；可选，定义级身份来源，未声明回退派生〕、
+    /// 注册者〔R9；可选，定义级触发者归因——卡/效果注入共享触发器时声明〕）。
     /// 初始事件集合与注册 API 为等价通道（逐项走相同装配校验）。
     /// hooks 声明时机仅构造期（无运行期注册 API）：非空即被动语义；每项须非空、非纯空白、不重复（声明顺序保留）。
     /// </summary>
@@ -62,7 +64,8 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
         IEnumerable<string>? hooks = null,
         int priority = UpdatePriorities.Normal,
         object? owner = null,
-        string? stableKey = null)
+        string? stableKey = null,
+        object? registrant = null)
     {
         Name = name;
         Kind = kind;
@@ -86,6 +89,7 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
         _hooks = ValidateAndCopyHooks(hooks, kind);
         _mountPriority = priority;
         _owner = owner;
+        _registrant = registrant;
 
         if (events is not null)
         {
@@ -167,6 +171,13 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
     /// <summary>所有者声明（构造期；可选、可为 null；S3 卸载机制内部使用、公共面不暴露）。</summary>
     internal object? Owner => _owner;
 
+    /// <summary>
+    /// 注册者声明（R9；构造期可选）：本触发器内注册项的默认触发者归因（卡/效果）；
+    /// 注册项级 <c>registrant</c> 优先于本值；未声明时按所有者（<see cref="Owner"/> 为 Card/Effect）回退。
+    /// 语义见 <see cref="TriggerEventInfo.Registrant"/>／<see cref="TriggerEventInfo.SourceCard"/>。
+    /// </summary>
+    public object? Registrant => _registrant;
+
     /// <summary>当前挂载的总线（null＝未挂载；实例级状态；仅由总线 Mount/UnmountOwner 读写）。</summary>
     internal Bus? MountedBus { get; set; }
 
@@ -177,14 +188,21 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
     /// </summary>
     public IReadOnlyList<TriggerRegistration> InitialRegistrations => _initialRegistrations;
 
+    /// <summary>
+    /// 构造期声明的专门 band 方案（<c>null</c>＝默认方案）。S11 加性只读面：
+    /// 供框架侧注入（预制体 <c>injects</c> 的 band 名解析）判定「该触发器要求显式 band」。
+    /// </summary>
+    public Type? BandType => _bandType;
+
     /// <summary>注册一个不带 band 的事件（落默认区段；仅默认 band 方案可用）。返回注册句柄（S4 加性扩展；可用于 <see cref="Unregister"/> 撤销）。</summary>
     /// <exception cref="ArgumentNullException">handler 为 null。</exception>
     /// <exception cref="ArgumentException">事件名为空；默认方案下 band 校验不适用项；downstream 含 null/空白/重复项。</exception>
     /// <exception cref="ArgumentOutOfRangeException">优先级越界（须满足 0 ≤ 优先级 &lt; 1000）。</exception>
     /// <param name="downstream">声明的下游触发器稳定键（S-C2 加性；可选；不改运行行为，仅供审查链静态图取边）。</param>
-    public TriggerRegistration Register(string name, Func<TView, Context, CancellationToken, Task> handler, int priority = 0, IEnumerable<string>? downstream = null, IEnumerable<string>? seams = null)
+    /// <param name="registrant">注册者（R9 加性；可选；卡/效果注入共享触发器时声明——审计面 <see cref="TriggerEventInfo.SourceCard"/> 的来源）。</param>
+    public TriggerRegistration Register(string name, Func<TView, Context, CancellationToken, Task> handler, int priority = 0, IEnumerable<string>? downstream = null, IEnumerable<string>? seams = null, object? registrant = null)
     {
-        var entry = AddEvent(name, handler, band: null, priority, downstream, seams);
+        var entry = AddEvent(name, handler, band: null, priority, downstream, seams, registrant: registrant);
         return new TriggerRegistration(this, entry.Seq, name);
     }
 
@@ -193,10 +211,11 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
     /// <exception cref="ArgumentException">事件名为空；band 成员与已声明方案不一致（二选一保护）；downstream 含 null/空白/重复项。</exception>
     /// <exception cref="ArgumentOutOfRangeException">band 值或优先级越界（band 须为自然数且 ≤ 1,000,000）。</exception>
     /// <param name="downstream">声明的下游触发器稳定键（S-C2 加性；可选；不改运行行为，仅供审查链静态图取边）。</param>
-    public TriggerRegistration Register(string name, Func<TView, Context, CancellationToken, Task> handler, Enum band, int priority = 0, IEnumerable<string>? downstream = null, IEnumerable<string>? seams = null)
+    /// <param name="registrant">注册者（R9 加性；可选；卡/效果注入共享触发器时声明）。</param>
+    public TriggerRegistration Register(string name, Func<TView, Context, CancellationToken, Task> handler, Enum band, int priority = 0, IEnumerable<string>? downstream = null, IEnumerable<string>? seams = null, object? registrant = null)
     {
         ArgumentNullException.ThrowIfNull(band);
-        var entry = AddEvent(name, handler, band, priority, downstream, seams);
+        var entry = AddEvent(name, handler, band, priority, downstream, seams, registrant: registrant);
         return new TriggerRegistration(this, entry.Seq, name);
     }
 
@@ -209,13 +228,15 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
     /// <exception cref="ArgumentNullException">handler 为 null。</exception>
     /// <exception cref="ArgumentException">事件名为空；downstream 含 null/空白/重复项。</exception>
     /// <exception cref="ArgumentOutOfRangeException">优先级越界（须满足 0 ≤ 优先级 &lt; 1000）。</exception>
+    /// <param name="registrant">注册者（R9 加性；可选；卡/效果声明销毁 handler 时传入）。</param>
     public TriggerRegistration RegisterDisposal(
         string name,
         Func<TView, Context, CancellationToken, Task> handler,
         int priority = 0,
-        IEnumerable<string>? downstream = null, IEnumerable<string>? seams = null)
+        IEnumerable<string>? downstream = null, IEnumerable<string>? seams = null,
+        object? registrant = null)
     {
-        var entry = AddEvent(name, handler, band: null, priority, downstream, isDisposalSlot: true);
+        var entry = AddEvent(name, handler, band: null, priority, downstream, isDisposalSlot: true, registrant: registrant);
         return new TriggerRegistration(this, entry.Seq, name);
     }
 
@@ -408,6 +429,15 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
     {
         ArgumentNullException.ThrowIfNull(engine);
 
+        // R9 入口初值（fail-fast）：只认 TriggerCard 键；非 Card 且非 null ⇒ 立即抛（不静默、不进契约兜底）。
+        // 「上游仍写 Ref 而漏归一化」在此立刻暴露——归一化唯一入口＝写入边界的 SourceNormalizer.ToCard。
+        var entry = data is not null && data.TryGetValue(TriggerPayloadKeys.TriggerCard, out var raw) ? raw : null;
+        if (entry is not null && entry is not Orc.Cards.Card)
+        {
+            throw new InvalidCastException(
+                $"载荷 '{TriggerPayloadKeys.TriggerCard}' 必须为 Card（收到 {entry.GetType().Name}）；请在写入边界经 SourceNormalizer.ToCard 归一化。");
+        }
+
         var parent = ExecutionFrame.Current;
         var label = DisplayName;
         var stream = new EventStream();
@@ -415,7 +445,10 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
             parent?.Stream ?? engine.RootStream,
             parent is null ? label : ExecutionFrame.BuildSource(parent.TriggerLabel, parent.CurrentEventName));
 
-        var frame = new ExecutionFrame(parent, stream, label, engine);
+        var frame = new ExecutionFrame(parent, stream, label, engine)
+        {
+            TriggerCard = (entry as Orc.Cards.Card) ?? parent?.TriggerCard,
+        };
         ExecutionFrame.Current = frame;
         try
         {
@@ -543,6 +576,12 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
             }
 
             frame.CurrentEventName = item.Name;
+
+            // R9 逐事件解析（进入事件前、before 包装器之前）：卡/效果注册项改写为其 source 卡（链上最后者胜），
+            // 其余注册项原样继承；解析结果写回数据面（视图代理按名直读，csx 与 C# 共用 view.TriggerCard）。
+            frame.TriggerCard = item.SourceCard ?? frame.TriggerCard;
+            ctx.Data[TriggerPayloadKeys.TriggerCard] = frame.TriggerCard;
+
             var before = item.SnapshotBefore();
             var after = item.SnapshotAfter();
             var replace = item.LastReplaceWrapper;
@@ -626,7 +665,8 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
         int priority,
         IEnumerable<string>? downstream = null,
         IEnumerable<string>? seams = null,
-        bool isDisposalSlot = false)
+        bool isDisposalSlot = false,
+        object? registrant = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
 
@@ -644,10 +684,20 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
         var bandValue = isDisposalSlot ? 0 : ResolveBandValue(band);
         var entry = new EventEntry(
             name, handler, bandValue, priority, _seq++, ValidateDownstream(downstream),
-            ValidateSeams(seams), isDisposalSlot);
+            ValidateSeams(seams), isDisposalSlot, ResolveRegistrant(registrant));
         _events.Add(entry);
         return entry;
     }
+
+    /// <summary>
+    /// 注册者归因链（R9）：注册项级 → 触发器声明级 → 所有者（仅 Card/Effect）→ null。
+    /// 非 Card/Effect 的注册者按 null 处理（不抛——归因面只降级、不阻断注册）。
+    /// </summary>
+    private object? ResolveRegistrant(object? registrant)
+        => NormalizeRegistrant(registrant ?? _registrant ?? _owner);
+
+    private static object? NormalizeRegistrant(object? candidate)
+        => candidate is Orc.Cards.Card or Orc.Cards.Effect ? candidate : null;
 
     /// <summary>downstream 声明校验与拷贝（S-C2；每项非空、非纯空白、不重复；null＝空）。</summary>
     /// <summary>动作缝声明校验与拷贝：每项非空、非纯空白、不重复；null＝空。</summary>
@@ -846,7 +896,8 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
             long seq,
             string[] downstream,
             string[] seams,
-            bool isDisposalSlot = false)
+            bool isDisposalSlot = false,
+            object? registrant = null)
         {
             Name = name;
             Handler = handler;
@@ -855,6 +906,7 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
             Seq = seq;
             Downstream = downstream;
             IsDisposalSlot = isDisposalSlot;
+            Registrant = registrant;
 
             _seams = new Dictionary<string, SeamEntry>(StringComparer.Ordinal);
             foreach (var seam in seams)
@@ -873,12 +925,26 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
         /// <summary>是否位于保留槽（效果销毁 handler；恒在普通事件之后执行）。</summary>
         internal bool IsDisposalSlot { get; }
 
+        /// <summary>注册项触发者归因（R9；Card / Effect / null——注册期已归一，非卡非效果＝null）。</summary>
+        internal object? Registrant { get; }
+
+        /// <summary>
+        /// 触发者卡牌（R9；读取期派生）：注册者为 Card ⇒ 自身；为 Effect ⇒ 宿主卡（宿主销毁后自动降级 null）；
+        /// 其余 ⇒ null。派生不抛（宿主已清理属正常生命周期）。
+        /// </summary>
+        internal Orc.Cards.Card? SourceCard => Registrant switch
+        {
+            Orc.Cards.Card card => card,
+            Orc.Cards.Effect effect => effect.HostOrNull,
+            _ => null,
+        };
+
         /// <summary>投影为只读审阅信息（S-C2；含当前 moding 项数）。</summary>
         internal TriggerEventInfo ToInfo() => new(
             Name, BandValue, Priority, Seq, Downstream,
             _beforeWrappers.Count + _afterWrappers.Count + _replaceWrappers.Count,
             _beforeWrappers.Count, _afterWrappers.Count, _replaceWrappers.Count,
-            _seams.Count, SumSeamWrapperCount(), IsDisposalSlot);
+            _seams.Count, SumSeamWrapperCount(), IsDisposalSlot, Registrant, SourceCard);
 
         internal int BandValue { get; }
 
@@ -1140,7 +1206,9 @@ public sealed class TriggerEventInfo
         int replaceWrapperCount,
         int seamCount,
         int seamWrapperCount,
-        bool isDisposalSlot = false)
+        bool isDisposalSlot = false,
+        object? registrant = null,
+        Orc.Cards.Card? sourceCard = null)
     {
         Name = name;
         BandValue = bandValue;
@@ -1154,6 +1222,8 @@ public sealed class TriggerEventInfo
         SeamCount = seamCount;
         SeamWrapperCount = seamWrapperCount;
         IsDisposalSlot = isDisposalSlot;
+        Registrant = registrant;
+        SourceCard = sourceCard;
     }
 
     /// <summary>事件名（日志/定位用；不承担唯一键职责）。</summary>
@@ -1192,6 +1262,18 @@ public sealed class TriggerEventInfo
 
     /// <summary>是否位于保留槽（效果销毁 handler；恒在普通事件之后执行）。</summary>
     public bool IsDisposalSlot { get; }
+
+    /// <summary>
+    /// 注册者（R9 审计面；Card / Effect / null）：注册项级 <c>registrant</c> → 触发器声明级 → 所有者（Card/Effect）
+    /// → null。非卡非效果一律 null（不抛）。
+    /// </summary>
+    public object? Registrant { get; }
+
+    /// <summary>
+    /// 触发者卡牌（R9 审计面；读取期派生）：注册者为 Card ⇒ 该卡；为 Effect ⇒ 效果宿主卡
+    /// （宿主销毁后自动降级 null、不抛）；其余 ⇒ null。
+    /// </summary>
+    public Orc.Cards.Card? SourceCard { get; }
 }
 
 /// <summary>
@@ -1235,6 +1317,12 @@ internal sealed class ExecutionFrame
 
     /// <summary>当前正在执行的事件名（source 构成用；未进入事件时为 null）。</summary>
     internal string? CurrentEventName { get; set; }
+
+    /// <summary>
+    /// 当前触发者卡牌（R9；帧级解析结果）：入口初值（载荷 <c>TriggerCard</c>，仅接受 Card/null）或父帧继承；
+    /// 每个事件执行前按该注册项的 SourceCard 覆盖（链上最后者胜）。
+    /// </summary>
+    internal Orc.Cards.Card? TriggerCard { get; set; }
 
     internal Func<string, CancellationToken, Task>? SeamExecutor { get; set; }
 
@@ -1300,6 +1388,7 @@ internal sealed class ExecutionFrame
             for (var frame = top; frame is not null; frame = frame.Parent)
             {
                 frame.Interrupted = true;
+                frame.Stream.Interrupted = true;
             }
         }
         else
@@ -1307,6 +1396,7 @@ internal sealed class ExecutionFrame
             for (var frame = this; frame is not null; frame = frame.Parent)
             {
                 frame.Interrupted = true;
+                frame.Stream.Interrupted = true;
             }
         }
     }

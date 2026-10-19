@@ -23,7 +23,7 @@ public class Scenario1Tests
         var goblin = new Card(engine, "哥布林");
         goblin.AddData(new HealthData { Hp = 10 });
 
-        var fireball = new DamageOrder(engine.DamageFlow, "火球");
+        var fireball = new DamageOrder(engine, "火球");
         mage.AddEffect(fireball);
         await S4TestHelpers.Place(engine, mage);
 
@@ -37,12 +37,12 @@ public class Scenario1Tests
         // 未被反制：无中断留痕
         Assert.DoesNotContain(engine.RootStream.Entries, e => e.Keywords.Contains("interrupt"));
 
-        // 完整链节点：指令流程流（顶层挂总流）→ 指令施放链流 → 伤害结算流
+        // 完整链节点：指令流程流（顶层挂总流）→ 指令施放链流
+        // （P5：DamageFlow 删除后，伤害数值在施放链内直接落地——不再有独立伤害结算子流）
         Assert.Same(engine.RootStream, stream.Parent);
         var castChain = stream.Children.Single();
-        var damageStream = castChain.Children.Single();
         Assert.Same(stream, castChain.Parent);
-        Assert.Same(castChain, damageStream.Parent);
+        Assert.Empty(castChain.Children);
 
         // 伤害结算流内：结算前先于伤害生效（阶段次序）
         var preIdx = S4TestHelpers.IndexOfEntry(
@@ -62,7 +62,7 @@ public class Scenario1Tests
         var goblin = new Card(engine, "哥布林");
         goblin.AddData(new HealthData { Hp = 10 });
 
-        var fireball = new DamageOrder(engine.DamageFlow, "火球");
+        var fireball = new DamageOrder(engine, "火球");
         mage.AddEffect(fireball);
         await S4TestHelpers.Place(engine, mage);
 
@@ -111,7 +111,7 @@ public class Scenario1Tests
         var goblin = new Card(engine, "哥布林");
         goblin.AddData(new HealthData { Hp = 10 });
 
-        var fireball = new DamageOrder(engine.DamageFlow, "火球");
+        var fireball = new DamageOrder(engine, "火球");
         mage.AddEffect(fireball);
         await S4TestHelpers.Place(engine, mage);
 
@@ -164,7 +164,8 @@ public sealed class OrderCounterEffect : PassiveEffect
     {
         CounterChecks++;
 
-        if (_onlyOrderName is not null && view.Order.Name != _onlyOrderName)
+        var order = view.Orders[0]; // P4：多指令视图（登记序；本场景恰一条）
+        if (_onlyOrderName is not null && order.Name != _onlyOrderName)
         {
             return Task.CompletedTask; // 条件未命中（反制哪些指令＝handler 内部自由）
         }
@@ -172,9 +173,9 @@ public sealed class OrderCounterEffect : PassiveEffect
         CounterHits++;
         _engine.RootStream.WriteLog(
             "测试效果/指令反制",
-            $"反制 '{view.Order.Name}'（目标 '{view.Target.Name}'）：施放被拒绝。",
+            $"反制 '{order.Name}'（目标 '{view.Target?.Name ?? "无"}'）：施放被拒绝。",
             LogLevel.Warning,
-            new[] { "counter", "rejected", view.Order.Name, view.Target.Name });
+            new[] { "counter", "rejected", order.Name, view.Target?.Name ?? "无" });
         ctx.Interrupt();
         return Task.CompletedTask;
     }

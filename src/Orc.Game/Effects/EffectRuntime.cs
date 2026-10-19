@@ -79,6 +79,11 @@ public enum EffectDuration
 /// （主场景＝「（触发条件）后从卡组抽取此牌」；结果对象 <c>DeckFetchResult</c>——三态＋类别，两层同型）。</para>
 /// <para>解析路径与既有服务同构：<see cref="ResolveFor"/>（卡 → 玩家 → 服务）。</para>
 /// <para>服务不可达（未装配/脱局）＝**降级不抛错**：返回 false／空集（沿用「功能不可用＝不失败」口径）。</para>
+/// <para>R9 加性（来源透传）：动作方法在 <c>ct</c> 之后追加可选 <c>Card? source</c>——只做两件事：
+/// 写入下游信号的 <c>Source</c> 载荷、作为下游动作（伤害来源/击杀者/弃置施动方）的显式入参；
+/// **不做猜测性回退**（不拿 target/viewer 当 source），不传＝null。`DamageAsync`／`KillAsync` 沿用既有
+/// `source` 形参（位于 ct 前、位置不变）。本期已接下游消费方＝伤害/击杀＋弃置路径；其余动作的 `source`
+/// 为下游服务接线预留（下游服务不在本步改动文件清单内）。</para>
 /// </summary>
 public sealed partial class EffectRuntime
 {
@@ -174,39 +179,76 @@ public sealed partial class EffectRuntime
         return true;
     }
 
-    /// <summary>造成伤害（游戏语义：单位扣防御、总部扣血）。</summary>
+    /// <summary>
+    /// 造成伤害（游戏语义：单位扣防御、总部扣血）。
+    /// R11：经 <c>effect.damage</c> → <c>damage.apply</c>（免疫在此归零、重甲不减免——重甲只挂对战伤害）。
+    /// </summary>
     /// <param name="source">施动方（E1-50；提供时归属：发 <c>unit.damage.dealt</c>、致死时作 <c>Killer</c>）。</param>
+    /// <returns><c>true</c> ＝处理端已执行；服务不可达/目标无伤害语义＝<c>false</c>（零副作用）。</returns>
     /// <exception cref="ArgumentNullException">target 为 null。</exception>
     public async Task<bool> DamageAsync(Card target, int amount, Card? source = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(target);
-        var dealer = source as UnitCard;
-        switch (target)
+        if (_commands() is not { } commands)
         {
-            case UnitCard unit when dealer is not null && _commands() is { } commands:
-                // E1-50：有来源 ⇒ 走指挥管理器的受控面（**伤害来源游标** ＋ unit.damage.dealt 归属）
-                await commands.DealDamageAsync(unit, amount, dealer, ct).ConfigureAwait(false);
-                return true;
-            case UnitCard unit:
-                await unit.ApplyDefenseDamageAsync(amount, ct).ConfigureAwait(false);
-                return true;
-            case Hq hq when dealer is not null && _commands() is { } commands:
-                await commands.DealDamageToHqAsync(hq, amount, dealer, ct).ConfigureAwait(false);
-                return true;
-            case Hq hq:
-                await hq.ApplyDamageAsync(amount, ct).ConfigureAwait(false);
-                return true;
-            default:
-                return false;
+            return false; // 无对局伤害管道：服务不可用（不旁路门户）
         }
+
+        return await commands.DamageByEffectAsync(source, target, amount, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// **战斗**（R10）：两个在场存活单位互相对拼——快照双方攻击力后各走一次 <c>battle.damage</c>，
+    /// 先死者不影响反向输出（同时结算语义）。
+    /// <para>无视：射程 / 守护 / 烟幕 / 拦截 / 伏击改写 / 反击资格；不扣行动费、不清行动位；
+    /// 不发 <c>unit.attack.*</c> / <c>unit.combat.survived</c> / <c>unit.acted</c>。</para>
+    /// </summary>
+    /// <param name="first">先手方（其对 <paramref name="second"/> 的伤害 <c>Source/Killer = first</c>）。</param>
+    /// <param name="second">后手方（反向同理）。</param>
+    /// <param name="source">发起这次战斗的卡（审计参数：只写日志，**不改变伤害归属**；可空）。</param>
+    /// <returns><c>true</c> ＝两向结算均落到处理端；任一方非在场存活单位 / 服务不可达＝<c>false</c>（零副作用）。</returns>
+    /// <exception cref="ArgumentNullException">first / second 为 null。</exception>
+    public async Task<bool> BattleAsync(Card first, Card second, Card? source = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(first);
+        ArgumentNullException.ThrowIfNull(second);
+
+        if (first is not UnitCard a || second is not UnitCard b)
+        {
+            return false;
+        }
+
+        if (!IsBattleReady(a) || !IsBattleReady(b) || ReferenceEquals(a, b))
+        {
+            return false; // 非在场存活单位（含同一单位）：零副作用
+        }
+
+        if (_commands() is not { } commands)
+        {
+            return false;
+        }
+
+        // source 仅审计：不改变「first→second 的伤害归属＝first」这一事实。
+        _engine?.Invoke()?.RootStream.WriteLog(
+            "战斗",
+            source is null
+                ? $"'{a.Name}' 与 '{b.Name}' 强制战斗（无发起卡）。"
+                : $"'{a.Name}' 与 '{b.Name}' 由 '{source.Name}' 发起强制战斗。",
+            LogLevel.Info,
+            new[] { "battle" });
+
+        return await commands.BattleByEffectAsync(a, b, ct).ConfigureAwait(false);
+    }
+
+    private static bool IsBattleReady(UnitCard unit)
+        => unit.TryGetData<UnitStateData>(out var state) && !state.IsDestroyed && state.Position is not null;
 
     /// <summary>属性修饰（攻击力/防御力增减；来源＝本门面实例——撤销请经 <c>RemoveBySourceAsync</c>）。</summary>
     /// <param name="duration">期限（E1-41；<see cref="EffectDuration.Permanent"/>＝随效果存续）。</param>
     /// <exception cref="ArgumentNullException">target 为 null。</exception>
     public async Task<bool> BuffAsync(
         Card target, int attack, int defense,
-        EffectDuration duration = EffectDuration.Permanent, CancellationToken ct = default)
+        EffectDuration duration = EffectDuration.Permanent, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(target);
         if (target is Hq hq && attack == 0)
@@ -249,7 +291,7 @@ public sealed partial class EffectRuntime
     /// 语义完全沿用既有词条组件（幂等＝已存在时无操作 false；终态拒绝/装载失败＝异常透传、不吞不降级）。
     /// </summary>
     /// <exception cref="ArgumentNullException">target 为 null。</exception>
-    public Task<bool> GrantAsync(Card target, string keyword, CancellationToken ct = default)
+    public Task<bool> GrantAsync(Card target, string keyword, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(target);
         ArgumentException.ThrowIfNullOrWhiteSpace(keyword);
@@ -264,7 +306,7 @@ public sealed partial class EffectRuntime
     /// 值域由词条组件既有机制钳制，如重甲/情报 [0,3]）。可达域与语义/降级同无参值形态（同族统一判定）。
     /// </summary>
     /// <exception cref="ArgumentNullException">target 为 null。</exception>
-    public Task<bool> GrantAsync(Card target, string keyword, int? value, CancellationToken ct = default)
+    public Task<bool> GrantAsync(Card target, string keyword, int? value, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(target);
         ArgumentException.ThrowIfNullOrWhiteSpace(keyword);
@@ -279,7 +321,7 @@ public sealed partial class EffectRuntime
     /// 对已死亡卡＝拒绝（明确异常透传）；不可达（无词条面）＝false 降级。
     /// </summary>
     /// <exception cref="ArgumentNullException">target 为 null。</exception>
-    public Task<bool> RevokeAsync(Card target, string keyword, CancellationToken ct = default)
+    public Task<bool> RevokeAsync(Card target, string keyword, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(target);
         ArgumentException.ThrowIfNullOrWhiteSpace(keyword);
@@ -294,7 +336,7 @@ public sealed partial class EffectRuntime
     /// （不存在＝明确异常透传）。不可达（无词条面）＝false（可判别「未执行」）；可达＝已改写 true（置空成功也为 true）。
     /// </summary>
     /// <exception cref="ArgumentNullException">target 为 null。</exception>
-    public Task<bool> SetKeywordValueAsync(Card target, string keyword, int? value, CancellationToken ct = default)
+    public Task<bool> SetKeywordValueAsync(Card target, string keyword, int? value, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(target);
         ArgumentException.ThrowIfNullOrWhiteSpace(keyword);
@@ -314,7 +356,7 @@ public sealed partial class EffectRuntime
     /// 幂等/终态/异常语义完全沿用既有标识授予。
     /// </summary>
     /// <exception cref="ArgumentNullException">target 为 null。</exception>
-    public Task<bool> GrantWithContentAsync(Card target, string keyword, Effect? content, CancellationToken ct = default)
+    public Task<bool> GrantWithContentAsync(Card target, string keyword, Effect? content, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(target);
         ArgumentException.ThrowIfNullOrWhiteSpace(keyword);
@@ -325,7 +367,7 @@ public sealed partial class EffectRuntime
 
     /// <summary>抽牌（走玩家管理器——含满手爆牌裁决）；返回请求的抽牌次数（服务不可达＝0）。</summary>
     /// <exception cref="ArgumentNullException">viewer 为 null。</exception>
-    public async Task<int> DrawAsync(Card viewer, int count, CancellationToken ct = default)
+    public async Task<int> DrawAsync(Card viewer, int count, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(viewer);
         if (count <= 0 || _players() is not { } players || OwnerOf(viewer) is not { } player)
@@ -357,7 +399,7 @@ public sealed partial class EffectRuntime
     /// → <see cref="DeckFetchFailureReason.CardDestroyed"/> → <see cref="DeckFetchFailureReason.NotInDeck"/>（后两者由动作层细化）。
     /// </summary>
     /// <exception cref="ArgumentNullException">target 为 null（参数层）。</exception>
-    public async Task<DeckFetchResult> FetchFromDeckAsync(Card target, CancellationToken ct = default)
+    public async Task<DeckFetchResult> FetchFromDeckAsync(Card target, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(target);
 
@@ -456,7 +498,7 @@ public sealed partial class EffectRuntime
 
     /// <summary>加入手牌（按**卡名**在卡池解析定义；不可用/未命中＝0）。</summary>
     /// <exception cref="ArgumentNullException">viewer 为 null。</exception>
-    public async Task<int> AddToHandAsync(Card viewer, string cardName, int count, CancellationToken ct = default)
+    public async Task<int> AddToHandAsync(Card viewer, string cardName, int count, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(viewer);
         ArgumentException.ThrowIfNullOrWhiteSpace(cardName);
@@ -480,7 +522,7 @@ public sealed partial class EffectRuntime
 
     /// <summary>洗入卡组（按**卡名**解析定义；发 <c>deck.shuffled</c>；不可用/未命中＝0）。</summary>
     /// <exception cref="ArgumentNullException">viewer 为 null。</exception>
-    public async Task<int> ShuffleInAsync(Card viewer, string cardName, int count, CancellationToken ct = default)
+    public async Task<int> ShuffleInAsync(Card viewer, string cardName, int count, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(viewer);
         ArgumentException.ThrowIfNullOrWhiteSpace(cardName);
@@ -504,7 +546,7 @@ public sealed partial class EffectRuntime
 
     /// <summary>压制（游戏层压制服务；施加前资格判定，拒绝＝false）。</summary>
     /// <exception cref="ArgumentNullException">target 为 null。</exception>
-    public async Task<bool> PinAsync(Card target, CancellationToken ct = default)
+    public async Task<bool> PinAsync(Card target, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(target);
         return target is UnitCard unit && await SuppressRules.ApplyAsync(unit).ConfigureAwait(false);
@@ -512,7 +554,7 @@ public sealed partial class EffectRuntime
 
     /// <summary>抑制（游戏层抑制服务——清空处置全链；资格拒绝/非单位＝false）。</summary>
     /// <exception cref="ArgumentNullException">target 为 null。</exception>
-    public Task<bool> SilenceAsync(Card target, CancellationToken ct = default)
+    public Task<bool> SilenceAsync(Card target, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(target);
         return target is UnitCard unit ? InhibitRules.ApplyAsync(unit, ct) : Task.FromResult(false);
@@ -524,7 +566,7 @@ public sealed partial class EffectRuntime
     /// 非单位（指令/反制/HQ 等）＝拒绝结果（「在场且存活」谓词不满足——降级不抛错，对齐本门面惯例）。
     /// </summary>
     /// <exception cref="ArgumentNullException">target 为 null。</exception>
-    public Task<VeteranPromotionResult> UpgradeAsync(Card target, CancellationToken ct = default)
+    public Task<VeteranPromotionResult> UpgradeAsync(Card target, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(target);
         return target is UnitCard unit
@@ -539,7 +581,7 @@ public sealed partial class EffectRuntime
     /// 非单位（指令/反制/HQ 等）＝无操作结果（幂等语义——降级不抛错，对齐本门面惯例）。
     /// </summary>
     /// <exception cref="ArgumentNullException">target 为 null。</exception>
-    public Task<RevealOutcome> RevealAsync(Card target, CancellationToken ct = default)
+    public Task<RevealOutcome> RevealAsync(Card target, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(target);
         return target is UnitCard unit
@@ -547,9 +589,13 @@ public sealed partial class EffectRuntime
             : Task.FromResult(RevealOutcome.NoOp);
     }
 
-    /// <summary>移动（无头；zone＝<c>frontline</c>／<c>support</c>；不可用＝false）。</summary>
+    /// <summary>
+    /// 移动（无头；zone＝<c>frontline</c>／<c>support</c>；不可用＝false）。
+    /// S6/R16：效果移动**零资源消耗**——不扣指挥点、不动行动位、不发 <c>unit.acted</c>、不受压制阻断；
+    /// 落地经「卡牌移动」动作的唯一处理端。
+    /// </summary>
     /// <exception cref="ArgumentNullException">target 为 null。</exception>
-    public async Task<bool> MoveAsync(Card target, string zone, CancellationToken ct = default)
+    public async Task<bool> MoveAsync(Card target, string zone, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(target);
         ArgumentException.ThrowIfNullOrWhiteSpace(zone);
@@ -566,7 +612,7 @@ public sealed partial class EffectRuntime
     /// 槽实际变化才经由资源管理器发 <c>slot.gained</c>→<c>slot.changed</c>。
     /// </summary>
     /// <exception cref="ArgumentNullException">viewer 为 null。</exception>
-    public async Task<bool> GainPointSlotsAsync(Card viewer, int amount, CancellationToken ct = default)
+    public async Task<bool> GainPointSlotsAsync(Card viewer, int amount, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(viewer);
         if (amount <= 0 || _resources() is not { } resources || OwnerOf(viewer) is not { } player)
@@ -582,7 +628,7 @@ public sealed partial class EffectRuntime
     /// 槽实际变化才经由资源管理器发 <c>slot.lost</c>→<c>slot.changed</c>。
     /// </summary>
     /// <exception cref="ArgumentNullException">viewer 为 null。</exception>
-    public async Task<bool> LosePointSlotsAsync(Card viewer, int amount, CancellationToken ct = default)
+    public async Task<bool> LosePointSlotsAsync(Card viewer, int amount, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(viewer);
         if (amount <= 0 || _resources() is not { } resources || OwnerOf(viewer) is not { } player)
@@ -598,7 +644,7 @@ public sealed partial class EffectRuntime
     /// 点数实际增加才经由资源管理器发 <c>point.gained</c>→<c>point.changed</c>。
     /// </summary>
     /// <exception cref="ArgumentNullException">viewer 为 null。</exception>
-    public async Task<bool> GainPointsAsync(Card viewer, int amount, CancellationToken ct = default)
+    public async Task<bool> GainPointsAsync(Card viewer, int amount, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(viewer);
         if (amount <= 0 || _resources() is not { } resources || OwnerOf(viewer) is not { } player)
@@ -614,7 +660,7 @@ public sealed partial class EffectRuntime
     /// 点数实际减少才经由资源管理器发 <c>point.lost</c>→<c>point.changed</c>。
     /// </summary>
     /// <exception cref="ArgumentNullException">viewer 为 null。</exception>
-    public async Task<bool> LosePointsAsync(Card viewer, int amount, CancellationToken ct = default)
+    public async Task<bool> LosePointsAsync(Card viewer, int amount, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(viewer);
         if (amount <= 0 || _resources() is not { } resources || OwnerOf(viewer) is not { } player)

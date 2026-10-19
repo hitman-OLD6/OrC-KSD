@@ -1,3 +1,4 @@
+using Orc.Foundation.Actions;
 using Orc.Game.Plugins;
 using Orc.Packages;
 using Orc.Plugins.BuiltIn;
@@ -18,9 +19,16 @@ public static class TestHost
 /// <summary>
 /// 测试程序集模块初始化（批次 2）：强制加载内置插件程序集并装配其**进程级**资产（词条），
 /// 使用例（含不建对局、只用词条注册面的用例）与迁移前静态构造时序等价。
+/// <para>
+/// P5b：动作实现集是**进程级单一真源**（R17），在此注册一次；未注册时动作目录装配即 fail-fast。
+/// </para>
 /// </summary>
 internal static class TestModuleInitializer
 {
     [System.Runtime.CompilerServices.ModuleInitializer]
-    internal static void Initialize() => BuiltInPlugin.RegisterProcessDefaults();
+    internal static void Initialize()
+    {
+        BuiltInPlugin.RegisterProcessDefaults();
+        FoundationActions.Register();
+    }
 }

@@ -45,7 +45,7 @@ public class GameEntryPointsTests
     [Fact]
     public void Catalog_Contains_New_Entries_As_Available()
     {
-        foreach (var name in new[] { "BeginCommandPrePlayAsync", "BeginMoveAsync", "BeginAttackAsync" })
+        foreach (var name in new[] { "BeginOrderPrePlayAsync", "BeginMoveAsync", "BeginAttackAsync" })
         {
             var entry = GameEntryPoints.All.Single(e => e.Name == name);
             Assert.True(entry.IsAvailable, $"{name} 应为本批已具备");

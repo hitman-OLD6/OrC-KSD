@@ -1,4 +1,6 @@
+﻿using Orc.Cards;
 using Orc.Core;
+using Orc.Game.Actions;
 using Orc.Game.Board;
 using Orc.Game.Cards;
 using Orc.Game.Players;
@@ -16,8 +18,10 @@ namespace Orc.Game.Managers;
 ///   「开始/取消/确认」形态：开始＝本入口；取消/确认＝交互完成路径（桥接 Complete/Cancel 驱动，等价于前端拖回/释放手势）。
 /// ②单位打出链直接驱动（<see cref="PlayUnitAsync"/>）：外层复验＋部署链＋收尾扣费（部署路径）。
 /// ③加入路径（<see cref="JoinUnitAsync"/>）：加入触发器 → 共用单位化触发器；不扣费、不走部署词条（后端入口、不问来源）。
-/// ④指令（<see cref="PlayCommandAsync"/>）：预打出段（验证＋handler 捕获；默认无交互、零更新）自动衔接打出段
-///   （card.played → 主动 handler 集 → 收尾扣费/离手）；捕获结果自动移交为打出触发器 object? 参数。
+/// ④指令（<see cref="PlayOrderAsync"/>）：预打出段（验证＋handler 捕获；默认无交互、零更新）自动衔接打出段
+///   （经指令施放动作 → <c>OrderFlow</c>：Counter → Resolve〔card.played → 全部主动效果〕→ Finalize〔扣费/离手〕）；
+///   预打出捕获结果解析为可选目标后随流程传递（非卡引用＝null，不阻断施放）。
+///   指令打出触发器已退化为纯验证（打出段复验指挥点）。
 /// ⑤反制（<see cref="UseCounterAsync"/>）：单入口状态翻转（激活 ↔ 取消；仅己方回合）。
 /// 结果统一经 <see cref="PlayResult"/>（不抛；失败原因类别化；取消＝<see cref="PlayResultStatus.Cancelled"/>）；
 /// 拒绝/失败/取消均不发任何游戏更新、不进入后续步骤。
@@ -36,6 +40,7 @@ public sealed class PlayManager
     private readonly MatchLifecycle? _lifecycle;
     private readonly Func<Player, Entity?, Entity?, bool> _inputAllowed;
     private readonly Func<Player, bool>? _turnOwner;
+    private readonly IOrderAction _orderAction;
 
     /// <summary>创建打出管理器。</summary>
     /// <param name="engine">对局引擎（发射更新 / 触发子触发器）。</param>
@@ -53,7 +58,8 @@ public sealed class PlayManager
         TurnManager? turnManager = null,
         MatchLifecycle? lifecycle = null,
         Func<Player, Entity?, Entity?, bool>? inputAllowed = null,
-        Func<Player, bool>? turnOwner = null)
+        Func<Player, bool>? turnOwner = null,
+        IOrderAction? orderAction = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(targeterManager);
@@ -66,6 +72,19 @@ public sealed class PlayManager
         _lifecycle = lifecycle;
         _inputAllowed = inputAllowed ?? ((_, _, _) => true);
         _turnOwner = turnOwner;
+
+        // S13 第 6 条：指令施放经**唯一动作入口**（IOrderAction 包装 OrderFlow）——不直调 flow。
+        _orderAction = orderAction ?? ActionRuntime.ResolveOrder(engine);
+
+        // S13：游戏层经 band 向内核 OrderFlow 注入语义（每条引擎恰注册一次）：
+        // ① Resolve / priority 0＝打出宣告（card.played；OrderCard 守卫——内核测试的裸卡不受影响）；
+        //    宣告点在 Resolve 之首：反制 Stop 使整个 Resolve 不执行，被反制的指令因此**不发** card.played
+        //    （视为未成功打出）——现有指令卡效果＝被动效果 hook card.played，宣告点若早于反制会绕过反制。
+        // ② Finalize / priority 100＝打出收尾（扣费 → 离手；Stop 不阻止本段）。
+        engine.OrderFlow.Trigger.Register(
+            "打出宣告", HandleOrderAnnouncedAsync, OrderFlowBands.Resolve, 0);
+        engine.OrderFlow.FinalizeTrigger.Register(
+            "打出收尾", HandleOrderFinalizedAsync, OrderFlowBands.Finalize, 100);
     }
 
     // ---------- ① 单位预打出（开始→交互→确认/取消；一次调用链） ----------
@@ -284,7 +303,7 @@ public sealed class PlayManager
             UnitCard unit => !unit.TryGetData<UnitStateData>(out _)
                 && unit.PrePlayTrigger.EvaluateValidation(Array.Empty<Ref<Entity>>()).IsValid
                 && DeploymentLines(unit).Any(line=>line.GetInsertionGaps().Count>0),
-            CommandCard command => command.PrePlayTrigger.EvaluateValidation(Array.Empty<Ref<Entity>>()).IsValid,
+            OrderCard command => command.PrePlayTrigger.EvaluateValidation(Array.Empty<Ref<Entity>>()).IsValid,
             CounterCard counter => counter.UseCounterTrigger.EvaluateValidation(Array.Empty<Ref<Entity>>()).IsValid,
             _ => false,
         };
@@ -383,25 +402,25 @@ public sealed class PlayManager
     /// ①预打出段：触发预打出触发器（内含指挥点验证——不足＝拒绝）；执行预打出 handler 集（装配期注册；登记序；
     ///   异常沿用引擎隔离；捕获经 <see cref="CardCaptureBox"/> 提交；取消经 <see cref="CardCaptureBox.CancelPrePlay"/> 显式请求）；
     ///   选择器槽位声明（<c>SelectorSlots</c>）随触发数据提供，交互经桥接应答驱动；
-    /// ②打出段（确认后自动衔接）：触发打出触发器（复验指挥点）——card.played → 主动 handler 集（登记序）→ 收尾（扣费→离手）；
-    ///   捕获结果自动移交为 object? 参数（单引用/列表/targeter 皆可承载）。
+    /// ②打出段（确认后自动衔接）：触发打出触发器（**纯验证**，复验指挥点）→ 经 <see cref="IOrderAction"/> 走
+    ///   <c>OrderFlow</c>（Counter → Resolve〔card.played → 全部主动效果〕→ Finalize〔扣费 → 离手〕）。
     /// 预打出段失败/取消 ⇒ 打出不发生（零副作用——不发更新、卡留手、无扣费/离手）。
     /// </summary>
     /// <exception cref="ArgumentNullException">card 为 null。</exception>
     /// <exception cref="InvalidOperationException">卡牌未加载归属（装配性错误、fail-fast）。</exception>
-    public Task<PlayResult> BeginCommandPrePlayAsync(CommandCard card, CancellationToken ct = default)
-        => RunCommandChainAsync(card, ct);
+    public Task<PlayResult> BeginOrderPrePlayAsync(OrderCard card, CancellationToken ct = default)
+        => RunOrderChainAsync(card, ct);
 
     /// <summary>
-    /// 指令打出（兼容入口；受控变更登记：原对外形态保留、内部收敛到预行为入口 <see cref="BeginCommandPrePlayAsync"/>，
-    /// 行为不变——同一实现、一次调用链）。
+    /// 指令打出（<see cref="BeginOrderPrePlayAsync"/> 的等价入口——同一实现、一次调用链；
+    /// 原 <c>PlayOrderAsync</c> 按 R4 改名，不留旧名转发）。
     /// </summary>
     /// <exception cref="ArgumentNullException">card 为 null。</exception>
     /// <exception cref="InvalidOperationException">卡牌未加载归属（装配性错误、fail-fast）。</exception>
-    public Task<PlayResult> PlayCommandAsync(CommandCard card, CancellationToken ct = default)
-        => RunCommandChainAsync(card, ct);
+    public Task<PlayResult> PlayOrderAsync(OrderCard card, CancellationToken ct = default)
+        => RunOrderChainAsync(card, ct);
 
-    private async Task<PlayResult> RunCommandChainAsync(CommandCard card, CancellationToken ct)
+    private async Task<PlayResult> RunOrderChainAsync(OrderCard card, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(card);
         var owner = RequireOwner(card);
@@ -455,24 +474,106 @@ public sealed class PlayManager
 
         if (CheckAdmission(card, true) is { } commitAdmission) return PlayResult.Failure(commitAdmission);
 
-        // ② 打出段：复验＋宣告＋主动 handler 集＋收尾；捕获结果自动移交为 object? 参数。
-        if(!await KeywordProgramRuntime.PreparePlayAsync(card,ct))return PlayResult.Cancelled();
+        // ② 打出段：复验（纯验证触发器，无链事件）→ 指令施放动作（唯一动作入口，经 OrderFlow）。
+        if (!await KeywordProgramRuntime.PreparePlayAsync(card, ct)) return PlayResult.Cancelled();
         var playStream = await card.PlayTrigger.InvokeAsync(
             _engine,
             new Dictionary<string, object?>
             {
                 [GameUpdates.PayloadCard] = card,
                 [GameUpdates.PayloadPlayer] = owner,
-                [nameof(CardTriggerView.Argument)] = captureBox.Result,
             },
             ct);
 
-        return playStream.Outcome switch
+        if (playStream.Outcome == ExecutionOutcome.ValidationRejected)
         {
-            ExecutionOutcome.Normal => PlayResult.Success(),
-            ExecutionOutcome.ValidationRejected => PlayResult.Failure(PlayFailureReason.PlayVerificationRejected),
-            _ => PlayResult.Failure(PlayFailureReason.PlayChainFault),
-        };
+            return PlayResult.Failure(PlayFailureReason.PlayVerificationRejected);
+        }
+
+        if (playStream.Outcome != ExecutionOutcome.Normal)
+        {
+            return PlayResult.Failure(PlayFailureReason.PlayChainFault);
+        }
+
+        var result = await _orderAction
+            .ExecuteAsync(card, ResolveOrderTarget(captureBox.Result), amount: 0, ct: ct)
+            .ConfigureAwait(false);
+        return result.Targets[0].Outcome == ActionOutcomeKind.Skipped
+            ? PlayResult.Cancelled() // Interrupt：牌留手、不扣费
+            : PlayResult.Success();  // 正常结算，或反制 Stop（照常扣费/离手）
+    }
+
+    /// <summary>
+    /// 预打出捕获值 → 可选施放目标（S13 补：目标随流程传递，主动效果与反制适配视图均可读）。
+    /// 解析规则：<c>null</c>→null；<see cref="Card"/>→自身；<see cref="Ref{Entity}"/>→存活则解引用；
+    /// 列表/数组→取第一个可解析为 <see cref="Card"/> 的元素；其余→null。
+    /// 解析失败**不阻断施放**（目标只是可选载荷）；多目标指令的完整传递不在本批范围（遗留）。
+    /// </summary>
+    private static Card? ResolveOrderTarget(object? captured, int depth = 0)
+    {
+        switch (captured)
+        {
+            case null:
+                return null;
+            case Card card:
+                return card;
+            case Ref<Entity> reference:
+                return reference.IsAlive && reference.Value is Card referenced ? referenced : null;
+        }
+
+        // 列表承载（捕获箱多值＝object?[]）：取第一个可解析元素；限制递归深度，避免异常结构。
+        if (depth >= 2 || captured is string || captured is not System.Collections.IEnumerable items)
+        {
+            return null;
+        }
+
+        foreach (var item in items)
+        {
+            if (ResolveOrderTarget(item, depth + 1) is { } found)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 打出宣告（OrderFlow / Resolve / priority 0）：发 <c>card.played</c>（正常打出恰一次；<see cref="OrderCard"/> 守卫）。
+    /// 载荷沿用既有口径＝{ Card, Player }；先于主动效果（priority 100）。被反制（Counter 段 Stop）时 Resolve 整体不执行，
+    /// 故被反制的指令不发本信号（视为未成功打出；效果因此不触发）。
+    /// </summary>
+    private async Task HandleOrderAnnouncedAsync(OrderFlowView view, Context ctx, CancellationToken ct)
+    {
+        if (view.Source is OrderCard order && order.Owner is { } player)
+        {
+            await GameUpdates.EmitCardPlayed(_engine, order, player, ct, order).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// 打出收尾（OrderFlow / Finalize / priority 100）：扣费（恰一次；经点数通用入口发 point.changed）→ 离手。
+    /// <c>Stop</c> 不阻止本段（反制命中仍照常扣费/离手）；<c>Interrupt</c> 已由流程层跳过本阶段。
+    /// </summary>
+    private async Task HandleOrderFinalizedAsync(OrderFlowView view, Context ctx, CancellationToken ct)
+    {
+        if (view.Source is not OrderCard order || order.Owner is not { } player)
+        {
+            return;
+        }
+
+        // W3-2 G5：扣费读「有效部署费」（修饰贡献叠加后的链输出——无修饰时＝基准；与校验/复验同口径）
+        var cost = order.Modifiers.GetEffectiveValue(CardStatFields.DeployCost);
+        if (ResourceManager.ResolveFor(order) is { } manager)
+        {
+            await manager.ChangePointsAsync(player, -cost, PointChangeKind.Add, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            player.Points -= cost; // 脱局兜底（未装配资源管理器）：保持既有直写语义
+        }
+
+        player.Hand.Remove(order);
     }
 
     // ---------- ⑤ 反制（单入口状态翻转） ----------

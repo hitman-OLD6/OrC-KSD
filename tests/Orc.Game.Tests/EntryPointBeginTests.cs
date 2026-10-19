@@ -10,7 +10,7 @@ namespace Orc.Game.Tests;
 /// <summary>
 /// 02-输入接口 S7（新增入口与三类选择器槽位验收）：
 /// ①独立移动/攻击入口（成功／取消／发起拒绝零副作用；与 <c>GetCommandAvailability</c> 同源）；
-/// ②指令统一预行为入口（<c>BeginCommandPrePlayAsync</c> 与兼容入口同一实现）；
+/// ②指令统一预行为入口（<c>BeginOrderPrePlayAsync</c> 与 <c>PlayOrderAsync</c> 同一实现）；
 /// ③三类选择器槽位（槽位按声明序呈现、槽位参数随请求描述交付前端）。
 /// </summary>
 public class EntryPointBeginTests
@@ -140,12 +140,12 @@ public class EntryPointBeginTests
     // ---------- ② 指令统一预行为入口 ----------
 
     [Fact]
-    public async Task BeginCommandPrePlayAsync_Is_Unified_PreAction_Entry_With_Selector_Slots()
+    public async Task BeginOrderPrePlayAsync_Is_Unified_PreAction_Entry_With_Selector_Slots()
     {
         var match = PlayChainTestKit.CreatePlayMatch();
         await match.Initialize();
         var player = match.Players[0];
-        var command = await PlayChainTestKit.InstantiateLoadedAsync<CommandCard>(
+        var command = await PlayChainTestKit.InstantiateLoadedAsync<OrderCard>(
             match, player, PlayChainTestKit.CommandCheapId);
         IReadOnlyList<Selector>? observedSlots = null;
         command.AddPrePlayHandler("观测槽位声明", (view, ctx, ct) =>
@@ -155,7 +155,7 @@ public class EntryPointBeginTests
         });
 
         using var recorder = new UpdateRecorder(match.Engine);
-        var result = await match.PlayManager.BeginCommandPrePlayAsync(command);
+        var result = await match.PlayManager.BeginOrderPrePlayAsync(command);
 
         // 与兼容入口同一实现：照发 card.played（恰一次）、照扣费（E1-25 后续：收尾发 point.changed）、离手
         Assert.Equal(PlayResultStatus.Success, result.Status);
@@ -168,15 +168,15 @@ public class EntryPointBeginTests
     }
 
     [Fact]
-    public async Task PlayCommandAsync_Remains_Equivalent_Compat_Entry()
+    public async Task PlayOrderAsync_Is_Equivalent_To_PreAction_Entry()
     {
         var match = PlayChainTestKit.CreatePlayMatch();
         await match.Initialize();
         var player = match.Players[0];
-        var command = await PlayChainTestKit.InstantiateLoadedAsync<CommandCard>(
+        var command = await PlayChainTestKit.InstantiateLoadedAsync<OrderCard>(
             match, player, PlayChainTestKit.CommandCheapId);
 
-        var result = await match.PlayManager.PlayCommandAsync(command);
+        var result = await match.PlayManager.PlayOrderAsync(command);
 
         Assert.Equal(PlayResultStatus.Success, result.Status);
         Assert.Equal(0, player.Points);

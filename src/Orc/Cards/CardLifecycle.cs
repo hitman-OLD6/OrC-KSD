@@ -49,6 +49,23 @@ public class CardEventView
     [Optional]
     [Read]
     public virtual object? Killer { get; set; }
+
+    /// <summary>
+    /// 事件引发者（R9 加性可选面）：信号载荷 <c>Source</c>（<see cref="PayloadKeys.Source"/>）的引发卡；
+    /// 只读、可空（无引发者＝null）。与 <see cref="TriggerCard"/>（当前 handler 的触发者）分工不同：
+    /// 「敌方弃牌」读本面判敌方。
+    /// </summary>
+    [Optional]
+    [Read]
+    public virtual Card? Source { get; set; }
+
+    /// <summary>
+    /// 当前 handler 的触发者卡牌（R9 加性可选面）：执行链在进入事件前写入的帧值
+    /// （卡/效果注册项＝该卡/效果宿主卡；链上最后者胜），无触发者＝null。
+    /// </summary>
+    [Optional]
+    [Read]
+    public virtual Card? TriggerCard { get; set; }
 }
 
 /// <summary>S4 更新与流程载荷键名约定（card.placed / effect.removed / card.destroyed；攻击/伤害结算流程视图属性同名）。</summary>
@@ -69,8 +86,11 @@ public static class PayloadKeys
     /// <summary>数量载荷键："Amount"。</summary>
     public const string Amount = "Amount";
 
-    /// <summary>指令载荷键："Order"（值＝<see cref="ICastAction"/> 指令接线面；指令流程（S5）携带）。</summary>
+    /// <summary>指令载荷键："Order"（值＝<see cref="ICastAction"/> 指令接线面；S5 单指令形态，保留常量供旧数据键读取）。</summary>
     public const string Order = "Order";
+
+    /// <summary>指令集载荷键："Orders"（值＝<see cref="ICastAction"/> 列表，登记序；P4 指令流程携带）。</summary>
+    public const string Orders = "Orders";
 }
 
 /// <summary>装载链留痕与错误记录工具（内部）：写「当前执行者流（无则总流）」，与会话内留痕一致冒泡。</summary>

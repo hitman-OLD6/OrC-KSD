@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 3,
+  "root": {
+    "id": "diy.memorial.effect",
+    "version": 1,
+    "oneShot": false,
+    "mainTrigger": {
+      "id": "t.main",
+      "stableKey": "diy·纪奠",
+      "kind": "passive",
+      "viewType": "Orc.Cards.CardEventView",
+      "hooks": [
+        "card.played"
+      ],
+      "events": [
+        {
+          "id": "onPlayed",
+          "entry": "HandleAsync",
+          "csx": "Func<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n    if (view.Card is not Orc.Cards.Card played || !object.ReferenceEquals(played, view.Host))\n    {\n        return;\n    }\n\n    var runtime = Orc.Game.Effects.EffectRuntime.ResolveFor(played);\n    if (runtime is null || ctx.Engine is null)\n    {\n        return;\n    }\n\n    ctx.Engine.Variables.TryGet<int>(\"diy.example3.destroyed\", out var count);\n    if (count <= 0)\n    {\n        return;\n    }\n\n    var owner = (played as Orc.Game.Cards.CardBase)?.Owner;\n    var hq = owner?.Hq;\n    if (hq is not null)\n    {\n        await runtime.BuffAsync(hq, 0, count, Orc.Game.Effects.EffectDuration.Permanent, ct, played);\n    }\n};\n",
+          "version": 1
+        }
+      ],
+      "version": 1
+    },
+    "otherTriggers": [
+      {
+        "id": "t.death",
+        "stableKey": "diy·纪奠·死亡计数",
+        "kind": "passive",
+        "viewType": "Orc.Cards.CardEventView",
+        "hooks": [
+          "card.died"
+        ],
+        "events": [
+          {
+            "id": "onDied",
+            "entry": "HandleAsync",
+            "csx": "Func<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n    if (ctx.Engine is null)\n    {\n        await Task.CompletedTask;\n        return;\n    }\n\n    var variables = ctx.Engine.Variables;\n    variables.TryGet<int>(\"diy.example3.destroyed\", out var count);\n    variables.Set(\"diy.example3.destroyed\", count + 1);\n    await Task.CompletedTask;\n};\n",
+            "version": 1
+          }
+        ],
+        "version": 1
+      }
+    ],
+    "wrappers": [],
+    "injects": []
+  }
+}

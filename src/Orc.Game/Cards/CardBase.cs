@@ -128,6 +128,13 @@ public abstract class CardBase : Orc.Cards.Card
     internal Func<CardEffectLoadContext?>? EffectLoadContextProvider { get; set; }
 
     /// <summary>
+    /// 弃置动作提供器（P4 加性面；internal）：反制卡一次性消耗时调用既有
+    /// <c>PlayerManager.DiscardCardAsync</c>（手牌移除 → 销毁 → <c>card.discarded</c>），不新建第二条弃置路径。
+    /// 由对局加载路径经卡牌库注入；独立构造（缺省）＝null——消耗路径走同序同信号的脱局兜底。
+    /// </summary>
+    internal Func<Player, CardBase, Orc.Cards.Card?, CancellationToken, Task>? DiscardCardProvider { get; set; }
+
+    /// <summary>
     /// 对局级卡牌 ID（W1-1 加性面；internal）：加载时分配——由 <see cref="MatchCardIdProvider"/> 取新值；
     /// 未分配（未加载 / 独立构造 / 无提供器）＝null。既有 <see cref="Orc.Core.Entity.Id"/> 为 Guid 不可比较，
     /// 本整数序号承载「构筑外判定」（ID ＞ 初始化水位线）。

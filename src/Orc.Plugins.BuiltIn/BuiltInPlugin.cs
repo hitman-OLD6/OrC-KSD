@@ -139,14 +139,15 @@ public static class BuiltInPlugin
                     $"判定器 '{name}' 基线输出契约不符：期望 object[]{{bool}}（1 元素）——fail-fast。");
 
             // 冲击（bypass range）：效果发起的攻击无视范围矩阵（原 InvokeBool 内联特判迁入）。
+            // args 可空（委托契约为 Func<object[]?, object[]?>）——空参＝无升级特判，不抛。
             if (name == JudicatorNames.CombatRange
-                && args.FirstOrDefault() is UnitCard unit
+                && args?.FirstOrDefault() is UnitCard unit
                 && KeywordProgramRuntime.BypassesRange(unit))
             {
                 value = true;
             }
 
-            if (args.FirstOrDefault() is Orc.Cards.Card actor && KeywordProgram.RuleNames.Contains(name))
+            if (args?.FirstOrDefault() is Orc.Cards.Card actor && KeywordProgram.RuleNames.Contains(name))
             {
                 value = KeywordProgramRuntime.Resolve(actor, name, value ? 1 : 0) != 0;
             }

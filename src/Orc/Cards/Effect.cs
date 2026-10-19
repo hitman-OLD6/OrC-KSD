@@ -1,4 +1,4 @@
-using Orc.Core;
+﻿using Orc.Core;
 
 namespace Orc.Cards;
 
@@ -179,7 +179,7 @@ public abstract class Effect
                 $"Inject 仅可在装载语境（OnMount）中调用；效果 '{Name}' 当前不在装载语境。");
         }
 
-        var registration = target.Register(name, handler, band, priority);
+        var registration = target.Register(name, handler, band, priority, registrant: this);
         var record = new EffectInjection(target, name, band, priority, registration);
         _injections.Add(record);
         _rollbacks.Add(() =>
@@ -226,7 +226,8 @@ public abstract class Effect
     /// </summary>
     /// <exception cref="ArgumentNullException">target / viewType / handler 为 null。</exception>
     public TriggerRegistration InjectByFramework(
-        object target, Type viewType, string name, Delegate handler, int priority = 0)
+        object target, Type viewType, string name, Delegate handler, int priority = 0,
+        string? bandName = null)
     {
         ArgumentNullException.ThrowIfNull(target);
         ArgumentNullException.ThrowIfNull(viewType);
@@ -241,8 +242,15 @@ public abstract class Effect
             handler = WrapWithHost(handler, viewType, this);
         }
 
-        var registration = TriggerReflection.RegisterDefaultBand(target, viewType, name, handler, priority);
-        var record = new EffectInjection(target, name, Orc.Core.DefaultBands.Default, priority, registration);
+        // S11：预制体 <c>injects</c> 可声明 band 名——目标触发器声明了专门 band 方案时按名解析其枚举成员；
+        // 未声明 band 名＝默认区段（默认方案；专门方案下由触发器注册面拒绝并隔离）。
+        var resolvedBand = string.IsNullOrWhiteSpace(bandName) ? null : ResolveBand(target, bandName);
+        var registration = resolvedBand is null
+            ? TriggerReflection.RegisterDefaultBand(target, viewType, name, handler, priority, registrant: this)
+            : TriggerReflection.RegisterBand(
+                target, viewType, name, handler, resolvedBand, priority, registrant: this);
+        var band = resolvedBand ?? (Enum)Orc.Core.DefaultBands.Default;
+        var record = new EffectInjection(target, name, band, priority, registration);
         _injections.Add(record);
         _rollbacks.Add(() =>
         {
@@ -250,6 +258,21 @@ public abstract class Effect
             _injections.Remove(record); // S-C2：注入读面随撤销同步收敛
         });
         return registration;
+    }
+
+    /// <summary>按名解析目标触发器声明的 band 方案成员（S11；无专门方案/未知名＝明确异常，由调用侧隔离）。</summary>
+    private static Enum ResolveBand(object target, string bandName)
+    {
+        var bandType = TriggerReflection.GetBandType(target)
+            ?? throw new InvalidOperationException(
+                $"注入区段 '{bandName}' 不受支持：目标触发器未声明专门 band 方案（只接受默认区段）。");
+        if (!bandType.IsEnum || !Enum.TryParse(bandType, bandName, ignoreCase: false, out var band) || band is null)
+        {
+            throw new InvalidOperationException(
+                $"注入区段 '{bandName}' 不是触发器 band 方案 '{bandType.Name}' 的成员。");
+        }
+
+        return (Enum)band;
     }
 
     /// <summary>

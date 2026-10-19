@@ -44,19 +44,19 @@ public class G14HistoryCountTests
         await match.ResourceManager.AddPointsAsync(player, 10); // 受控加值面：准备打出费用
 
         // 「X」＝轻指令（卡种/定义口径——同名卡＝同一定义）；监听 handler 自持计数（私有闭环）
-        var watched = match.CardLibrary.Get(CommandTestKit.CommandCardId);
+        var watched = match.CardLibrary.Get(CommandTestKit.OrderCardId);
         var handler = new UseCountWatchHandler(match.Engine, player, watched);
         handler.Attach();
 
         // 使用序列：真实打出链驱动 card.played——3 张 X ＋ 1 张旁卡（不同定义）
         for (var i = 0; i < 3; i++)
         {
-            var x = await PlayChainTestKit.InstantiateLoadedAsync<CommandCard>(match, player, CommandTestKit.CommandCardId);
-            Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.PlayCommandAsync(x)).Status);
+            var x = await PlayChainTestKit.InstantiateLoadedAsync<OrderCard>(match, player, CommandTestKit.OrderCardId);
+            Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.PlayOrderAsync(x)).Status);
         }
 
-        var alt = await PlayChainTestKit.InstantiateLoadedAsync<CommandCard>(match, player, AltCommandId);
-        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.PlayCommandAsync(alt)).Status);
+        var alt = await PlayChainTestKit.InstantiateLoadedAsync<OrderCard>(match, player, AltCommandId);
+        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.PlayOrderAsync(alt)).Status);
 
         // 按卡累计：事件 4 次（真实源联动）、X 命中恰 3 次（旁卡不入——卡种识别＝定义；归属过滤＝使用方）
         Assert.Equal(4, handler.SeenEvents);
@@ -384,7 +384,9 @@ internal sealed class DamageThresholdWatchHandler
     /// <summary>订阅伤害流程（「造成攻击伤害」共享触发器；默认互伤之后执行）＋挂载域重置监听。</summary>
     public void Attach(CommandManager commands)
     {
-        commands.AttackDamageTrigger.Register($"{_watched.Name}/伤害结算监听", OnDamageResolvedAsync, priority: 200);
+        commands.AttackDamageTrigger.Register(
+            $"{_watched.Name}/伤害结算监听", OnDamageResolvedAsync,
+            Orc.Game.Actions.ActionHandleBands.Apply, priority: 200);
         _engine.Bus.Mount(_resetTrigger);
     }
 

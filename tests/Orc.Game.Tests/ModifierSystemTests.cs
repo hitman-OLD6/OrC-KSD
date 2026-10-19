@@ -225,7 +225,7 @@ public class ModifierSystemTests
     public async Task Non_Unit_Cards_Support_The_Modifier_Mechanism()
     {
         var engine = new LogicEngine();
-        var command = ModifierTestKit.CreateCommandCard(engine);
+        var command = ModifierTestKit.CreateOrderCard(engine);
         using var recorder = new UpdateRecorder(engine);
         const string powerField = "CommandPower";
         var source = new object();

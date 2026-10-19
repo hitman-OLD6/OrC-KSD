@@ -13,13 +13,13 @@ namespace Orc.Game.Tests;
 /// ④按费用筛选（花费 ≤3 消费有效费用读取口——机制级谓词＋随动；经 Targeter 两级筛选流程）；
 /// 附：反制路径（评估〔EvaluateUse〕＋翻转〔激活读有效值扣点、取消按实扣额退还——「扣点与退点同额」跨调用守恒，
 /// 含修饰漂移增/减两方向边界〕＋承载〔CounterUseTrigger→EvaluateUse〕）统一读有效部署费。
-/// 「6 处读取接改」触达：CostCheckTrigger（②③真实校验）／UnitCard 扣费（③真实部署）／CommandCard 扣费（②）／
+/// 「6 处读取接改」触达：CostCheckTrigger（②③真实校验）／UnitCard 扣费（③真实部署）／OrderCard 扣费（②）／
 /// CounterCard 评估与翻转＋CounterUseTrigger 承载（附）。
 /// </summary>
 public class DeployCostModifierTests
 {
     /// <summary>构造指定部署费的指令卡（机制级最小状态——独立构造；部署费域构造期常驻）。</summary>
-    private static CommandCard CreateDeployCostCard(LogicEngine engine, int deployCost)
+    private static OrderCard CreateDeployCostCard(LogicEngine engine, int deployCost)
         => new(engine, new CardDefinition(
             $"费用{deployCost}指令", deployCost, 0, 0, 0, CardCategory.Command,
             faction: Faction.Germany, rarity: Rarity.Standard));
@@ -32,13 +32,13 @@ public class DeployCostModifierTests
         var match = PlayChainTestKit.CreatePlayMatch();
         await match.Initialize();
         var player = match.Players[0]; // 回合 1：点数 1
-        var command = await PlayChainTestKit.InstantiateLoadedAsync<CommandCard>(
+        var command = await PlayChainTestKit.InstantiateLoadedAsync<OrderCard>(
             match, player, PlayChainTestKit.CommandCostlyId); // 部署费 5
         using var recorder = new UpdateRecorder(match.Engine);
         var source = new object();
 
         // 未修饰：点数 1 < 5 → 预打出拒绝（留手、零副作用）
-        var rejected = await match.PlayManager.PlayCommandAsync(command);
+        var rejected = await match.PlayManager.PlayOrderAsync(command);
         Assert.Equal(PlayResultStatus.Failed, rejected.Status);
         Assert.Equal(PlayFailureReason.PrePlayPointShortage, rejected.FailureReason);
         Assert.Equal(1, player.Points);
@@ -53,7 +53,7 @@ public class DeployCostModifierTests
         // 真实路径消费有效值：预打出校验（1 ≥ 0）＋打出复验通过 → 扣费读有效值（扣 0——点数保持 1）→ 离手
         // （若读基准 5：校验拒绝；若读实时值扣费：1 − 5 为负——两者均可判别）
         recorder.Clear();
-        var played = await match.PlayManager.PlayCommandAsync(command);
+        var played = await match.PlayManager.PlayOrderAsync(command);
         Assert.Equal(PlayResultStatus.Success, played.Status);
         Assert.Equal(1, player.Points);
         Assert.DoesNotContain(command, player.Hand);
@@ -69,7 +69,7 @@ public class DeployCostModifierTests
     public async Task Clamp_And_Group_Registration_And_Unregistration()
     {
         var engine = new LogicEngine();
-        var card = ModifierTestKit.CreateCommandCard(engine); // 部署费 2（基准）
+        var card = ModifierTestKit.CreateOrderCard(engine); // 部署费 2（基准）
         using var recorder = new UpdateRecorder(engine);
         var groupSource = new object();
 
@@ -250,19 +250,19 @@ public class DeployCostModifierTests
         var cardCost5 = CreateDeployCostCard(engine, 5);
 
         // 「消灭花费 ≤3」类效果可用：筛选谓词消费同一有效费用读取口（含边界——恰等入选、超一排除）
-        static IReadOnlyList<CommandCard> Filter(IEnumerable<CommandCard> cards)
+        static IReadOnlyList<OrderCard> Filter(IEnumerable<OrderCard> cards)
             => cards.Where(c =>
                 c.Modifiers.GetEffectiveValue(CardStatFields.DeployCost) <= 3).ToList();
 
         var cards = new[] { cardCost1, cardCost3, cardCost4, cardCost5 };
-        Assert.Equal(new CommandCard[] { cardCost1, cardCost3 }, Filter(cards).ToArray());
+        Assert.Equal(new OrderCard[] { cardCost1, cardCost3 }, Filter(cards).ToArray());
 
         // 随动：修饰使有效部署费改变（4 → 3）→ 同一筛选读取即时反映；撤销 → 回弹排除
         var source = new object();
         await cardCost4.Modifiers.AddModifierAsync(new AddModifier(CardStatFields.DeployCost, -1, source));
-        Assert.Equal(new CommandCard[] { cardCost1, cardCost3, cardCost4 }, Filter(cards).ToArray());
+        Assert.Equal(new OrderCard[] { cardCost1, cardCost3, cardCost4 }, Filter(cards).ToArray());
         await cardCost4.Modifiers.RemoveBySourceAsync(source);
-        Assert.Equal(new CommandCard[] { cardCost1, cardCost3 }, Filter(cards).ToArray());
+        Assert.Equal(new OrderCard[] { cardCost1, cardCost3 }, Filter(cards).ToArray());
     }
 
     [Fact]

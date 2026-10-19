@@ -202,7 +202,7 @@ public class EffectRuntimeEndToEndMoreTests
         var plain = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(match, playerA, plainId, toHand: false);
         var british = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(match, playerA, britishId, toHand: false);
         var plan = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(match, playerA, planId, toHand: false);
-        var command = await PlayChainTestKit.InstantiateLoadedAsync<CommandCard>(
+        var command = await PlayChainTestKit.InstantiateLoadedAsync<OrderCard>(
             match, playerB, commandId, toHand: false);
 
         // 反例一律用"普通兵"（无 tag／非指令／日本／名不匹配 ⇒ 四个维度全不命中）

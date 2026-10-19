@@ -1,6 +1,7 @@
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
 using Orc.Cards;
 using Orc.Core;
+using Orc.Game.Actions;
 using Orc.Game.Board;
 using Orc.Game.Cards;
 using Orc.Game.Players;
@@ -119,6 +120,7 @@ public sealed class MatchCardService
     private readonly Func<UnitCard, Slot, CancellationToken, Task<PlayResult>>? _joinUnitAction;
     private readonly Func<Player, CancellationToken, Task>? _shuffleDeckAction;
     private readonly Func<MatchState>? _stateProvider;
+    private readonly Func<IAddToHandAction?>? _addToHandActionProvider;
 
     /// <summary>
     /// 创建卡牌服务。
@@ -129,6 +131,7 @@ public sealed class MatchCardService
     /// <param name="joinUnitAction">阵线放置动作面（既有「加入路径」语义；对局装配＝PlayManager.JoinUnitAsync；缺省＝阵线放置不可用）。</param>
     /// <param name="shuffleDeckAction">洗切动作面（洗入；对局装配＝Match.ShuffleDeckAsync——发 deck.shuffled；缺省＝洗入不可用）。</param>
     /// <param name="stateProvider">对局状态读取器（门禁——仅「进行」态；缺省＝独立构造无门禁）。</param>
+    /// <param name="addToHandActionProvider">加入手牌动作面（S7：放置到手牌的唯一入口；缺省＝独立构造时按需自建最小实例）。</param>
     /// <exception cref="ArgumentNullException">engine / library 为 null。</exception>
     public MatchCardService(
         LogicEngine engine,
@@ -137,7 +140,8 @@ public sealed class MatchCardService
         Func<UnitCard, Slot, CancellationToken, Task<PlayResult>>? joinUnitAction = null,
         Func<Player, CancellationToken, Task>? shuffleDeckAction = null,
         Func<MatchState>? stateProvider = null,
-        CardEffectRegistry? effectRegistry = null)
+        CardEffectRegistry? effectRegistry = null,
+        Func<IAddToHandAction?>? addToHandActionProvider = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(library);
@@ -149,7 +153,12 @@ public sealed class MatchCardService
         _shuffleDeckAction = shuffleDeckAction;
         _stateProvider = stateProvider;
         _effectRegistry = effectRegistry;
+        _addToHandActionProvider = addToHandActionProvider;
     }
+
+    /// <summary>加入手牌动作面（对局路径＝装配链注入的同一实例；独立构造＝经动作目录查询面按默认实现集创建并登记）。</summary>
+    private IAddToHandAction AddToHandAction()
+        => _addToHandActionProvider?.Invoke() ?? ActionRuntime.ResolveAddToHand(_engine);
 
     private readonly CardEffectRegistry? _effectRegistry;
 
@@ -243,17 +252,15 @@ public sealed class MatchCardService
         ArgumentNullException.ThrowIfNull(player);
         ValidatePlacementTarget(card, player);
 
-        if (HandLimitBurn.IsAtLimit(player))
+        // 入口适配器（S7）：只把 ActionResult 翻译为 CardPlaceResult；写入与爆牌裁决都在「加入手牌」动作的处理端。
+        var result = await AddToHandAction().AddAsync(card, player, triggerCard: null, ct).ConfigureAwait(false);
+        var outcome = result.Targets[0];
+        return outcome.Outcome switch
         {
-            // 满手＝爆牌（G7 已交付口径；生成路径信号＝销毁（含 card.destroyed）→ card.burned 恰一次；
-            // hand.add / drawn 零次——「未经手牌」；不经弃置动作——经共享爆牌单元〔K0·B12 统一；Kb 独立信号输出〕）
-            await HandLimitBurn.BurnAsync(_engine, player, card, emitDrawn: false, ct);
-            return CardPlaceResult.Burned(card);
-        }
-
-        player.Hand.Add(card);
-        await GameUpdates.EmitCardHandAdd(_engine, player, card, ct);
-        return CardPlaceResult.Placed(card);
+            ActionOutcomeKind.Applied => CardPlaceResult.Placed(card),
+            _ when outcome.Reason == ActionFailureKind.HandFull => CardPlaceResult.Burned(card),
+            _ => CardPlaceResult.Rejected(CardPlaceFailureReason.PlacementRejected, card),
+        };
     }
 
     /// <summary>

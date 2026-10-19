@@ -99,8 +99,8 @@ public static class GameEntryPoints
         new GameEntryPoint("BeginUnitPrePlayAsync", CategoryPlay, "Orc.Game.Managers.PlayManager",
             "BeginUnitPrePlayAsync(card, ct)", "非终局 ∧ 归属已加载 ∧ 费用 ∧ 空槽候选非空",
             "PlayResult（确认⇒自动衔接打出链）", GameEntryPointStatus.Available),
-        new GameEntryPoint("BeginCommandPrePlayAsync", CategoryPlay, "Orc.Game.Managers.PlayManager",
-            "BeginCommandPrePlayAsync(card, ct)", "非终局 ∧ 归属已加载 ∧ 费用",
+        new GameEntryPoint("BeginOrderPrePlayAsync", CategoryPlay, "Orc.Game.Managers.PlayManager",
+            "BeginOrderPrePlayAsync(card, ct)", "非终局 ∧ 归属已加载 ∧ 费用",
             "PlayResult（确认⇒自动衔接打出段）", GameEntryPointStatus.Available),
         new GameEntryPoint("PlayUnitAsync", CategoryPlay, "Orc.Game.Managers.PlayManager",
             "PlayUnitAsync(card, target, ct)", "非终局 ∧ 槽位为空 ∧ 未单位化",
@@ -111,8 +111,10 @@ public static class GameEntryPoints
         new GameEntryPoint("UseCounterAsync", CategoryPlay, "Orc.Game.Managers.PlayManager",
             "UseCounterAsync(card, ct)", "非终局 ∧ 己方回合 ∧ 费用",
             "PlayResult（激活↔取消）", GameEntryPointStatus.Available),
-        new GameEntryPoint("PlayCommandAsync", CategoryPlay, "Orc.Game.Managers.PlayManager",
-            "PlayCommandAsync(card, ct)〔兼容入口〕", "同 BeginCommandPrePlayAsync",
+        // P4 契约白名单：本条目只允许 Name/Signature 改名；Gate 文本是受冻结字段（零 diff），
+        // 其中的旧入口名仅作"门禁同源"的描述性引用，不指向任何现存成员——语义仍为「与预行为入口同一门禁」。
+        new GameEntryPoint("PlayOrderAsync", CategoryPlay, "Orc.Game.Managers.PlayManager",
+            "PlayOrderAsync(card, ct)", "同 BeginCommandPrePlayAsync",
             "PlayResult（与预行为入口同一实现）", GameEntryPointStatus.Available),
 
         // ---------- 指挥 ----------
@@ -229,7 +231,7 @@ public static class GameEntryPoints
 
         // ---------- 门户/重发 ----------
         new GameEntryPoint("ApplyDefenseDamageAsync", CategoryGateway, "Orc.Game.Cards.UnitCard",
-            "ApplyDefenseDamageAsync(amount, ct)", "已单位化 ∧ 未死亡", "Task（进管线→集中触发）",
+            "ApplyDefenseDamageAsync(amount, ct)", "已单位化 ∧ 未死亡", "Task（受控面：仅 DamagePipeline 可调）",
             GameEntryPointStatus.Available),
         new GameEntryPoint("RepairDefenseAsync", CategoryGateway, "Orc.Game.Cards.UnitCard",
             "RepairDefenseAsync(ct)", "已单位化 ∧ 未死亡", "Task（有变化才发）",
@@ -239,7 +241,7 @@ public static class GameEntryPoints
             GameEntryPointStatus.Available),
         new GameEntryPoint("ApplyDamageAsync", CategoryGateway, "Orc.Game.Players.Hq",
             "ApplyDamageAsync(amount, ct)", "非终局（HQ 数值路径与管线）",
-            "Task（改写→介入→应用→跑链）", GameEntryPointStatus.Available),
+            "Task（受控面：仅 DamagePipeline 可调）", GameEntryPointStatus.Available),
         new GameEntryPoint("AddDamageRewriter", CategoryGateway, "Orc.Game.Players.Hq",
             "AddDamageRewriter(rewriter)", "装配/效果装载期", "void",
             GameEntryPointStatus.Available),

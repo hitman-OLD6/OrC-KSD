@@ -5,25 +5,31 @@ using Orc.Core;
 namespace Orc.Cards;
 
 /// <summary>
-/// 指令流程 band 方案（S5 具名 band 扩展位；与 <see cref="AttackFlowBands"/> 全序同构）：
+/// 指令流程 band 方案（R3 公共名兼容：8 个动作中唯一保留专属 band 方案者）：
 /// Counter＝反制检查（扩展位，无默认处理器；反制类效果经既有装载/注入机制接入此处）／
-/// Resolve＝施放结算（默认处理器「施放结算」：调用当前指令的施放链；链被中断时本事件不再执行——施放效果不发生）／
-/// Finalize＝收尾（扩展位，无默认处理器）。
+/// Resolve＝结算（priority 0＝宣告点 <c>card.played</c>；priority 100＝默认「施放结算」——按登记序执行全部主动效果）／
+/// Finalize＝收尾（独立阶段；游戏层 priority 100 注册扣费/离手）。
+/// <para>
+/// 段序：<see cref="Counter"/> → <see cref="Resolve"/> → <see cref="Finalize"/>。
+/// <c>card.played</c> 位于 <see cref="Resolve"/> 之首（priority 0）：反制 <c>Stop</c> 使整个 Resolve 不执行，
+/// 因此被反制的指令**不发** <c>card.played</c>（视为未成功打出）——这是「反制后效果不触发」的必要前提
+/// （现有指令卡效果＝被动效果 hook <c>card.played</c>，宣告点若早于反制则效果会绕过反制）。
+/// </para>
 /// </summary>
 public enum OrderFlowBands
 {
     /// <summary>反制检查（扩展位；默认无处理器，供反制类效果注入）。</summary>
     Counter = 1,
 
-    /// <summary>施放结算（默认处理器在此调用指令的施放链；被中断（Interrupt）时跳过——施放不发生）。</summary>
+    /// <summary>结算（priority 0＝宣告点；priority 100＝默认施放结算）。</summary>
     Resolve = 2,
 
-    /// <summary>收尾（扩展位；默认无处理器，供效果/调用方注入）。</summary>
+    /// <summary>收尾（独立阶段；<c>ctx.Stop()</c> 不阻止本段，<c>ctx.Interrupt()</c> 阻止）。</summary>
     Finalize = 3,
 }
 
 /// <summary>
-/// 指令流程视图（S5）：一次施放的执行时信息通道——来源 / 目标 / 数值 / 当前指令（非泛型接线面）。
+/// 指令流程视图（S5；P4 多指令化）：一次施放的执行时信息通道——来源 / 目标 / 数值 / 当前施放的指令集（非泛型接线面）。
 /// 反制等检查位 handler 经本视图获得「当前施放的指令 / 来源 / 目标」（执行时数据），而非装配时预绑具体指令引用。
 /// </summary>
 [ContextView]
@@ -33,30 +39,43 @@ public class OrderFlowView
     [Read]
     public virtual Card Source { get; set; }
 
-    /// <summary>施放目标（承受方）。</summary>
+    /// <summary>施放目标（承受方；可空——无目标指令）。</summary>
+    [Optional]
     [Read]
-    public virtual Card Target { get; set; }
+    public virtual Card? Target { get; set; }
 
     /// <summary>数值（如伤害量；流程内可改写）。</summary>
     [Mutate]
     public virtual int Amount { get; set; }
 
-    /// <summary>当前施放的指令（执行时数据；非泛型接线面，反制等检查位不依赖具体指令类型）。</summary>
+    /// <summary>当前施放的指令集（登记序；多主动效果按此序全部执行）。空集＝无主动效果。</summary>
     [Read]
-    public virtual ICastAction Order { get; set; }
+    public virtual IReadOnlyList<ICastAction> Orders { get; set; }
 }
 
 /// <summary>
-/// 指令流程（S5；引擎级共享，与 <see cref="AttackFlow"/> / <see cref="DamageFlow"/> 同构）：
-/// 编排「反制检查（Counter）→ 施放结算（Resolve；默认调用指令施放链）→ 收尾（Finalize）」。
-/// 承载引擎级共享的施放检查位：反制类效果经既有装载/注入机制（<see cref="Effect"/> 的 Inject）接入 Counter band；
-/// 反制判定命中并经 <see cref="Context.Interrupt"/> 中断后，Resolve 不再执行——施放链（含伤害结算）不发生。
-/// 框架统一提供位点：指令（主动效果）经本流程施放，作者无需自定位点；检查位施放信息经视图（执行时数据通道）传递。
+/// 指令流程（S5；引擎级共享；P5/S17 起为内核唯一流程——
+/// 攻击／伤害流程类 <c>AttackFlow</c>／<c>DamageFlow</c> 已删除，动作实现归游戏层动作实体）：
+/// 编排「反制检查（Counter）→ 结算（Resolve）→ 收尾（Finalize）」。
+/// <para>
+/// P4 两阶段执行（S13）：阶段 1＝<see cref="Trigger"/>（Counter → Resolve）；阶段 2＝<see cref="FinalizeTrigger"/>。
+/// <c>ExecuteAsync</c> 先跑阶段 1；<c>Interrupt</c>（链级中断）则跳过阶段 2；否则无论阶段 1 是否 <c>Stop</c> 都跑阶段 2。
+/// 因此 <c>ctx.Stop()</c>＝被反制但仍消耗（Resolve 停、Finalize 跑；反制默认语义），
+/// <c>ctx.Interrupt()</c>＝牌留手/不扣费（两阶段全停；保留为可选路径）。
+/// </para>
+/// <para>
+/// 游戏层经 band 注入语义：<c>Resolve / priority 0</c>＝<c>card.played</c>（<c>view.Source is OrderCard</c> 守卫）；
+/// <c>Finalize / priority 100</c>＝扣费/离手。内核只提供位点，不认识具体卡类型。
+/// </para>
 /// </summary>
 public sealed class OrderFlow
 {
+    /// <summary>「施放结算」默认事件优先级（S13：主动效果在 priority 100；宣告点在 0）。</summary>
+    private const int ResolveDefaultPriority = 100;
+
     private readonly LogicEngine _engine;
     private readonly Trigger<OrderFlowView> _trigger;
+    private readonly Trigger<OrderFlowView> _finalizeTrigger;
     private readonly TriggerRegistration _resolveRegistration;
 
     internal OrderFlow(LogicEngine engine)
@@ -67,48 +86,95 @@ public sealed class OrderFlow
             kind: TriggerKind.Active,
             bandType: typeof(OrderFlowBands));
 
-        // 施放结算＝调用当前指令的施放链（默认事件；被中断时跳过）。
+        // 阶段 2：独立收尾触发器（同 band 方案——Finalize 段）。
+        _finalizeTrigger = new Trigger<OrderFlowView>(
+            name: "指令流程收尾",
+            kind: TriggerKind.Active,
+            bandType: typeof(OrderFlowBands));
+
+        // 施放结算＝按登记序执行全部主动效果（默认事件；被 Stop/Interrupt 时跳过）。
         // 经注册面装配（等价通道）：内置处理器为普通注册项、注册句柄直接可得（供 moding（逻辑替换）等经句柄寻址）。
-        _resolveRegistration = _trigger.Register("施放结算", OnResolve, OrderFlowBands.Resolve);
+        _resolveRegistration = _trigger.Register(
+            "施放结算", OnResolve, OrderFlowBands.Resolve, ResolveDefaultPriority);
     }
 
-    /// <summary>指令流程触发器（band 扩展位载体；效果经 Register 注入具名 band，经 Unregister 撤销）。</summary>
+    /// <summary>指令流程阶段 1 触发器（Counter → Resolve；反制经 band 注入、经 Unregister 撤销）。</summary>
     public Trigger<OrderFlowView> Trigger => _trigger;
+
+    /// <summary>指令流程阶段 2 触发器（Finalize；<c>Stop</c> 不阻止、<c>Interrupt</c> 阻止）。</summary>
+    public Trigger<OrderFlowView> FinalizeTrigger => _finalizeTrigger;
 
     /// <summary>「施放结算」处理器（内置默认事件）的注册句柄（供 moding（逻辑替换）等经句柄寻址）。</summary>
     public TriggerRegistration ResolveRegistration => _resolveRegistration;
 
     /// <summary>
-    /// 执行指令流程（规范施放入口）：反制检查 → 施放结算（执行指令施放链）→ 收尾。
-    /// 顶层调用时指令流挂总流；嵌套调用（如触发器内）时挂当前执行者流。
+    /// 执行指令流程（单指令便捷重载）：<paramref name="order"/> 为 null＝无主动效果。
     /// </summary>
-    /// <exception cref="ArgumentNullException">source、order 或 target 为 null。</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="source"/> 为 null。</exception>
     public Task<EventStream> ExecuteAsync(
-        Card source, ICastAction order, Card target, int amount, CancellationToken ct = default)
+        Card source, ICastAction? order, Card? target, int amount, CancellationToken ct = default)
+        => ExecuteAsync(
+            source,
+            order is null ? Array.Empty<ICastAction>() : new[] { order },
+            target,
+            amount,
+            ct);
+
+    /// <summary>
+    /// 执行指令流程（规范施放入口）：反制检查 → 结算（宣告点 + 按登记序执行全部主动效果）→〔未中断时〕收尾。
+    /// 顶层调用时指令流挂总流；嵌套调用（如触发器内）时挂当前执行者流。
+    /// 只要求 <paramref name="source"/> 非空；目标可空（无目标指令）。
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="source"/> 或 <paramref name="orders"/> 为 null。</exception>
+    public async Task<EventStream> ExecuteAsync(
+        Card source, IReadOnlyList<ICastAction> orders, Card? target, int amount,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(source);
-        ArgumentNullException.ThrowIfNull(order);
-        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(orders);
 
         var data = new Dictionary<string, object?>
         {
             [PayloadKeys.Source] = source,
             [PayloadKeys.Target] = target,
             [PayloadKeys.Amount] = amount,
-            [PayloadKeys.Order] = order,
+            [PayloadKeys.Orders] = orders,
         };
-        return _trigger.InvokeAsync(_engine, data, ct);
+
+        // 阶段 1：Counter → Resolve。
+        var stream = await _trigger.InvokeAsync(_engine, data, ct).ConfigureAwait(false);
+
+        // Interrupt＝两阶段全停（牌留手/不扣费）；Stop＝只停 Resolve、Finalize 照常。
+        if (stream.Interrupted)
+        {
+            return stream;
+        }
+
+        // 阶段 2：Finalize（独立阶段；扣费/离手）。
+        await _finalizeTrigger.InvokeAsync(_engine, data, ct).ConfigureAwait(false);
+        return stream;
     }
 
-    /// <summary>施放结算（默认）：调用当前指令的施放链（施放信息经执行时数据传递；不预绑具体指令引用）。</summary>
-    private Task OnResolve(OrderFlowView view, Context ctx, CancellationToken ct)
+    /// <summary>
+    /// 施放结算（默认）：按登记序依次执行全部主动效果（**禁止** <c>FirstOrDefault</c>——多主动效果必须全跑）。
+    /// 施放信息经执行时数据传递；不预绑具体指令引用。
+    /// </summary>
+    private async Task OnResolve(OrderFlowView view, Context ctx, CancellationToken ct)
     {
-        var castData = new Dictionary<string, object?>
+        foreach (var order in view.Orders)
         {
-            [PayloadKeys.Source] = view.Source,
-            [PayloadKeys.Target] = view.Target,
-            [PayloadKeys.Amount] = view.Amount,
-        };
-        return view.Order.CastAsync(_engine, castData, ct);
+            if (ctx.Interrupted)
+            {
+                break; // 链级中断：后续主动效果不再执行
+            }
+
+            var castData = new Dictionary<string, object?>
+            {
+                [PayloadKeys.Source] = view.Source,
+                [PayloadKeys.Target] = view.Target,
+                [PayloadKeys.Amount] = view.Amount,
+            };
+            await order.CastAsync(_engine, castData, ct).ConfigureAwait(false);
+        }
     }
 }

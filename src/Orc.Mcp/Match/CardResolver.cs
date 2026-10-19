@@ -32,7 +32,7 @@ internal static class CardResolver
         return true;
     }
 
-    /// <summary>解析并做具体类型判定（如 <c>UnitCard</c>/<c>CommandCard</c>/<c>CounterCard</c>）。</summary>
+    /// <summary>解析并做具体类型判定（如 <c>UnitCard</c>/<c>OrderCard</c>/<c>CounterCard</c>）。</summary>
     public static bool TryResolveCard<T>(Orc.Game.Match match, string reference, out T? card, out string error)
         where T : class
     {

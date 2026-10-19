@@ -300,12 +300,12 @@ public sealed partial class McpService : IMcpHost, IMcpActions
         => Executor.RunAsync(
             async m =>
             {
-                if (!CardResolver.TryResolveCard<Orc.Game.Cards.CommandCard>(m, cardRef, out var card, out var error))
+                if (!CardResolver.TryResolveCard<Orc.Game.Cards.OrderCard>(m, cardRef, out var card, out var error))
                 {
                     return ActionOutcome.Failed(McpCodes.InvalidArguments, error);
                 }
 
-                var result = await m.PlayManager.BeginCommandPrePlayAsync(card!, ct).ConfigureAwait(false);
+                var result = await m.PlayManager.BeginOrderPrePlayAsync(card!, ct).ConfigureAwait(false);
                 return EngineResultMapper.FromPlay(result);
             },
             ct);
@@ -315,12 +315,12 @@ public sealed partial class McpService : IMcpHost, IMcpActions
         => Executor.RunAsync(
             async m =>
             {
-                if (!CardResolver.TryResolveCard<Orc.Game.Cards.CommandCard>(m, cardRef, out var card, out var error))
+                if (!CardResolver.TryResolveCard<Orc.Game.Cards.OrderCard>(m, cardRef, out var card, out var error))
                 {
                     return ActionOutcome.Failed(McpCodes.InvalidArguments, error);
                 }
 
-                var result = await m.PlayManager.PlayCommandAsync(card!, ct).ConfigureAwait(false);
+                var result = await m.PlayManager.PlayOrderAsync(card!, ct).ConfigureAwait(false);
                 return EngineResultMapper.FromPlay(result);
             },
             ct);

@@ -115,7 +115,7 @@ public class KeywordEffectChannelTests
 
         // 渲染衔接：带参值形态进入 csx（四参调用——逗号＋整数字面量）。
         var csx = Assert.Single(snapshot.Root.MainTrigger.Events).CsxSource!;
-        Assert.Contains($"GrantAsync(target, \"{keyword}\", {value}, ct)", csx, StringComparison.Ordinal);
+        Assert.Contains($"GrantAsync(target, \"{keyword}\", {value}, ct, self)", csx, StringComparison.Ordinal);
         AssertCompiles(snapshot, $"grant {keyword}={value}");
 
         var registry = new CardEffectRegistry();
@@ -235,18 +235,18 @@ public class KeywordEffectChannelTests
 
         // 未提供参值：与既有渲染**逐字**一致（三参调用——不携带参值；既有无参值断言口径零修改）。
         var legacy = catalog.Render(new DslOp("grant", new DslSelector("self"), keyword: "闪击"));
-        Assert.Contains("await runtime.GrantAsync(target, \"闪击\", ct);", legacy, StringComparison.Ordinal);
+        Assert.Contains("await runtime.GrantAsync(target, \"闪击\", ct, self);", legacy, StringComparison.Ordinal);
         Assert.DoesNotContain("\"闪击\", null", legacy, StringComparison.Ordinal);
 
         // 显式提供（含 0/负数）：四参调用（逗号＋整数字面量——「未提供 vs 显式 0」由此区分）。
         var valued = catalog.Render(new DslOp("grant", new DslSelector("self"), keyword: "重甲", value: 3));
-        Assert.Contains("await runtime.GrantAsync(target, \"重甲\", 3, ct);", valued, StringComparison.Ordinal);
+        Assert.Contains("await runtime.GrantAsync(target, \"重甲\", 3, ct, self);", valued, StringComparison.Ordinal);
 
         var zero = catalog.Render(new DslOp("grant", new DslSelector("self"), keyword: "重甲", value: 0));
-        Assert.Contains("await runtime.GrantAsync(target, \"重甲\", 0, ct);", zero, StringComparison.Ordinal);
+        Assert.Contains("await runtime.GrantAsync(target, \"重甲\", 0, ct, self);", zero, StringComparison.Ordinal);
 
         var negative = catalog.Render(new DslOp("grant", new DslSelector("self"), keyword: "重甲", value: -1));
-        Assert.Contains("await runtime.GrantAsync(target, \"重甲\", -1, ct);", negative, StringComparison.Ordinal);
+        Assert.Contains("await runtime.GrantAsync(target, \"重甲\", -1, ct, self);", negative, StringComparison.Ordinal);
     }
 
     [Fact]

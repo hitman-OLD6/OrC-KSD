@@ -114,7 +114,7 @@ public class MatchOutcomeTests
         var unit = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(unit);
         var handUnit = await CommandTestKit.InstantiateLoadedAsync(match, playerA, CommandTestKit.InfantryId, toHand: true);
-        var commandCard = (CommandCard)match.CardLibrary.Instantiate(CommandTestKit.CommandCardId);
+        var commandCard = (OrderCard)match.CardLibrary.Instantiate(CommandTestKit.OrderCardId);
         await commandCard.LoadAsync(playerA);
         playerA.Hand.Add(commandCard);
 
@@ -140,7 +140,7 @@ public class MatchOutcomeTests
         var joinUnit = await match.PlayManager.JoinUnitAsync(handUnit, match.Battlefield.PlayerASupportLine[3]);
         Assert.Equal(PlayFailureReason.GameEnded, joinUnit.FailureReason);
 
-        var playCommand = await match.PlayManager.PlayCommandAsync(commandCard);
+        var playCommand = await match.PlayManager.PlayOrderAsync(commandCard);
         Assert.Equal(PlayFailureReason.GameEnded, playCommand.FailureReason);
 
         // ④移动/攻击流程的触发器级对外入口：直接驱动＝ValidationRejected（零副作用——槽位/状态不变）。

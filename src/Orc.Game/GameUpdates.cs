@@ -298,12 +298,19 @@ public static class GameUpdates
     /// <summary>载荷键：新点数（值＝int；point.changed 携带）。</summary>
     public const string PayloadNewPoints = "NewPoints";
 
+    /// <summary>
+    /// 载荷键：来源（R9；值＝<see cref="Card"/> 对象引用，可空）：**事件引发者**——恒写、缺省 null
+    /// （「无引发者」与「键缺失」不混淆）。回合五连与玩家主动操作恒 null；
+    /// 与视图属性 <c>TriggerCard</c>（当前 handler 的触发者，链上最后者胜）分工不同。
+    /// </summary>
+    public const string PayloadSource = "Source";
+
     // ---------- 发射助手（可选便捷层；统一走总线 Emit 通路） ----------
 
     /// <summary>发射 card.played（W4-1 升级版；载荷＝{ Card, Player }——被使用卡实例＋使用方；部署/指令打出链调用点）。</summary>
     /// <exception cref="ArgumentNullException">engine / card / player 为 null。</exception>
     public static Task EmitCardPlayed(
-        LogicEngine engine, Card card, Player player, CancellationToken ct = default)
+        LogicEngine engine, Card card, Player player, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(card);
@@ -314,6 +321,7 @@ public static class GameUpdates
             {
                 [PayloadCard] = card,
                 [PayloadPlayer] = player,
+                [PayloadSource] = source,
             },
             ct);
     }
@@ -321,7 +329,7 @@ public static class GameUpdates
     /// <summary>发射 deck.shuffled（载荷＝{ Player, Deck }；洗切动作面统一使用——初始化双方卡组洗切各一条、恰一次）。</summary>
     /// <exception cref="ArgumentNullException">engine / player / deck 为 null。</exception>
     public static Task EmitDeckShuffled(
-        LogicEngine engine, Player player, CardList deck, CancellationToken ct = default)
+        LogicEngine engine, Player player, CardList deck, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(player);
@@ -332,6 +340,7 @@ public static class GameUpdates
             {
                 [PayloadPlayer] = player,
                 [PayloadDeck] = deck,
+                [PayloadSource] = source,
             },
             ct);
     }
@@ -342,7 +351,7 @@ public static class GameUpdates
     /// </summary>
     /// <exception cref="ArgumentNullException">engine / unit 为 null。</exception>
     public static Task EmitUnitTypesChanged(
-        LogicEngine engine, Card unit, string addedType, CancellationToken ct = default)
+        LogicEngine engine, Card unit, string addedType, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(unit);
@@ -352,6 +361,7 @@ public static class GameUpdates
             {
                 [PayloadUnit] = unit,
                 [PayloadAddedType] = addedType,
+                [PayloadSource] = source,
             },
             ct);
     }
@@ -363,7 +373,7 @@ public static class GameUpdates
     /// <exception cref="ArgumentNullException">engine / card / changedFields 为 null。</exception>
     /// <exception cref="ArgumentException">changedFields 为空集合（无变更不发——空集合调用属逻辑错误）。</exception>
     public static Task EmitCardStatChanged(
-        LogicEngine engine, Card card, IReadOnlyList<string> changedFields, CancellationToken ct = default)
+        LogicEngine engine, Card card, IReadOnlyList<string> changedFields, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(card);
@@ -380,12 +390,13 @@ public static class GameUpdates
             {
                 [PayloadCard] = card,
                 [PayloadChangedFields] = changedFields,
+                [PayloadSource] = source,
             },
             ct);
     }
 
     /// <summary>发射 card.drawn（载荷＝{ 玩家, 卡牌实例 }；抽牌链路实际使用）。</summary>
-    public static Task EmitCardDrawn(LogicEngine engine, Player player, Card card, CancellationToken ct = default)
+    public static Task EmitCardDrawn(LogicEngine engine, Player player, Card card, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(player);
@@ -396,6 +407,7 @@ public static class GameUpdates
             {
                 [PayloadPlayer] = player,
                 [PayloadCard] = card,
+                [PayloadSource] = source,
             },
             ct);
     }
@@ -406,18 +418,22 @@ public static class GameUpdates
     /// W3-A3 起调用点＝部署链/加入链〔单位化成功后、完成信号 unit.deployed / unit.joined 之前〕；
     /// 加载时点不发射——放置＝「上场」语义。消费＝装载链放置处理器〔初始化＋装载幂等兜底〕＋策略 1 效果订阅作上场驱动）。</summary>
     /// <exception cref="ArgumentNullException">engine / card 为 null。</exception>
-    public static Task EmitCardPlaced(LogicEngine engine, Card card, CancellationToken ct = default)
+    public static Task EmitCardPlaced(LogicEngine engine, Card card, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(card);
         return engine.Emit(
             Updates.CardPlaced,
-            new Dictionary<string, object?> { [PayloadKeys.Card] = card },
+            new Dictionary<string, object?>
+            {
+                [PayloadKeys.Card] = card,
+                [PayloadSource] = source,
+            },
             ct);
     }
 
     /// <summary>发射 card.load（载荷＝{ 玩家, 卡牌实例 }；对局初始化逐张加载实际使用）。</summary>
-    public static Task EmitCardLoad(LogicEngine engine, Player player, Card card, CancellationToken ct = default)
+    public static Task EmitCardLoad(LogicEngine engine, Player player, Card card, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(player);
@@ -428,12 +444,13 @@ public static class GameUpdates
             {
                 [PayloadPlayer] = player,
                 [PayloadCard] = card,
+                [PayloadSource] = source,
             },
             ct);
     }
 
     /// <summary>发射 card.hand.add（载荷＝{ 玩家, 卡牌实例 }；抽牌链路实际使用——drawn 之后连发；其他来源调用点随各流程批次）。</summary>
-    public static Task EmitCardHandAdd(LogicEngine engine, Player player, Card card, CancellationToken ct = default)
+    public static Task EmitCardHandAdd(LogicEngine engine, Player player, Card card, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(player);
@@ -444,6 +461,7 @@ public static class GameUpdates
             {
                 [PayloadPlayer] = player,
                 [PayloadCard] = card,
+                [PayloadSource] = source,
             },
             ct);
     }
@@ -451,7 +469,7 @@ public static class GameUpdates
     /// <summary>发射 card.discarded（G7；载荷＝{ Card, Player }——被弃卡实例在前、玩家在后；弃置路径专用——销毁先于信号、恰一次）。</summary>
     /// <exception cref="ArgumentNullException">engine / card / player 为 null。</exception>
     public static Task EmitCardDiscarded(
-        LogicEngine engine, Card card, Player player, CancellationToken ct = default)
+        LogicEngine engine, Card card, Player player, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(card);
@@ -462,6 +480,7 @@ public static class GameUpdates
             {
                 [PayloadCard] = card,
                 [PayloadPlayer] = player,
+                [PayloadSource] = source,
             },
             ct);
     }
@@ -469,7 +488,7 @@ public static class GameUpdates
     /// <summary>发射 card.burned（Kb；载荷＝{ Card, Player }——被爆卡实例在前、玩家在后；爆牌路径专用——销毁先于信号、恰一次；不复用 card.discarded）。</summary>
     /// <exception cref="ArgumentNullException">engine / card / player 为 null。</exception>
     public static Task EmitCardBurned(
-        LogicEngine engine, Card card, Player player, CancellationToken ct = default)
+        LogicEngine engine, Card card, Player player, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(card);
@@ -480,12 +499,13 @@ public static class GameUpdates
             {
                 [PayloadCard] = card,
                 [PayloadPlayer] = player,
+                [PayloadSource] = source,
             },
             ct);
     }
 
     /// <summary>死亡已确认、卸载前结算宿主效果；载荷同完成死亡事件。</summary>
-    public static Task EmitCardDying(LogicEngine engine, Card card, Card? killer = null, CancellationToken ct = default)
+    public static Task EmitCardDying(LogicEngine engine, Card card, Card? killer = null, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(card);
@@ -493,11 +513,12 @@ public static class GameUpdates
         {
             [PayloadCard] = card,
             [PayloadKiller] = killer,
+            [PayloadSource] = source,
         }, ct);
     }
 
     /// <summary>发射 card.leaving（载荷＝{ Card, Reason }；槽位释放之前，恰一次）。</summary>
-    public static Task EmitCardLeaving(LogicEngine engine, Card card, string reason, CancellationToken ct = default)
+    public static Task EmitCardLeaving(LogicEngine engine, Card card, string reason, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(card);
@@ -505,23 +526,25 @@ public static class GameUpdates
         {
             [PayloadCard] = card,
             ["Reason"] = reason,
+            [PayloadSource] = source,
         }, ct);
     }
 
     /// <summary>发射 keyword.attack.finished（载荷＝{ Card }；词条临时增益的到期相位）。</summary>
-    public static Task EmitKeywordAttackFinished(LogicEngine engine, Card card, CancellationToken ct = default)
+    public static Task EmitKeywordAttackFinished(LogicEngine engine, Card card, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(card);
         return engine.Emit(KeywordAttackFinished, new Dictionary<string, object?>
         {
             [PayloadCard] = card,
+            [PayloadSource] = source,
         }, ct);
     }
 
     /// <summary>发射 card.died（载荷＝{ 卡牌实例, Killer? }；2C 起调用点＝战斗死亡流程——清理就绪后、恰一次）。</summary>
     /// <param name="killer">击杀者（E1-47 加性；null＝非归属驱动来源，如修饰到期致防御归零）。</param>
-    public static Task EmitCardDied(LogicEngine engine, Card card, Card? killer = null, CancellationToken ct = default)
+    public static Task EmitCardDied(LogicEngine engine, Card card, Card? killer = null, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(card);
@@ -531,13 +554,14 @@ public static class GameUpdates
             {
                 [PayloadCard] = card,
                 [PayloadKiller] = killer,
+                [PayloadSource] = source,
             },
             ct);
     }
 
     /// <summary>发射 counter.triggered（E1-53；载荷＝{ 反制卡, 归属玩家 }；激活分支调用一次）。</summary>
     /// <exception cref="ArgumentNullException">engine / card / player 为 null。</exception>
-    public static Task EmitCounterTriggered(LogicEngine engine, Card card, Player player, CancellationToken ct = default)
+    public static Task EmitCounterTriggered(LogicEngine engine, Card card, Player player, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(card);
@@ -548,6 +572,7 @@ public static class GameUpdates
             {
                 [PayloadCard] = card,
                 [PayloadPlayer] = player,
+                [PayloadSource] = source,
             },
             ct);
     }
@@ -555,7 +580,7 @@ public static class GameUpdates
     /// <summary>发射 unit.damage.dealt（E1-47；载荷＝{ 施动方, 受方, 伤害量 }；实际变化量 &gt; 0 才发）。</summary>
     /// <exception cref="ArgumentNullException">engine / unit / target 为 null。</exception>
     public static Task EmitUnitDamageDealt(
-        LogicEngine engine, Card unit, Card target, int amount, CancellationToken ct = default)
+        LogicEngine engine, Card unit, Card target, int amount, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(unit);
@@ -567,13 +592,14 @@ public static class GameUpdates
                 [PayloadUnit] = unit,
                 [PayloadCard] = target,
                 [PayloadAmount] = amount,
+                [PayloadSource] = source,
             },
             ct);
     }
 
     /// <summary>发射 card.damaged（载荷＝{ 卡牌实例, 伤害量 }；伤害结算后调用——单位/HQ 各自路径、恰一次）。</summary>
     /// <exception cref="ArgumentNullException">engine / card 为 null。</exception>
-    public static Task EmitCardDamaged(LogicEngine engine, Card card, int amount, CancellationToken ct = default)
+    public static Task EmitCardDamaged(LogicEngine engine, Card card, int amount, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(card);
@@ -583,36 +609,45 @@ public static class GameUpdates
             {
                 [PayloadCard] = card,
                 [PayloadAmount] = amount,
+                [PayloadSource] = source,
             },
             ct);
     }
 
     /// <summary>发射 unit.acted（载荷＝{ 单位 }；攻击/移动外层收尾成功后调用——各自恰一次）。</summary>
     /// <exception cref="ArgumentNullException">engine / unit 为 null。</exception>
-    public static Task EmitUnitActed(LogicEngine engine, Card unit, CancellationToken ct = default)
+    public static Task EmitUnitActed(LogicEngine engine, Card unit, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(unit);
         return engine.Emit(
             UnitActed,
-            new Dictionary<string, object?> { [PayloadUnit] = unit },
+            new Dictionary<string, object?>
+            {
+                [PayloadUnit] = unit,
+                [PayloadSource] = source,
+            },
             ct);
     }
 
     /// <summary>发射 unit.combat.survived（载荷＝{ 单位 }；对战结算收尾后对每个幸存参战单位调用——各自恰一次）。</summary>
     /// <exception cref="ArgumentNullException">engine / unit 为 null。</exception>
-    public static Task EmitUnitCombatSurvived(LogicEngine engine, Card unit, CancellationToken ct = default)
+    public static Task EmitUnitCombatSurvived(LogicEngine engine, Card unit, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(unit);
         return engine.Emit(
             UnitCombatSurvived,
-            new Dictionary<string, object?> { [PayloadUnit] = unit },
+            new Dictionary<string, object?>
+            {
+                [PayloadUnit] = unit,
+                [PayloadSource] = source,
+            },
             ct);
     }
 
     /// <summary>发射 unit.joined（载荷＝{ 单位, 位置 }；2B 加入路径调用点——单位化完成后）。</summary>
-    public static Task EmitUnitJoined(LogicEngine engine, Card unit, Slot position, CancellationToken ct = default)
+    public static Task EmitUnitJoined(LogicEngine engine, Card unit, Slot position, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(unit);
@@ -623,12 +658,13 @@ public static class GameUpdates
             {
                 [PayloadUnit] = unit,
                 [PayloadPosition] = position,
+                [PayloadSource] = source,
             },
             ct);
     }
 
     /// <summary>发射 unit.deployed（载荷＝{ 单位, 位置 }；2B 部署链调用点——单位化完成后）。</summary>
-    public static Task EmitUnitDeployed(LogicEngine engine, Card unit, Slot position, CancellationToken ct = default)
+    public static Task EmitUnitDeployed(LogicEngine engine, Card unit, Slot position, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(unit);
@@ -639,13 +675,14 @@ public static class GameUpdates
             {
                 [PayloadUnit] = unit,
                 [PayloadPosition] = position,
+                [PayloadSource] = source,
             },
             ct);
     }
 
     /// <summary>发射 unit.position.changed（载荷＝{ 单位, 原位置, 新位置 }；2C 起调用点＝移动执行段——槽位变更后、恰一次）。</summary>
     public static Task EmitUnitPositionChanged(
-        LogicEngine engine, Card unit, Slot oldPosition, Slot newPosition, CancellationToken ct = default)
+        LogicEngine engine, Card unit, Slot oldPosition, Slot newPosition, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(unit);
@@ -658,31 +695,40 @@ public static class GameUpdates
                 [PayloadUnit] = unit,
                 [PayloadOldPosition] = oldPosition,
                 [PayloadNewPosition] = newPosition,
+                [PayloadSource] = source,
             },
             ct);
     }
 
     /// <summary>发射 unit.upgraded（S1；载荷＝{ Unit }——升级完成单位；升级落定后调用、恰一次——先数值结果、后机制宣告）。</summary>
     /// <exception cref="ArgumentNullException">engine / unit 为 null。</exception>
-    public static Task EmitUnitUpgraded(LogicEngine engine, Card unit, CancellationToken ct = default)
+    public static Task EmitUnitUpgraded(LogicEngine engine, Card unit, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(unit);
         return engine.Emit(
             UnitUpgraded,
-            new Dictionary<string, object?> { [PayloadUnit] = unit },
+            new Dictionary<string, object?>
+            {
+                [PayloadUnit] = unit,
+                [PayloadSource] = source,
+            },
             ct);
     }
 
     /// <summary>发射 unit.revealed（S2；载荷＝{ Unit }——被揭示单位；揭示落定后调用、恰一次——先落定、后发射）。</summary>
     /// <exception cref="ArgumentNullException">engine / unit 为 null。</exception>
-    public static Task EmitUnitRevealed(LogicEngine engine, Card unit, CancellationToken ct = default)
+    public static Task EmitUnitRevealed(LogicEngine engine, Card unit, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(unit);
         return engine.Emit(
             UnitRevealed,
-            new Dictionary<string, object?> { [PayloadUnit] = unit },
+            new Dictionary<string, object?>
+            {
+                [PayloadUnit] = unit,
+                [PayloadSource] = source,
+            },
             ct);
     }
 
@@ -691,7 +737,7 @@ public static class GameUpdates
     /// <summary>发射 slot.gained（载荷＝{ Player, Amount }——Amount＝实际变化量 Δ；槽实际增加才发、其后接 slot.changed）。</summary>
     /// <exception cref="ArgumentNullException">engine / player 为 null。</exception>
     public static Task EmitSlotGained(
-        LogicEngine engine, Player player, int amount, CancellationToken ct = default)
+        LogicEngine engine, Player player, int amount, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(player);
@@ -701,6 +747,7 @@ public static class GameUpdates
             {
                 [PayloadPlayer] = player,
                 [PayloadAmount] = amount,
+                [PayloadSource] = source,
             },
             ct);
     }
@@ -708,7 +755,7 @@ public static class GameUpdates
     /// <summary>发射 slot.lost（载荷＝{ Player, Amount }——Amount＝实际变化量 Δ；槽实际减少才发、其后接 slot.changed）。</summary>
     /// <exception cref="ArgumentNullException">engine / player 为 null。</exception>
     public static Task EmitSlotLost(
-        LogicEngine engine, Player player, int amount, CancellationToken ct = default)
+        LogicEngine engine, Player player, int amount, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(player);
@@ -718,6 +765,7 @@ public static class GameUpdates
             {
                 [PayloadPlayer] = player,
                 [PayloadAmount] = amount,
+                [PayloadSource] = source,
             },
             ct);
     }
@@ -728,7 +776,7 @@ public static class GameUpdates
     /// </summary>
     /// <exception cref="ArgumentNullException">engine / player 为 null。</exception>
     public static Task EmitSlotChanged(
-        LogicEngine engine, Player player, int oldSlots, int newSlots, CancellationToken ct = default)
+        LogicEngine engine, Player player, int oldSlots, int newSlots, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(player);
@@ -739,6 +787,7 @@ public static class GameUpdates
                 [PayloadPlayer] = player,
                 [PayloadOldSlots] = oldSlots,
                 [PayloadNewSlots] = newSlots,
+                [PayloadSource] = source,
             },
             ct);
     }
@@ -746,7 +795,7 @@ public static class GameUpdates
     /// <summary>发射 point.gained（载荷＝{ Player, Amount }——Amount＝实际变化量 Δ；点数实际增加才发、其后接 point.changed）。</summary>
     /// <exception cref="ArgumentNullException">engine / player 为 null。</exception>
     public static Task EmitPointGained(
-        LogicEngine engine, Player player, int amount, CancellationToken ct = default)
+        LogicEngine engine, Player player, int amount, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(player);
@@ -756,6 +805,7 @@ public static class GameUpdates
             {
                 [PayloadPlayer] = player,
                 [PayloadAmount] = amount,
+                [PayloadSource] = source,
             },
             ct);
     }
@@ -763,7 +813,7 @@ public static class GameUpdates
     /// <summary>发射 point.lost（载荷＝{ Player, Amount }——Amount＝实际变化量 Δ；点数实际减少才发、其后接 point.changed）。</summary>
     /// <exception cref="ArgumentNullException">engine / player 为 null。</exception>
     public static Task EmitPointLost(
-        LogicEngine engine, Player player, int amount, CancellationToken ct = default)
+        LogicEngine engine, Player player, int amount, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(player);
@@ -773,6 +823,7 @@ public static class GameUpdates
             {
                 [PayloadPlayer] = player,
                 [PayloadAmount] = amount,
+                [PayloadSource] = source,
             },
             ct);
     }
@@ -783,7 +834,7 @@ public static class GameUpdates
     /// </summary>
     /// <exception cref="ArgumentNullException">engine / player 为 null。</exception>
     public static Task EmitPointChanged(
-        LogicEngine engine, Player player, int oldPoints, int newPoints, CancellationToken ct = default)
+        LogicEngine engine, Player player, int oldPoints, int newPoints, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(player);
@@ -794,6 +845,7 @@ public static class GameUpdates
                 [PayloadPlayer] = player,
                 [PayloadOldPoints] = oldPoints,
                 [PayloadNewPoints] = newPoints,
+                [PayloadSource] = source,
             },
             ct);
     }

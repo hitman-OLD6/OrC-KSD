@@ -1,4 +1,4 @@
-using Orc.Cards;
+﻿using Orc.Cards;
 using Orc.Core;
 using Orc.Game;
 using Orc.Game.Cards;
@@ -118,7 +118,7 @@ public class EffectSystemTests
     [Fact]
     public async Task Effect_Unmount_On_Removal_Revokes_Injection_And_Is_Idempotent()
     {
-        Trigger<AttackFlowView>? flowTrigger = null;
+        Trigger<OrderFlowView>? flowTrigger = null;
         var registry = new CardEffectRegistry();
         registry.Register("effect.injectprobe", _ => new InjectionProbeEffect("注入探针效果", () => flowTrigger));
         registry.Declare(DemoId, new[] { "effect.injectprobe" });
@@ -126,14 +126,14 @@ public class EffectSystemTests
         var match = CommandTestKit.CreateCommandMatch(
             effectRegistry: registry, extraDefinitions: new[] { DemoDefinition });
         await match.Initialize();
-        flowTrigger = match.Engine.AttackFlow.Trigger;
+        flowTrigger = match.Engine.OrderFlow.Trigger;
         var demo = (UnitCard)match.CardLibrary.Instantiate(DemoId);
         await demo.LoadAsync(match.Players[0]);
         var effect = (InjectionProbeEffect)Assert.Single(demo.Effects);
         var (source, target) = CreateFlowCards(match.Engine);
 
         // 装载 → 注入生效：真实流程驱动 handler
-        await match.Engine.AttackFlow.ExecuteAsync(source, target, 1);
+        await match.Engine.OrderFlow.ExecuteAsync(source, (ICastAction?)null, target, 1);
         Assert.Equal(1, effect.HandlerCalls);
 
         // 移除（显式移除路径）→ 统一卸载链：OnUnmount → 撤销登记 → 总线卸载
@@ -145,7 +145,7 @@ public class EffectSystemTests
         Assert.DoesNotContain(effect.Name, match.Engine.Bus.GetSubscribers(Updates.EffectRemoved));
 
         // 注入撤销后 handler 不再执行（真实流程再驱动）
-        await match.Engine.AttackFlow.ExecuteAsync(source, target, 1);
+        await match.Engine.OrderFlow.ExecuteAsync(source, (ICastAction?)null, target, 1);
         Assert.Equal(1, effect.HandlerCalls);
 
         // 重复移除＝幂等（不重复清理）
@@ -226,7 +226,7 @@ public class EffectSystemTests
     [Fact]
     public async Task Mount_Failure_Rolls_Back_And_Isolates_Other_Effects()
     {
-        Trigger<AttackFlowView>? flowTrigger = null;
+        Trigger<OrderFlowView>? flowTrigger = null;
         var effects = new List<Effect>();
         var registry = new CardEffectRegistry();
         registry.Register("effect.ok1", _ =>
@@ -252,7 +252,7 @@ public class EffectSystemTests
         var match = CommandTestKit.CreateCommandMatch(
             effectRegistry: registry, extraDefinitions: new[] { DemoDefinition });
         await match.Initialize();
-        flowTrigger = match.Engine.AttackFlow.Trigger;
+        flowTrigger = match.Engine.OrderFlow.Trigger;
         var demo = (UnitCard)match.CardLibrary.Instantiate(DemoId);
 
         using var recorder = new UpdateRecorder(match.Engine);
@@ -282,7 +282,7 @@ public class EffectSystemTests
         Assert.DoesNotContain("失败效果/dispose", match.Engine.Bus.GetSubscribers(Updates.CardDestroyed));
         Assert.Contains("顺常效果一/dispose", match.Engine.Bus.GetSubscribers(Updates.CardDestroyed));
         var (source, target) = CreateFlowCards(match.Engine);
-        await match.Engine.AttackFlow.ExecuteAsync(source, target, 1);
+        await match.Engine.OrderFlow.ExecuteAsync(source, (ICastAction?)null, target, 1);
         Assert.Equal(0, fail.HandlerCalls);
 
         // 卡牌加载照常完成（card.load 已广播）
@@ -419,21 +419,21 @@ public class EffectSystemTests
         var effect = Assert.IsType<FlowWatchEffect>(Assert.Single(demo.Effects));
         var (source, target) = CreateFlowCards(match.Engine);
 
-        // a) 注入生效：真实流程（攻击流程）驱动 band 内 handler
-        await match.Engine.AttackFlow.ExecuteAsync(source, target, 1);
+        // a) 注入生效：真实流程（内核指令流程）驱动 band 内 handler
+        await match.Engine.OrderFlow.ExecuteAsync(source, (ICastAction?)null, target, 1);
         Assert.Equal(1, effect.SeenCount);
 
         // c) 未达成＝不触发（零副作用）
         Assert.Equal(0, effect.FireCount);
 
         // d) 达成（第 2 次）＝恰一次触发＋触发后自清理（注册撤销）——b) 状态自持（累计正确）
-        await match.Engine.AttackFlow.ExecuteAsync(source, target, 1);
+        await match.Engine.OrderFlow.ExecuteAsync(source, (ICastAction?)null, target, 1);
         Assert.Equal(2, effect.SeenCount);
         Assert.Equal(1, effect.FireCount);
         Assert.True(effect.RegistrationRevoked);
 
         // 注册撤销后不再被调用
-        await match.Engine.AttackFlow.ExecuteAsync(source, target, 1);
+        await match.Engine.OrderFlow.ExecuteAsync(source, (ICastAction?)null, target, 1);
         Assert.Equal(2, effect.SeenCount);
         Assert.Equal(1, effect.FireCount);
     }
@@ -497,18 +497,18 @@ public class EffectSystemTests
         var target = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1); // 攻 2 / 防 5
         CommandTestKit.Activate(attacker);
 
-        var attackLog = new List<Ref<Entity>?>();
-        var damageLog = new List<Ref<Entity>?>();
+        var attackLog = new List<Card?>();
+        var damageLog = new List<Card?>();
         match.CommandManager.UnitAttackTrigger.Register("X1探测-攻击视图", (view, ctx, ct) =>
         {
             attackLog.Add(view.TriggerCard);
             return Task.CompletedTask;
-        });
+        }, Orc.Game.Actions.ActionTriggerBands.Initiate);
         match.CommandManager.AttackDamageTrigger.Register("X1探测-伤害视图", (view, ctx, ct) =>
         {
             damageLog.Add(view.TriggerCard);
             return Task.CompletedTask;
-        });
+        }, Orc.Game.Actions.ActionHandleBands.Apply);
 
         // 主动效果（宿主＝attacker）：施放时调用底层「单位攻击」触发器（显式携带触发者＝宿主卡）
         var effect = new StrikeActiveEffect(match.Engine, "演示打击", match.CommandManager.UnitAttackTrigger);
@@ -519,8 +519,8 @@ public class EffectSystemTests
 
         // 效果调用底层触发器 → 真实攻击结算（目标防御 5 − 2）；触发者＝效果宿主卡（两链路同引用实例）
         Assert.Equal(3, target.GetData<UnitStateData>().Defense);
-        Assert.Same(attacker.Ref, Assert.Single(attackLog));
-        Assert.Same(attacker.Ref, Assert.Single(damageLog));
+        Assert.Same(attacker, Assert.Single(attackLog));
+        Assert.Same(attacker, Assert.Single(damageLog));
     }
 
     // ---------- 辅助 ----------
@@ -560,12 +560,12 @@ internal sealed class LifecycleProbeEffect : PassiveEffect
     protected override void OnUnmount() => UnmountCalls += 1;
 }
 
-/// <summary>注入探针效果：装载时向注入目标（攻击流程）注册 handler（装载语境 Inject——卸载时框架撤销登记）。</summary>
+/// <summary>注入探针效果：装载时向注入目标（内核指令流程）注册 handler（装载语境 Inject——卸载时框架撤销登记）。</summary>
 internal sealed class InjectionProbeEffect : PassiveEffect
 {
-    private readonly Func<Trigger<AttackFlowView>?> _target;
+    private readonly Func<Trigger<OrderFlowView>?> _target;
 
-    public InjectionProbeEffect(string name, Func<Trigger<AttackFlowView>?> target)
+    public InjectionProbeEffect(string name, Func<Trigger<OrderFlowView>?> target)
         : base(name)
         => _target = target;
 
@@ -581,13 +581,13 @@ internal sealed class InjectionProbeEffect : PassiveEffect
         var target = _target();
         if (target is not null)
         {
-            Inject(target, "流程探针", AttackFlowBands.Resolve, OnFlowAsync);
+            Inject(target, "流程探针", OrderFlowBands.Resolve, OnFlowAsync);
         }
     }
 
     protected override void OnUnmount() => UnmountCalls += 1;
 
-    private Task OnFlowAsync(AttackFlowView view, Context ctx, CancellationToken ct)
+    private Task OnFlowAsync(OrderFlowView view, Context ctx, CancellationToken ct)
     {
         HandlerCalls += 1;
         return Task.CompletedTask;
@@ -599,9 +599,9 @@ internal sealed class FailingMountEffect : PassiveEffect
 {
     public const string FailureMessage = "装载钩子异常（失败注入）";
 
-    private readonly Func<Trigger<AttackFlowView>?> _injectTarget;
+    private readonly Func<Trigger<OrderFlowView>?> _injectTarget;
 
-    public FailingMountEffect(string name, Func<Trigger<AttackFlowView>?> injectTarget)
+    public FailingMountEffect(string name, Func<Trigger<OrderFlowView>?> injectTarget)
         : base(name)
         => _injectTarget = injectTarget;
 
@@ -612,13 +612,13 @@ internal sealed class FailingMountEffect : PassiveEffect
         var target = _injectTarget();
         if (target is not null)
         {
-            Inject(target, "失败探针", AttackFlowBands.Resolve, OnFlowAsync);
+            Inject(target, "失败探针", OrderFlowBands.Resolve, OnFlowAsync);
         }
 
         throw new InvalidOperationException(FailureMessage);
     }
 
-    private Task OnFlowAsync(AttackFlowView view, Context ctx, CancellationToken ct)
+    private Task OnFlowAsync(OrderFlowView view, Context ctx, CancellationToken ct)
     {
         HandlerCalls += 1;
         return Task.CompletedTask;
@@ -688,7 +688,7 @@ internal sealed class TurnEndWatchEffect : PassiveEffect
 }
 
 /// <summary>
-/// 流程监听效果（G14 模式演示——流程 band 注入宿主）：装载时经 Inject 把 handler 注入攻击流程
+/// 流程监听效果（G14 模式演示——流程 band 注入宿主）：装载时经 Inject 把 handler 注入内核流程
 /// 「结算（Resolve）」band（装载语境、经真实流程驱动）；handler 状态自持（累计）；条件达成（第 2 次）→
 /// invoke 自持主动触发器＋触发后自清理（注册撤销）。
 /// </summary>
@@ -697,7 +697,7 @@ internal sealed class FlowWatchEffect : PassiveEffect
     private readonly LogicEngine _engine;
     private readonly Trigger<CardEventView> _fireTrigger;
     private TriggerRegistration? _registration;
-    private Trigger<AttackFlowView>? _target;
+    private Trigger<OrderFlowView>? _target;
     private int _seen;
 
     public FlowWatchEffect(LogicEngine engine, string name)
@@ -716,11 +716,11 @@ internal sealed class FlowWatchEffect : PassiveEffect
 
     protected override void OnMount()
     {
-        _target = _engine.AttackFlow.Trigger;
-        _registration = Inject(_target, "流程监听", AttackFlowBands.Resolve, OnFlowAsync);
+        _target = _engine.OrderFlow.Trigger;
+        _registration = Inject(_target, "流程监听", OrderFlowBands.Resolve, OnFlowAsync);
     }
 
-    private async Task OnFlowAsync(AttackFlowView view, Context ctx, CancellationToken ct)
+    private async Task OnFlowAsync(OrderFlowView view, Context ctx, CancellationToken ct)
     {
         _seen += 1;
         if (_seen != 2)
@@ -822,7 +822,7 @@ internal sealed class StrikeActiveEffect : ActiveEffect<StrikeTargetView>
         {
             [CommandDataKeys.Attacker] = Host.Ref,
             [CommandDataKeys.Target] = targetRef,
-            [CommandDataKeys.TriggerCard] = Host.Ref, // X1：效果显式携带触发者（本次操作由本效果宿主卡引发）
+            [CommandDataKeys.TriggerCard] = Host, // X1：效果显式携带触发者（本次操作由本效果宿主卡引发）
         };
         await _attackTrigger.InvokeAsync(_engine, data, ct);
     }

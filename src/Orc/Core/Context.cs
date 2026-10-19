@@ -64,6 +64,13 @@ public sealed class Context
     public LogicEngine? Engine => _frame?.Engine;
 
     /// <summary>
+    /// 当前 handler 的触发者卡牌（R9；执行期可读、执行外为 null）：
+    /// 取值＝执行帧的解析结果（注册者为卡/效果时被改写为其 source 卡；否则继承父帧/入口初值）。
+    /// 与视图属性 <c>TriggerCard</c>（数据面同名键）同值；与信号载荷 <c>Source</c>（事件引发者）分工不同。
+    /// </summary>
+    public Orc.Cards.Card? TriggerCard => _frame?.TriggerCard;
+
+    /// <summary>
     /// 调用当前 handler 的具名动作缝（管道式）：按该缝的前置包装器列表 LIFO 依次执行。
     /// 仅在触发器 handler 执行期间可用；未关联执行帧、未处于 handler 内、或缝未声明均 fail-fast。
     /// </summary>

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 3,
+  "root": {
+    "id": "diy.field-rescue.effect",
+    "version": 1,
+    "oneShot": false,
+    "mainTrigger": {
+      "id": "t.main",
+      "stableKey": "diy·战地救护",
+      "kind": "passive",
+      "viewType": "Orc.Cards.CardEventView",
+      "hooks": [
+        "card.discarded"
+      ],
+      "events": [
+        {
+          "id": "onDiscarded",
+          "entry": "HandleAsync",
+          "csx": "Func<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n    if (view.Card is not Orc.Cards.Card discarded || view.Source is not Orc.Cards.Card source || view.Host is not Orc.Cards.Card self)\n    {\n        return;\n    }\n\n    if (object.ReferenceEquals(source, self))\n    {\n        return;\n    }\n\n    var sourceOwner = (source as Orc.Game.Cards.CardBase)?.Owner;\n    var selfOwner = (self as Orc.Game.Cards.CardBase)?.Owner;\n    if (sourceOwner is null || selfOwner is null || object.ReferenceEquals(sourceOwner, selfOwner))\n    {\n        return;\n    }\n\n    var runtime = Orc.Game.Effects.EffectRuntime.ResolveFor(self);\n    if (runtime is null)\n    {\n        return;\n    }\n\n    await runtime.FetchFromDeckAsync(self, ct, self);\n};\n",
+          "version": 1
+        }
+      ],
+      "version": 1
+    },
+    "otherTriggers": [],
+    "wrappers": [],
+    "injects": []
+  }
+}

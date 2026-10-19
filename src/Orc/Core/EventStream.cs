@@ -49,6 +49,14 @@ public sealed class EventStream
     /// </summary>
     public ExecutionOutcome Outcome { get; internal set; }
 
+    /// <summary>
+    /// 本次执行是否发生链级中断（<see cref="Context.Interrupt"/>；加性可观测标记）。
+    /// 与 <see cref="Outcome"/> 正交：中断不是失败标记，而是「链上剩余事件不再执行」的事实；
+    /// 由执行帧在中断传播时置位（本流及其祖先流均置位）。<c>Stop</c> 不置位。
+    /// 用途：两阶段编排（如指令流程的 Finalize）据此判断是否整体跳过——不新增总线信号。
+    /// </summary>
+    public bool Interrupted { get; internal set; }
+
     /// <summary>条目枚举（含本地写入与后代冒泡）。</summary>
     public IReadOnlyList<LogEntry> Entries => _entries;
 

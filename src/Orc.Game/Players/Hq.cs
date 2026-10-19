@@ -153,7 +153,8 @@ public sealed class Hq : Card
     /// </summary>
     /// <param name="amount">伤害性扣减量（≥0；0＝合法——零发射）。</param>
     /// <exception cref="ArgumentOutOfRangeException">amount 为负。</exception>
-    public async Task ApplyDamageAsync(int amount, CancellationToken ct = default)
+    /// <remarks>R11 起为 <c>internal</c> 受控面：唯一调用方＝伤害处理端（<c>MatchActionServices.ApplyDamageAsync</c>）。</remarks>
+    internal async Task ApplyDamageAsync(int amount, CancellationToken ct = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(amount);
         var state = GetData<HqStateData>();

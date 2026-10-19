@@ -22,6 +22,8 @@
     <ProjectReference Include="..\..\src\Orc.Plugins.BuiltIn\Orc.Plugins.BuiltIn.csproj" />
     <ProjectReference Include="..\..\src\Orc.UI\Orc.UI.csproj" />
     <ProjectReference Include="..\..\src\Orc\Orc.csproj" />
+    <!-- P5b：建局前须注册动作实现集（移动已迁出宿主）。 -->
+    <ProjectReference Include="..\..\src\Orc.Foundation.Actions\Orc.Foundation.Actions.csproj" />
   </ItemGroup>
 
 </Project>

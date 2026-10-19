@@ -1,4 +1,5 @@
-using Orc.Core;
+﻿using Orc.Core;
+using Orc.Game.Actions;
 using Orc.Game.Board;
 using Orc.Game.Managers;
 using Orc.Game.Players;
@@ -13,10 +14,12 @@ namespace Orc.Game.Cards;
 /// 单位数据 / 指挥组件于「单位化」时挂载（2B：单位化触发器默认事件——位置＝槽位、已毁＝false、类型＝从定义填充〔2C〕、三实时值＝对战组件值）。
 /// 触发器（2B）：
 /// ①预打出触发器（费用校验——指挥点验证；开始＝验证＋targeter 交互由打出管理器驱动）；
-/// ②打出触发器（费用校验——外层复验；默认链＝打出宣告〔card.played〕→ 部署链〔闪击＝unit.deployed 发射时置位〕→ 收尾〔扣费→离手→词条落点〔钳击＝同伴选择〕〕）；
-/// ③部署触发器（默认链＝部署逻辑检查〔组件存在且 handler 非空〕→ 部署词条效果按序触发〔逐条异常隔离〕→ 单位化触发器 → card.placed → unit.deployed）；
-/// ④加入触发器（默认链＝单位化触发器 → card.placed → unit.joined；不扣费、不走部署词条）；
-/// ⑤单位化触发器（部署/加入共用：加单位组件＋指挥组件＋实际加入空槽位＋建立修饰机制初始快照〔W2b〕）。
+/// ②打出触发器（费用校验——外层复验；S9：默认链＝入口收尾〔unit.deployed → 扣费 → 离手 → 词条落点〕，
+///   打出宣告／部署词条／单位化／card.placed 已下沉到「加入战场」动作）；
+/// ③部署触发器（S9：默认链＝转发加入战场动作的**部署触发端**——代价校验 → card.played → 部署词条 → 共享处理端）；
+/// ④加入触发器（S9：默认链＝转发加入战场动作的**加入触发端** → 共享处理端 → unit.joined；不扣费、不走部署词条）；
+/// ⑤单位化触发器（部署/加入共用：加单位组件＋指挥组件＋实际加入空槽位＋建立修饰机制初始快照〔W2b〕；
+///   S9：唯一调用者＝加入战场动作处理端——经 <see cref="InvokeUnitizeAsync"/>）。
 /// 门户（W2b G3；单位数值受控变更面——防御语义）：伤害扣减 <see cref="ApplyDefenseDamageAsync"/>（损伤量增加）与
 /// 修复 <see cref="RepairDefenseAsync"/>（恢复到上限）＝运行期数值本体的合规变更入口（配合卡侧修饰容器＝修饰加值/撤销）；
 /// 变更一律经「门户 → 跑链（修饰机制管线）→ 有变更集中触发」。
@@ -75,11 +78,15 @@ public class UnitCard : CardBase
         RegisterNamedTrigger(CovertRules.TriggerName, RevealTrigger, typeof(CardTriggerView));
 
         // 默认链事件（构造期装配；装配方扩展事件按注册序追加于其后——闪击等词条注入属 2C）。
-        PlayTrigger.Register("打出链", HandlePlayChainAsync);
-        DeployTrigger.Register("部署链", HandleDeployChainAsync);
-        JoinTrigger.Register("加入链", HandleJoinChainAsync);
-        UnitizeTrigger.Register("单位化", HandleUnitizeAsync);
-        VeteranTrigger.Register("升级链", HandleVeteranChainAsync);
+        // R9：内置链 handler 归因于本卡（registrant: this）——进入 handler 时帧触发者＝本卡，
+        // 链内发信号以 view.TriggerCard 为 Source（卡自身注册 ⇒ 恒为本卡）。
+        // S9：部署/加入的**执行**已下沉到加入战场动作（`JoinBattlefieldAction`）——本卡只保留入口收尾
+        // （unit.deployed／unit.joined、扣费、离手、OnDeployChainFinalized）。
+        PlayTrigger.Register("打出链", HandlePlayChainAsync, registrant: this);
+        DeployTrigger.Register("部署链", HandleDeployChainAsync, registrant: this);
+        JoinTrigger.Register("加入链", HandleJoinChainAsync, registrant: this);
+        UnitizeTrigger.Register("单位化", HandleUnitizeAsync, registrant: this);
+        VeteranTrigger.Register("升级链", HandleVeteranChainAsync, registrant: this);
     }
 
     /// <summary>预打出触发器（费用校验：指挥点验证；开始/交互编排由打出管理器驱动；装配方扩展点保留）。</summary>
@@ -143,7 +150,10 @@ public class UnitCard : CardBase
 
     // ---------- 默认链（构造期装配；链只经公开触发器面驱动） ----------
 
-    /// <summary>打出链（外层；仅部署路径）：card.played → 部署链 → 收尾（扣费 → 离手）。</summary>
+    /// <summary>
+    /// 打出链（外层；仅部署路径）：打出宣告由**加入战场动作**的部署触发端 <c>Announce</c> 段发射；
+    /// 本 handler 只保留**入口收尾**——<c>unit.deployed</c> → 扣部署费 → 离手 → 词条落点。
+    /// </summary>
     private async Task HandlePlayChainAsync(CardTriggerView view, Context ctx, CancellationToken ct)
     {
         if (view.Card is not UnitCard unit || view.Player is not Player player)
@@ -161,18 +171,17 @@ public class UnitCard : CardBase
 
         if (slot is null) { ctx.Interrupt(); return; }
 
-        // ① 打出宣告（card.played；W4-1 升级版载荷＝{ Card, Player }——被使用卡实例＋使用方）
-        await GameUpdates.EmitCardPlayed(_chainEngine, unit, player, ct);
-
-        // ② 内层部署链（部署词条 → 单位化 → unit.deployed）
+        // 内层部署链（部署词条 → 单位化 → card.placed）——S9：执行全部下沉到「加入战场」动作的部署触发端。
         await unit.DeployTrigger.InvokeAsync(_chainEngine, BuildUnitData(unit, player, slot), ct);
         if (ctx.Interrupted)
         {
-            return; // 部署链未完成（防御：单位化失败等）：不进入收尾（不扣费、不离手）
+            return; // 部署链未完成（代价不足/结构拒绝）：不进入收尾（不扣费、不离手、不发 unit.deployed）
         }
 
-        // ③ 收尾：扣费（仅部署扣费——恰一次；W3-2 G5：读有效部署费——与校验/复验同口径；
-        //    E1-25 后续：经点数通用入口发 point.changed）→ 离手（扣费之后、链尾前最后一步）→ 词条落点（2C-A1：钳击＝同伴选择；经静态助手收口——组件遍历在其内）
+        // 部署完成：unit.deployed（单位化之后——组件挂载＋槽位占用已成立；R9：Source＝本卡）→
+        // 扣费（仅部署扣费——恰一次；读有效部署费——与校验/复验同口径）→ 离手 → 词条落点（钳击＝同伴选择）。
+        await GameUpdates.EmitUnitDeployed(_chainEngine, unit, slot, ct, view.TriggerCard ?? unit);
+
         var deployCost = unit.Modifiers.GetEffectiveValue(CardStatFields.DeployCost);
         if (ResourceManager.ResolveFor(unit) is { } manager)
         {
@@ -187,36 +196,39 @@ public class UnitCard : CardBase
         await KeywordRules.OnDeployChainFinalizedAsync(unit, ct);
     }
 
-    /// <summary>部署链（内层）：默认检查〔部署逻辑组件存在且 handler 非空〕→ 部署词条效果按序触发 → 单位化 → card.placed → unit.deployed。</summary>
+    /// <summary>
+    /// 部署链（内层；S9）：转发到**加入战场动作**的部署触发端——代价校验 → <c>card.played</c> →
+    /// 部署词条 → 共享处理端（单位化 + 落位 + <c>card.placed</c>）。本卡不再自持执行段。
+    /// </summary>
     private async Task HandleDeployChainAsync(CardTriggerView view, Context ctx, CancellationToken ct)
     {
-        if (view.Card is not UnitCard unit || view.Position is not { } slot)
+        if (view.Card is not UnitCard unit || view.Position is not { } slot || view.Player is not Player player)
         {
             ctx.Interrupt();
             return;
         }
 
-        // ① 部署词条效果（S6／R12）：触发「部署词条触发器」——部署效果经效果系统表达
-        //    （数据体/预制体声明 inject 目标＝本触发器，装载时由框架侧注入 handler；卸载自动撤销）。
-        //    重放（RetriggerSystem）再调同一触发器（定向、不广播信号）。无注入＝空转（部署不因此失败）。
-        await unit.InvokeDeployKeywordAsync(view.Player as Player, slot, ct);
-
-        // ② 单位化（共用：加组件＋入槽）
-        await unit.UnitizeTrigger.InvokeAsync(_chainEngine, BuildUnitData(unit, view.Player as Player, slot), ct);
-        if (ctx.Interrupted)
+        var action = ActionRuntime.ResolveJoinBattlefield(_chainEngine);
+        if (action is null)
         {
-            return; // 单位化未完成（防御：装配失败不留矛盾中间态）：不发射 card.placed / unit.deployed
+            // 装配性错误（独立构造的卡无对局动作集）：链中止、零落地、留痕。
+            _chainEngine.RootStream.WriteLog(
+                "部署链", $"单位 '{unit.Name}' 的部署被拒绝：本引擎未装配加入战场动作。",
+                LogLevel.Error, new[] { "action:missing" });
+            ctx.Interrupt();
+            return;
         }
 
-        // ③ W3-A3：放置驱动装载信号（card.placed）——单位化（组件挂载＋槽位占用）成功之后、完成信号之前
-        //    （策略 1 效果以此驱动延迟挂载；装载链放置处理器幂等吸收；失败/中止不发射——「每次成功完成的部署恰发射一次」）。
-        await GameUpdates.EmitCardPlaced(_chainEngine, unit, ct);
-
-        // ④ 部署完成：unit.deployed（单位化之后——组件挂载＋槽位占用已成立）
-        await GameUpdates.EmitUnitDeployed(_chainEngine, unit, slot, ct);
+        await using var scope = _chainEngine.BeginAction();
+        var result = await action.DeployAsync(unit, slot, player, view.TriggerCard, ct)
+            .ConfigureAwait(false);
+        if (result.Targets[0].Outcome != ActionOutcomeKind.Applied)
+        {
+            ctx.Interrupt(); // 处理端未落地：不发射 card.placed／unit.deployed，入口收尾不发生
+        }
     }
 
-    /// <summary>加入链：单位化 → card.placed → unit.joined（不扣费、不走部署词条）。</summary>
+    /// <summary>加入链（S9）：转发到加入战场动作的加入触发端 → 共享处理端；完成后发 <c>unit.joined</c>。</summary>
     private async Task HandleJoinChainAsync(CardTriggerView view, Context ctx, CancellationToken ct)
     {
         if (view.Card is not UnitCard unit || view.Position is not { } slot)
@@ -225,23 +237,32 @@ public class UnitCard : CardBase
             return;
         }
 
-        await unit.UnitizeTrigger.InvokeAsync(_chainEngine, BuildUnitData(unit, view.Player as Player, slot), ct);
-        if (ctx.Interrupted)
+        var action = ActionRuntime.ResolveJoinBattlefield(_chainEngine);
+        if (action is null)
         {
-            return; // 单位化未完成（防御）：不发射 card.placed / unit.joined
+            _chainEngine.RootStream.WriteLog(
+                "加入链", $"单位 '{unit.Name}' 的加入被拒绝：本引擎未装配加入战场动作。",
+                LogLevel.Error, new[] { "action:missing" });
+            ctx.Interrupt();
+            return;
         }
 
-        // W3-A3：放置驱动装载信号（card.placed）——单位化成功之后、完成信号之前（每次成功完成的加入恰发射一次）。
-        await GameUpdates.EmitCardPlaced(_chainEngine, unit, ct);
+        await using var scope = _chainEngine.BeginAction();
+        var result = await action.JoinAsync(unit, slot, view.TriggerCard, ct).ConfigureAwait(false);
+        if (result.Targets[0].Outcome != ActionOutcomeKind.Applied)
+        {
+            ctx.Interrupt(); // 处理端未落地：不发射 card.placed／unit.joined
+            return;
+        }
 
-        await GameUpdates.EmitUnitJoined(_chainEngine, unit, slot, ct);
+        await GameUpdates.EmitUnitJoined(_chainEngine, unit, slot, ct, view.TriggerCard ?? unit);
     }
 
     /// <summary>
-    /// 单位化（部署/加入共用；链尾共用段）：加单位组件（位置＝槽位、已毁＝false、类型＝从定义填充〔2C 加性〕、三实时值＝对战组件值）
-    /// ＋指挥组件（初始 false/false）＋实际加入空槽位＋请求跑链一次（W2b：装配完成点建立修饰机制「初始快照」——
-    /// 无修饰/无损伤＝零变化、零发射；此后任何数值变更（伤害/修饰）均可被检测与集中触发）。
-    /// 结构不变量（矛盾中间态防护）：仅空槽、未单位化的卡可单位化——违反＝链中止（不放置、不挂组件、零中间态残留）。
+    /// 单位化（部署/加入共用；链尾共用段，S9 起由加入战场动作处理端经
+    /// <see cref="IJoinActionServices.UnitizeOnJoinAsync"/> 单源调用）：加单位组件（位置＝槽位、已毁＝false、
+    /// 类型＝从定义填充）＋指挥组件（初始 false/false）＋实际加入空槽位＋请求跑链一次（建立修饰机制「初始快照」）。
+    /// 结构不变量（矛盾中间态防护）：仅空槽、未单位化的卡可单位化——违反＝链中止（零中间态残留）。
     /// </summary>
     private async Task HandleUnitizeAsync(CardTriggerView view, Context ctx, CancellationToken ct)
     {
@@ -253,7 +274,7 @@ public class UnitCard : CardBase
         }
 
         var state = UnitStateData.CreateInitial(unit.GetData<BattleStatsData>());
-        state.FillInitialTypes(unit.Definition.UnitTypes); // 2C：单位类型清单从定义填充（部署/加入两路径一致）；S9：装配期填充＝列明例外（静默面）
+        state.FillInitialTypes(unit.Definition.UnitTypes); // 单位类型清单从定义填充（部署/加入两路径一致）
         state.Position = slot;
         unit.AddData(state);
         unit.AddData(new CommandData());
@@ -262,6 +283,20 @@ public class UnitCard : CardBase
         // W2b G3 接线：装配完成点请求跑链一次（首轮——以基准状态建立比较基线；本时点无修饰/无损伤＝零变化、零发射）。
         await unit.Modifiers.RequestRerunAsync(ct);
     }
+
+    /// <summary>
+    /// 单位化的**卡侧单源入口**（S9；唯一调用者＝加入战场动作服务面）：触发「单位化触发器」
+    /// （载荷＝{ Card, Position }），由默认链执行单位化；注入该触发器的效果照常参与。
+    /// </summary>
+    internal Task InvokeUnitizeAsync(Slot slot, CancellationToken ct = default)
+        => UnitizeTrigger.InvokeAsync(
+            _chainEngine,
+            new Dictionary<string, object?>
+            {
+                [GameUpdates.PayloadCard] = this,
+                [GameUpdates.PayloadPosition] = slot,
+            },
+            ct);
 
     // ---------- S2 隐蔽机制（揭示导航面——由 CovertRules.RevealAsync 服务调用、不对外） ----------
 
@@ -572,11 +607,14 @@ public class UnitCard : CardBase
     /// 死亡后数值面冻结：已死亡/已毁＝明确拒绝（fail-fast、零副作用）；未单位化＝明确异常（装配性错误）。
     /// 批 1（动员效果化）：动员「受伤失去」由动员效果监听本门户发射的 card.damaged 信号承载——
     /// 门户不再感知动员（直调路径退役）；信号发射条件不变（净伤害＞0 且防御实际变化；先落定后发射）。
+    /// <para>R11 起为 <c>internal</c> 受控面：**唯一**调用方＝伤害动作服务面
+    /// （<c>DamageAction</c> 处理端 → <c>MatchActionServices.ApplyDamageAsync</c>）
+    /// ——其他程序集编译期不可调（测试程序集为友元）。</para>
     /// </summary>
     /// <param name="amount">伤害量（≥0；0＝合法——跑链无变化时零发射）。</param>
     /// <exception cref="ArgumentOutOfRangeException">amount 为负。</exception>
     /// <exception cref="InvalidOperationException">未单位化；或已死亡/已毁（死亡后数值面冻结——明确拒绝）。</exception>
-    public async Task ApplyDefenseDamageAsync(int amount, CancellationToken ct = default)
+    internal async Task ApplyDefenseDamageAsync(int amount, CancellationToken ct = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(amount);
         var state = RequireUnitState();

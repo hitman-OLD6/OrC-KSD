@@ -1,3 +1,4 @@
+using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Players;
 
@@ -122,14 +123,16 @@ public sealed class TurnManager
     /// </summary>
     private bool ShouldDrawForTurn(int turnNumber) => turnNumber != 1 || _allowFirstTurnDraw;
 
-    /// <summary>发射 turn 系列更新（载荷＝{ 玩家, 回合数 }）。</summary>
-    private Task EmitTurnAsync(string updateType, Player player, int turnNumber, CancellationToken ct)
+    /// <summary>发射 turn 系列更新（载荷＝{ 玩家, 回合数, Source }；回合信号无引发者——Source 恒 null）。</summary>
+    private Task EmitTurnAsync(
+        string updateType, Player player, int turnNumber, CancellationToken ct = default, Card? source = null)
         => _engine.Emit(
             updateType,
             new Dictionary<string, object?>
             {
                 [GameUpdates.PayloadPlayer] = player,
                 [GameUpdates.PayloadTurnNumber] = turnNumber,
+                [GameUpdates.PayloadSource] = source,
             },
             ct);
 }

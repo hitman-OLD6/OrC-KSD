@@ -1,4 +1,4 @@
-// =============================================================================
+﻿// =============================================================================
 // Orc.Game.Sample —— KARDS 风格游戏层「最小可玩宿主」示例（供集成参考）
 //
 // 用法：
@@ -22,6 +22,7 @@
 //     收集＝提交前端可交互的完整引用列表；交互＝渲染槽位描述／候选并回传 Complete／Cancel。
 // =============================================================================
 
+using Orc.Foundation.Actions;
 using Orc.Game;
 using Orc.Game.Cards;
 using Orc.Game.Collections;
@@ -50,6 +51,7 @@ internal static class Program
 
         // 资产化 批次 2：宿主启动时装配插件的**进程级**资产（词条等静态注册面）——须早于任何对局。
         BuiltInPlugin.RegisterProcessDefaults();
+        FoundationActions.Register();
 
         // ① 建局：调用方提供数据（双方卡组＋定义集），Match 负责装配
         var bridge = new DemoTargeterBridge(interactive);
@@ -59,7 +61,11 @@ internal static class Program
             CreateDefinitions(),
             seed: seed,
             targeterBridge: bridge,
-            packageActivator: new SnapshotPackageActivator(BuiltInPluginPackage.CreateSnapshot()));
+            packageActivator: new SnapshotPackageActivator(AssetCatalogSnapshot.FromPackages(new[]
+            {
+                BuiltInPluginPackage.Load(),
+                FoundationActionsPluginPackage.Load(),
+            })));
         bridge.Match = match; // 桥接需读对局状态（候选收集／交互）
 
         // ⑦ 观察面之一：即时更新订阅（UI 非阻塞反馈；示例直接打印到控制台）
@@ -163,7 +169,7 @@ internal static class Program
             new CardDefinition(
                 "巨炮", deployCost: 1, operateCost: 1, attack: 30, defense: 30,
                 unitTypes: [UnitType.Artillery], faction: Faction.Germany, rarity: Rarity.Standard)),
-        // 指令／反制：对外入口见 GameEntryPoints（BeginCommandPrePlayAsync／UseCounterAsync）——本示例不展开
+        // 指令／反制：对外入口见 GameEntryPoints（BeginOrderPrePlayAsync／UseCounterAsync）——本示例不展开
         new CardDefinitionEntry(
             CommandId,
             new CardDefinition(

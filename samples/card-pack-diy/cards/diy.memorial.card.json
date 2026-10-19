@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "diy.memorial",
+  "name": "纪奠",
+  "components": [
+    {
+      "component": "typeCategory",
+      "type": [
+        "order"
+      ]
+    },
+    {
+      "component": "factionCost",
+      "faction": "Germany",
+      "kredits": 1
+    },
+    {
+      "component": "tagData",
+      "rarity": "Standard"
+    },
+    {
+      "component": "effects",
+      "prefabs": [
+        "diy.memorial.effect"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,872 @@
+{
+  "commit": "cce4ddf1e2532772cac59bd34ad3a4b0176354af",
+  "generatedAt": "2026-10-19T15:34:50.7738256+08:00",
+  "gameUpdates": [
+    {
+      "name": "CardBurned",
+      "value": "card.burned"
+    },
+    {
+      "name": "CardDamaged",
+      "value": "card.damaged"
+    },
+    {
+      "name": "CardDied",
+      "value": "card.died"
+    },
+    {
+      "name": "CardDiscarded",
+      "value": "card.discarded"
+    },
+    {
+      "name": "CardDrawn",
+      "value": "card.drawn"
+    },
+    {
+      "name": "CardDying",
+      "value": "card.dying"
+    },
+    {
+      "name": "CardHandAdd",
+      "value": "card.hand.add"
+    },
+    {
+      "name": "CardLeaving",
+      "value": "card.leaving"
+    },
+    {
+      "name": "CardLoad",
+      "value": "card.load"
+    },
+    {
+      "name": "CardPlayed",
+      "value": "card.played"
+    },
+    {
+      "name": "CardStatChanged",
+      "value": "card.stat.changed"
+    },
+    {
+      "name": "CounterTriggered",
+      "value": "counter.triggered"
+    },
+    {
+      "name": "DeckShuffled",
+      "value": "deck.shuffled"
+    },
+    {
+      "name": "KeywordAttackFinished",
+      "value": "keyword.attack.finished"
+    },
+    {
+      "name": "PayloadAddedType",
+      "value": "AddedType"
+    },
+    {
+      "name": "PayloadAmount",
+      "value": "Amount"
+    },
+    {
+      "name": "PayloadCard",
+      "value": "Card"
+    },
+    {
+      "name": "PayloadChangedFields",
+      "value": "ChangedFields"
+    },
+    {
+      "name": "PayloadDeck",
+      "value": "Deck"
+    },
+    {
+      "name": "PayloadKeyword",
+      "value": "Keyword"
+    },
+    {
+      "name": "PayloadKiller",
+      "value": "Killer"
+    },
+    {
+      "name": "PayloadNewPoints",
+      "value": "NewPoints"
+    },
+    {
+      "name": "PayloadNewPosition",
+      "value": "NewPosition"
+    },
+    {
+      "name": "PayloadNewSlots",
+      "value": "NewSlots"
+    },
+    {
+      "name": "PayloadOldPoints",
+      "value": "OldPoints"
+    },
+    {
+      "name": "PayloadOldPosition",
+      "value": "OldPosition"
+    },
+    {
+      "name": "PayloadOldSlots",
+      "value": "OldSlots"
+    },
+    {
+      "name": "PayloadPlayer",
+      "value": "Player"
+    },
+    {
+      "name": "PayloadPosition",
+      "value": "Position"
+    },
+    {
+      "name": "PayloadSource",
+      "value": "Source"
+    },
+    {
+      "name": "PayloadTurnNumber",
+      "value": "TurnNumber"
+    },
+    {
+      "name": "PayloadUnit",
+      "value": "Unit"
+    },
+    {
+      "name": "PointChanged",
+      "value": "point.changed"
+    },
+    {
+      "name": "PointGained",
+      "value": "point.gained"
+    },
+    {
+      "name": "PointLost",
+      "value": "point.lost"
+    },
+    {
+      "name": "SlotChanged",
+      "value": "slot.changed"
+    },
+    {
+      "name": "SlotGained",
+      "value": "slot.gained"
+    },
+    {
+      "name": "SlotLost",
+      "value": "slot.lost"
+    },
+    {
+      "name": "TurnEnd",
+      "value": "turn.end"
+    },
+    {
+      "name": "TurnEndBefore",
+      "value": "turn.end.before"
+    },
+    {
+      "name": "TurnStart",
+      "value": "turn.start"
+    },
+    {
+      "name": "TurnStartAfter",
+      "value": "turn.start.after"
+    },
+    {
+      "name": "TurnStartBefore",
+      "value": "turn.start.before"
+    },
+    {
+      "name": "UnitActed",
+      "value": "unit.acted"
+    },
+    {
+      "name": "UnitCombatSurvived",
+      "value": "unit.combat.survived"
+    },
+    {
+      "name": "UnitDamageDealt",
+      "value": "unit.damage.dealt"
+    },
+    {
+      "name": "UnitDeployed",
+      "value": "unit.deployed"
+    },
+    {
+      "name": "UnitJoined",
+      "value": "unit.joined"
+    },
+    {
+      "name": "UnitPositionChanged",
+      "value": "unit.position.changed"
+    },
+    {
+      "name": "UnitRevealed",
+      "value": "unit.revealed"
+    },
+    {
+      "name": "UnitTypesChanged",
+      "value": "unit.types.changed"
+    },
+    {
+      "name": "UnitUpgraded",
+      "value": "unit.upgraded"
+    }
+  ],
+  "effectRuntime": [
+    "AddToHandAsync`0(Orc.Cards.Card, System.String, System.Int32, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Int32>",
+    "AttachPrefabAsync`0(Orc.Cards.Card, System.String, System.Threading.CancellationToken):System.Threading.Tasks.Task<Orc.Game.Effects.EffectAttachResult>",
+    "AttachSnapshotAsync`0(Orc.Cards.Card, System.String, System.Threading.CancellationToken):System.Threading.Tasks.Task<Orc.Game.Effects.EffectAttachResult>",
+    "BattleAsync`0(Orc.Cards.Card, Orc.Cards.Card, Orc.Cards.Card, System.Threading.CancellationToken):System.Threading.Tasks.Task<System.Boolean>",
+    "BeginTargetSelectionAsync`0(Orc.Cards.Card, Orc.Game.Effects.EffectSelector, System.Threading.CancellationToken):System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Orc.Cards.Card>>",
+    "BuffAsync`0(Orc.Cards.Card, System.Int32, System.Int32, Orc.Game.Effects.EffectDuration, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
+    "CompileAttachAsync`0(Orc.Cards.Card, System.String, System.String, System.Threading.CancellationToken):System.Threading.Tasks.Task<Orc.Game.Effects.EffectAttachResult>",
+    "CostModAsync`0(Orc.Cards.Card, System.Int32, Orc.Game.Effects.EffectDuration, System.Threading.CancellationToken):System.Threading.Tasks.Task<System.Boolean>",
+    "DamageAsync`0(Orc.Cards.Card, System.Int32, Orc.Cards.Card, System.Threading.CancellationToken):System.Threading.Tasks.Task<System.Boolean>",
+    "DeclareAuraAsync`0(Orc.Cards.Card, System.String, System.Int32, Orc.Game.Effects.EffectAuraFilter, System.Threading.CancellationToken):System.Threading.Tasks.Task<System.Boolean>",
+    "DeployCostModAsync`0(Orc.Cards.Card, System.Int32, System.Threading.CancellationToken):System.Threading.Tasks.Task<System.Boolean>",
+    "DetachEffectAsync`0(Orc.Cards.Card, Orc.Cards.Effect, System.Threading.CancellationToken):System.Threading.Tasks.Task<Orc.Game.Effects.EffectAttachResult>",
+    "DetachEffectAsync`0(Orc.Cards.Card, Orc.Game.Effects.EffectAttachCredential, System.Threading.CancellationToken):System.Threading.Tasks.Task<Orc.Game.Effects.EffectAttachResult>",
+    "DrawAsync`0(Orc.Cards.Card, System.Int32, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Int32>",
+    "EvaluateCondition`0(Orc.Cards.Card, System.String):System.Boolean",
+    "FetchFromDeckAsync`0(Orc.Cards.Card, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<Orc.Game.Managers.DeckFetchResult>",
+    "GainPointSlotsAsync`0(Orc.Cards.Card, System.Int32, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
+    "GainPointsAsync`0(Orc.Cards.Card, System.Int32, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
+    "GrantAsync`0(Orc.Cards.Card, System.String, System.Nullable<System.Int32>, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
+    "GrantAsync`0(Orc.Cards.Card, System.String, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
+    "GrantWithContentAsync`0(Orc.Cards.Card, System.String, Orc.Cards.Effect, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
+    "KillAsync`0(Orc.Cards.Card, Orc.Cards.Card, System.Threading.CancellationToken):System.Threading.Tasks.Task<System.Boolean>",
+    "LosePointSlotsAsync`0(Orc.Cards.Card, System.Int32, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
+    "LosePointsAsync`0(Orc.Cards.Card, System.Int32, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
+    "MoveAsync`0(Orc.Cards.Card, System.String, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
+    "OwnerUnits`0(Orc.Game.Cards.CardBase):System.Collections.Generic.IReadOnlyList<Orc.Cards.Card>",
+    "PinAsync`0(Orc.Cards.Card, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
+    "ResolveFor`0(Orc.Cards.Card):Orc.Game.Effects.EffectRuntime",
+    "RevealAsync`0(Orc.Cards.Card, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<Orc.Game.Cards.RevealOutcome>",
+    "RevokeAsync`0(Orc.Cards.Card, System.String, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
+    "SelectAsync`0(Orc.Cards.Card, Orc.Game.Effects.EffectSelector, System.Threading.CancellationToken):System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Orc.Cards.Card>>",
+    "SetKeywordValueAsync`0(Orc.Cards.Card, System.String, System.Nullable<System.Int32>, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
+    "ShuffleInAsync`0(Orc.Cards.Card, System.String, System.Int32, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Int32>",
+    "SilenceAsync`0(Orc.Cards.Card, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
+    "UpgradeAsync`0(Orc.Cards.Card, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<Orc.Game.Cards.VeteranPromotionResult>",
+    "UseEffectAssets`0(System.Collections.Generic.IReadOnlyList<Orc.Game.EffectParsing.Templates.EffectTemplate>, Orc.Game.EffectParsing.Compilation.OpTemplateCatalog):System.Void",
+    "UseEffectAssets`0(System.String):System.Void"
+  ],
+  "gameEntryPoints": [
+    {
+      "name": ".ctor",
+      "category": "对局",
+      "owner": "Orc.Game.Match",
+      "signature": "Match(...)（构造注入：引擎/卡库/提供器/桥接/生命周期/判定器装配）",
+      "gate": "装配期（构造）",
+      "outcome": "对局实例（未初始化）",
+      "status": "Available"
+    },
+    {
+      "name": "Initialize",
+      "category": "对局",
+      "owner": "Orc.Game.Match",
+      "signature": "Initialize(ct)",
+      "gate": "未初始化（可重复调用＝幂等装配）",
+      "outcome": "void（就绪面开放）",
+      "status": "Available"
+    },
+    {
+      "name": "ShuffleDeckAsync",
+      "category": "对局",
+      "owner": "Orc.Game.Match",
+      "signature": "ShuffleDeckAsync(player, ct)",
+      "gate": "已初始化",
+      "outcome": "void（deck.shuffled）",
+      "status": "Available"
+    },
+    {
+      "name": "EndTurn",
+      "category": "对局",
+      "owner": "Orc.Game.Match",
+      "signature": "EndTurn(ct)",
+      "gate": "已初始化；非终局（相位门禁随 01）",
+      "outcome": "void（回合交接）",
+      "status": "Available"
+    },
+    {
+      "name": "Concede",
+      "category": "对局",
+      "owner": "Orc.Game.Match",
+      "signature": "Concede(player, ct)",
+      "gate": "非终局（置 Ended；与 HQ≤0 单源路径）",
+      "outcome": "void（终局记录）",
+      "status": "PendingDelivery"
+    },
+    {
+      "name": "MulliganReplace",
+      "category": "对局",
+      "owner": "Orc.Game.Match",
+      "signature": "MulliganReplace(player, handIndexes, ct)",
+      "gate": "Mulligan 相位 ∧ 该方未确认",
+      "outcome": "void（换牌）",
+      "status": "PendingDelivery"
+    },
+    {
+      "name": "MulliganDone",
+      "category": "对局",
+      "owner": "Orc.Game.Match",
+      "signature": "MulliganDone(player, ct)",
+      "gate": "Mulligan 相位 ∧ 该方未确认",
+      "outcome": "void（确认；双方确认＝进 Play）",
+      "status": "PendingDelivery"
+    },
+    {
+      "name": "BeginUnitPrePlayAsync",
+      "category": "出牌",
+      "owner": "Orc.Game.Managers.PlayManager",
+      "signature": "BeginUnitPrePlayAsync(card, ct)",
+      "gate": "非终局 ∧ 归属已加载 ∧ 费用 ∧ 空槽候选非空",
+      "outcome": "PlayResult（确认⇒自动衔接打出链）",
+      "status": "Available"
+    },
+    {
+      "name": "BeginCommandPrePlayAsync",
+      "category": "出牌",
+      "owner": "Orc.Game.Managers.PlayManager",
+      "signature": "BeginCommandPrePlayAsync(card, ct)",
+      "gate": "非终局 ∧ 归属已加载 ∧ 费用",
+      "outcome": "PlayResult（确认⇒自动衔接打出段）",
+      "status": "Available"
+    },
+    {
+      "name": "PlayUnitAsync",
+      "category": "出牌",
+      "owner": "Orc.Game.Managers.PlayManager",
+      "signature": "PlayUnitAsync(card, target, ct)",
+      "gate": "非终局 ∧ 槽位为空 ∧ 未单位化",
+      "outcome": "PlayResult",
+      "status": "Available"
+    },
+    {
+      "name": "JoinUnitAsync",
+      "category": "出牌",
+      "owner": "Orc.Game.Managers.PlayManager",
+      "signature": "JoinUnitAsync(card, target, ct)",
+      "gate": "非终局 ∧ 槽位为空 ∧ 未单位化",
+      "outcome": "PlayResult",
+      "status": "Available"
+    },
+    {
+      "name": "UseCounterAsync",
+      "category": "出牌",
+      "owner": "Orc.Game.Managers.PlayManager",
+      "signature": "UseCounterAsync(card, ct)",
+      "gate": "非终局 ∧ 己方回合 ∧ 费用",
+      "outcome": "PlayResult（激活↔取消）",
+      "status": "Available"
+    },
+    {
+      "name": "PlayCommandAsync",
+      "category": "出牌",
+      "owner": "Orc.Game.Managers.PlayManager",
+      "signature": "PlayCommandAsync(card, ct)〔兼容入口〕",
+      "gate": "同 BeginCommandPrePlayAsync",
+      "outcome": "PlayResult（与预行为入口同一实现）",
+      "status": "Available"
+    },
+    {
+      "name": "BeginCommandAsync",
+      "category": "指挥",
+      "owner": "Orc.Game.Commanding.CommandManager",
+      "signature": "BeginCommandAsync(unit, ct, triggerCard?)",
+      "gate": "非终局 ∧ 己方回合 ∧ 在场未死亡 ∧ 两动作之一可用",
+      "outcome": "CommandResult（拖拽：候选＝并集）",
+      "status": "Available"
+    },
+    {
+      "name": "BeginMoveAsync",
+      "category": "指挥",
+      "owner": "Orc.Game.Commanding.CommandManager",
+      "signature": "BeginMoveAsync(unit, ct)",
+      "gate": "非终局 ∧ 己方回合 ∧ 在场未死亡 ∧ 移动可用（含候选非空）",
+      "outcome": "CommandResult（候选＝前线空槽）",
+      "status": "Available"
+    },
+    {
+      "name": "BeginAttackAsync",
+      "category": "指挥",
+      "owner": "Orc.Game.Commanding.CommandManager",
+      "signature": "BeginAttackAsync(unit, ct)",
+      "gate": "非终局 ∧ 己方回合 ∧ 在场未死亡 ∧ 攻击可用（含候选非空）",
+      "outcome": "CommandResult（候选＝合法敌方单位/HQ）",
+      "status": "Available"
+    },
+    {
+      "name": "LeaveBattlefieldAsync",
+      "category": "指挥",
+      "owner": "Orc.Game.Commanding.CommandManager",
+      "signature": "LeaveBattlefieldAsync(unit, ct)",
+      "gate": "非终局",
+      "outcome": "void（离场）",
+      "status": "Available"
+    },
+    {
+      "name": "GetCommandAvailability",
+      "category": "指挥",
+      "owner": "Orc.Game.Commanding.CommandManager",
+      "signature": "GetCommandAvailability(unit)",
+      "gate": "纯查询（无门禁副作用；未终局）",
+      "outcome": "CommandAvailability（bool＋原因＋候选）",
+      "status": "Available"
+    },
+    {
+      "name": "RunAsync",
+      "category": "目标应答",
+      "owner": "Orc.Game.Targeting.TargeterManager",
+      "signature": "RunAsync(flow, param)",
+      "gate": "桥接可缺省（缺失＝失败结局）",
+      "outcome": "Task<TargeterResult>（三态）",
+      "status": "Available"
+    },
+    {
+      "name": "Step",
+      "category": "目标应答",
+      "owner": "Orc.Game.Targeting.ITargeterFlow",
+      "signature": "Step(selector, parameter)",
+      "gate": "流程内产出选择器并等待应答",
+      "outcome": "Task<SelectorResult<TResult>>",
+      "status": "Available"
+    },
+    {
+      "name": "Retry",
+      "category": "目标应答",
+      "owner": "Orc.Game.Targeting.ITargeterFlow",
+      "signature": "Retry()",
+      "gate": "重入当前选择器（同实例、有上限）",
+      "outcome": "Task<SelectorResult<TResult>>",
+      "status": "Available"
+    },
+    {
+      "name": "BeginTargeting",
+      "category": "目标应答",
+      "owner": "Orc.Game.Targeting.ITargeterBridge",
+      "signature": "BeginTargeting(session)",
+      "gate": "桥接已装配",
+      "outcome": "void（交付会话）",
+      "status": "Available"
+    },
+    {
+      "name": "NextAsync",
+      "category": "目标应答",
+      "owner": "Orc.Game.Targeting.ITargeterSession",
+      "signature": "NextAsync()",
+      "gate": "前端逐个取选择器",
+      "outcome": "Task<ISelectorInstance?>（null＝流程结束）",
+      "status": "Available"
+    },
+    {
+      "name": "Submit",
+      "category": "目标应答",
+      "owner": "Orc.Game.Targeting.ISelectorInstance",
+      "signature": "Submit(selectorEvent)",
+      "gate": "已取到选择器",
+      "outcome": "bool（true＝构成终局）",
+      "status": "Available"
+    },
+    {
+      "name": "CreateAsync",
+      "category": "生成/放置",
+      "owner": "Orc.Game.MatchCardService",
+      "signature": "CreateAsync(definitionId, owner, ct)",
+      "gate": "已初始化",
+      "outcome": "Task<CardBase>",
+      "status": "Available"
+    },
+    {
+      "name": "PlaceToHandAsync",
+      "category": "生成/放置",
+      "owner": "Orc.Game.MatchCardService",
+      "signature": "PlaceToHandAsync(card, player, ct)",
+      "gate": "已初始化",
+      "outcome": "Task<CardPlaceResult>",
+      "status": "Available"
+    },
+    {
+      "name": "PlaceToSupportLineAsync",
+      "category": "生成/放置",
+      "owner": "Orc.Game.MatchCardService",
+      "signature": "PlaceToSupportLineAsync(card, player, slot, …)",
+      "gate": "已初始化 ∧ 槽位为空",
+      "outcome": "Task<CardPlaceResult>",
+      "status": "Available"
+    },
+    {
+      "name": "PlaceToDeckTopAsync",
+      "category": "生成/放置",
+      "owner": "Orc.Game.MatchCardService",
+      "signature": "PlaceToDeckTopAsync(card, player, ct)",
+      "gate": "已初始化",
+      "outcome": "Task<CardPlaceResult>",
+      "status": "Available"
+    },
+    {
+      "name": "PlaceIntoDeckShuffledAsync",
+      "category": "生成/放置",
+      "owner": "Orc.Game.MatchCardService",
+      "signature": "PlaceIntoDeckShuffledAsync(card, player, …)",
+      "gate": "已初始化",
+      "outcome": "Task<CardPlaceResult>",
+      "status": "Available"
+    },
+    {
+      "name": "CreateAndPlaceToHandAsync",
+      "category": "生成/放置",
+      "owner": "Orc.Game.MatchCardService",
+      "signature": "CreateAndPlaceToHandAsync(definitionId, player, ct)〔复合入口〕",
+      "gate": "已初始化",
+      "outcome": "Task<CardPlaceResult>",
+      "status": "Available"
+    },
+    {
+      "name": "CreateAndPlaceToSupportLineAsync",
+      "category": "生成/放置",
+      "owner": "Orc.Game.MatchCardService",
+      "signature": "CreateAndPlaceToSupportLineAsync(definitionId, player, ct)〔复合入口〕",
+      "gate": "已初始化 ∧ 槽位为空",
+      "outcome": "Task<CardPlaceResult>",
+      "status": "Available"
+    },
+    {
+      "name": "CreateAndPlaceToDeckTopAsync",
+      "category": "生成/放置",
+      "owner": "Orc.Game.MatchCardService",
+      "signature": "CreateAndPlaceToDeckTopAsync(definitionId, player, ct)〔复合入口〕",
+      "gate": "已初始化",
+      "outcome": "Task<CardPlaceResult>",
+      "status": "Available"
+    },
+    {
+      "name": "CreateAndPlaceIntoDeckShuffledAsync",
+      "category": "生成/放置",
+      "owner": "Orc.Game.MatchCardService",
+      "signature": "CreateAndPlaceIntoDeckShuffledAsync(definitionId, player, ct)〔复合入口〕",
+      "gate": "已初始化",
+      "outcome": "Task<CardPlaceResult>",
+      "status": "Available"
+    },
+    {
+      "name": "CreateAndPlaceToAdjacentAsync",
+      "category": "生成/放置",
+      "owner": "Orc.Game.MatchCardService",
+      "signature": "CreateAndPlaceToAdjacentAsync(definitionId, player, ct)〔复合入口〕",
+      "gate": "已初始化 ∧ 邻位空槽",
+      "outcome": "Task<CardPlaceResult>",
+      "status": "Available"
+    },
+    {
+      "name": "Register",
+      "category": "注册/实例化",
+      "owner": "Orc.Game.Cards.CardLibrary",
+      "signature": "Register(id, definition)",
+      "gate": "装配期（注册表）",
+      "outcome": "void",
+      "status": "Available"
+    },
+    {
+      "name": "Instantiate",
+      "category": "注册/实例化",
+      "owner": "Orc.Game.Cards.CardLibrary",
+      "signature": "Instantiate(id)",
+      "gate": "定义已注册",
+      "outcome": "CardBase（未加载）",
+      "status": "Available"
+    },
+    {
+      "name": "LoadAsync",
+      "category": "注册/实例化",
+      "owner": "Orc.Game.Cards.CardBase",
+      "signature": "LoadAsync(owner, ct)",
+      "gate": "定义已装配",
+      "outcome": "void（card.load；归属就位）",
+      "status": "Available"
+    },
+    {
+      "name": "LoadOpeningHand",
+      "category": "手牌/资源",
+      "owner": "Orc.Game.Managers.PlayerManager",
+      "signature": "LoadOpeningHand(player, count)",
+      "gate": "已初始化（静默）",
+      "outcome": "void",
+      "status": "Available"
+    },
+    {
+      "name": "DrawCard",
+      "category": "手牌/资源",
+      "owner": "Orc.Game.Managers.PlayerManager",
+      "signature": "DrawCard(player, ct)",
+      "gate": "已初始化",
+      "outcome": "Task<CardBase>（card.drawn）",
+      "status": "Available"
+    },
+    {
+      "name": "DiscardCardAsync",
+      "category": "手牌/资源",
+      "owner": "Orc.Game.Managers.PlayerManager",
+      "signature": "DiscardCardAsync(player, card, ct)",
+      "gate": "已初始化 ∧ 卡在手牌",
+      "outcome": "Task（card.discarded）",
+      "status": "Available"
+    },
+    {
+      "name": "ReturnToDeckTop",
+      "category": "手牌/资源",
+      "owner": "Orc.Game.Managers.PlayerManager",
+      "signature": "ReturnToDeckTop(player, card)",
+      "gate": "已初始化",
+      "outcome": "void",
+      "status": "Available"
+    },
+    {
+      "name": "ReturnToDeck",
+      "category": "手牌/资源",
+      "owner": "Orc.Game.Managers.PlayerManager",
+      "signature": "ReturnToDeck(player, card, position)",
+      "gate": "已初始化",
+      "outcome": "void",
+      "status": "Available"
+    },
+    {
+      "name": "IsOutsideDeck",
+      "category": "手牌/资源",
+      "owner": "Orc.Game.Managers.PlayerManager",
+      "signature": "IsOutsideDeck(card)",
+      "gate": "纯查询",
+      "outcome": "bool",
+      "status": "Available"
+    },
+    {
+      "name": "SettleAsync",
+      "category": "手牌/资源",
+      "owner": "Orc.Game.Managers.ResourceManager",
+      "signature": "SettleAsync(player, ct)",
+      "gate": "回合开始（资源结算；槽变化发 slot.changed）",
+      "outcome": "Task",
+      "status": "Available"
+    },
+    {
+      "name": "AddPointsAsync",
+      "category": "手牌/资源",
+      "owner": "Orc.Game.Managers.ResourceManager",
+      "signature": "AddPointsAsync(player, amount, ct)",
+      "gate": "已初始化",
+      "outcome": "Task<bool>（发 point.changed）",
+      "status": "Available"
+    },
+    {
+      "name": "ChangePointsAsync",
+      "category": "手牌/资源",
+      "owner": "Orc.Game.Managers.ResourceManager",
+      "signature": "ChangePointsAsync(player, value, kind, ct)",
+      "gate": "已初始化",
+      "outcome": "Task<bool>（设为/增减；发 point.changed）",
+      "status": "Available"
+    },
+    {
+      "name": "EndTurn",
+      "category": "手牌/资源",
+      "owner": "Orc.Game.Managers.TurnManager",
+      "signature": "EndTurn(ct)",
+      "gate": "回合进行中",
+      "outcome": "Task（turn.end.before/turn.end）",
+      "status": "Available"
+    },
+    {
+      "name": "ApplyDefenseDamageAsync",
+      "category": "门户/重发",
+      "owner": "Orc.Game.Cards.UnitCard",
+      "signature": "ApplyDefenseDamageAsync(amount, ct)",
+      "gate": "已单位化 ∧ 未死亡",
+      "outcome": "Task（受控面：仅 DamagePipeline 可调）",
+      "status": "Available"
+    },
+    {
+      "name": "RepairDefenseAsync",
+      "category": "门户/重发",
+      "owner": "Orc.Game.Cards.UnitCard",
+      "signature": "RepairDefenseAsync(ct)",
+      "gate": "已单位化 ∧ 未死亡",
+      "outcome": "Task（有变化才发）",
+      "status": "Available"
+    },
+    {
+      "name": "AddUnitTypeAsync",
+      "category": "门户/重发",
+      "owner": "Orc.Game.Cards.UnitCard",
+      "signature": "AddUnitTypeAsync(type, ct)",
+      "gate": "已单位化 ∧ 已定义枚举值",
+      "outcome": "Task（unit.types.changed 恰一次）",
+      "status": "Available"
+    },
+    {
+      "name": "ApplyDamageAsync",
+      "category": "门户/重发",
+      "owner": "Orc.Game.Players.Hq",
+      "signature": "ApplyDamageAsync(amount, ct)",
+      "gate": "非终局（HQ 数值路径与管线）",
+      "outcome": "Task（受控面：仅 DamagePipeline 可调）",
+      "status": "Available"
+    },
+    {
+      "name": "AddDamageRewriter",
+      "category": "门户/重发",
+      "owner": "Orc.Game.Players.Hq",
+      "signature": "AddDamageRewriter(rewriter)",
+      "gate": "装配/效果装载期",
+      "outcome": "void",
+      "status": "Available"
+    },
+    {
+      "name": "AddLethalIntervention",
+      "category": "门户/重发",
+      "owner": "Orc.Game.Players.Hq",
+      "signature": "AddLethalIntervention(intervention)",
+      "gate": "装配/效果装载期",
+      "outcome": "void",
+      "status": "Available"
+    },
+    {
+      "name": "RemovePipelineHooksBySource",
+      "category": "门户/重发",
+      "owner": "Orc.Game.Players.Hq",
+      "signature": "RemovePipelineHooksBySource(source)",
+      "gate": "装载期配对（卸载）",
+      "outcome": "int（移除计数）",
+      "status": "Available"
+    },
+    {
+      "name": "RequestAsync",
+      "category": "门户/重发",
+      "owner": "Orc.Game.Cards.RetriggerSystem",
+      "signature": "RequestAsync(target, chain, ct)",
+      "gate": "目标在场（重入防护）",
+      "outcome": "Task<bool>",
+      "status": "Available"
+    },
+    {
+      "name": "RequestDeployAsync",
+      "category": "门户/重发",
+      "owner": "Orc.Game.Cards.RetriggerRules",
+      "signature": "RequestDeployAsync(target, ct)",
+      "gate": "目标在场",
+      "outcome": "Task<bool>",
+      "status": "Available"
+    },
+    {
+      "name": "RequestDeathrattleAsync",
+      "category": "门户/重发",
+      "owner": "Orc.Game.Cards.RetriggerRules",
+      "signature": "RequestDeathrattleAsync(target, ct)",
+      "gate": "目标在场",
+      "outcome": "Task<bool>",
+      "status": "Available"
+    }
+  ],
+  "resultShapes": {
+    "Orc.Game.Cards.PlayResult": {
+      "properties": [
+        "FailureReason:System.Nullable<Orc.Game.Cards.PlayFailureReason>",
+        "IsSuccess:System.Boolean",
+        "Status:Orc.Game.Cards.PlayResultStatus",
+        "Targeting:Orc.Game.Targeting.TargeterResult"
+      ],
+      "constructors": []
+    },
+    "Orc.Game.Commanding.CommandResult": {
+      "properties": [
+        "FailureReason:System.Nullable<Orc.Game.Commanding.CommandFailureReason>",
+        "IsSuccess:System.Boolean",
+        "Status:Orc.Game.Commanding.CommandResultStatus",
+        "Targeting:Orc.Game.Targeting.TargeterResult"
+      ],
+      "constructors": []
+    },
+    "Orc.Game.CardPlaceResult": {
+      "properties": [
+        "Card:Orc.Game.Cards.CardBase",
+        "FailureReason:System.Nullable<Orc.Game.CardPlaceFailureReason>",
+        "IsSuccess:System.Boolean",
+        "Status:Orc.Game.CardPlaceStatus"
+      ],
+      "constructors": []
+    },
+    "Orc.Game.Managers.DeckFetchResult": {
+      "properties": [
+        "Card:Orc.Cards.Card",
+        "FailureReason:System.Nullable<Orc.Game.Managers.DeckFetchFailureReason>",
+        "IsSuccess:System.Boolean",
+        "Status:Orc.Game.Managers.DeckFetchStatus"
+      ],
+      "constructors": []
+    }
+  },
+  "schemaDto": {
+    "Orc.Cards.PrefabJson": {
+      "properties": [],
+      "constructors": []
+    },
+    "Orc.Game.Cards.CardDefinition": {
+      "properties": [
+        "Attack:System.Int32",
+        "Attributes:System.Collections.Generic.IReadOnlyList<System.String>",
+        "BecomesVeteran:System.String",
+        "Category:System.String",
+        "Components:System.Collections.Generic.IReadOnlyList<Orc.Game.Cards.Data.ICardDataComponentDefinition>",
+        "Defense:System.Int32",
+        "DeployCost:System.Int32",
+        "Faction:System.String",
+        "IsGuard:System.Boolean",
+        "Keywords:System.Collections.Generic.IReadOnlyList<Orc.Game.Cards.KeywordDeclaration>",
+        "Name:System.String",
+        "OperateCost:System.Int32",
+        "Rarity:System.String",
+        "Tags:System.Collections.Generic.IReadOnlyList<System.String>",
+        "UnitTypes:System.Collections.Generic.IReadOnlyList<System.String>",
+        "UnmappedAttributes:System.Collections.Generic.IReadOnlyList<System.String>",
+        "VeteranOf:System.String"
+      ],
+      "constructors": [
+        "System.String, System.Collections.Generic.IEnumerable<Orc.Game.Cards.Data.ICardDataComponentDefinition>, System.Boolean",
+        "System.String, System.Int32, System.Int32, System.Int32, System.Int32, System.String, System.Collections.Generic.IEnumerable<Orc.Game.Cards.KeywordDeclaration>, System.Collections.Generic.IEnumerable<System.String>, System.Boolean, System.String, System.String, System.Collections.Generic.IEnumerable<System.String>, System.String, System.String"
+      ]
+    }
+  },
+  "prefabJsonDtos": [
+    "EffectPrefabDto.DisposingTrigger:Orc.Cards.PrefabJson+TriggerPrefabDto",
+    "EffectPrefabDto.Id:System.String",
+    "EffectPrefabDto.Injects:System.Collections.Generic.List<Orc.Cards.PrefabJson+InjectPrefabDto>",
+    "EffectPrefabDto.MainTrigger:Orc.Cards.PrefabJson+TriggerPrefabDto",
+    "EffectPrefabDto.OneShot:System.Boolean",
+    "EffectPrefabDto.OtherTriggers:System.Collections.Generic.List<Orc.Cards.PrefabJson+TriggerPrefabDto>",
+    "EffectPrefabDto.Version:System.Int32",
+    "EffectPrefabDto.Wrappers:System.Collections.Generic.List<Orc.Cards.PrefabJson+WrapperDto>",
+    "EventPrefabDto.AssemblyKey:System.String",
+    "EventPrefabDto.Band:System.String",
+    "EventPrefabDto.Csx:System.String",
+    "EventPrefabDto.Downstream:System.Collections.Generic.List<System.String>",
+    "EventPrefabDto.Entry:System.String",
+    "EventPrefabDto.Id:System.String",
+    "EventPrefabDto.Seams:System.Collections.Generic.List<System.String>",
+    "EventPrefabDto.Version:System.Int32",
+    "InjectPrefabDto.Band:System.String",
+    "InjectPrefabDto.Event:System.String",
+    "InjectPrefabDto.Priority:System.Int32",
+    "InjectPrefabDto.Target:System.String",
+    "SnapshotDto.Root:Orc.Cards.PrefabJson+EffectPrefabDto",
+    "SnapshotDto.SchemaVersion:System.Int32",
+    "TriggerPrefabDto.Events:System.Collections.Generic.List<Orc.Cards.PrefabJson+EventPrefabDto>",
+    "TriggerPrefabDto.Hooks:System.Collections.Generic.List<System.String>",
+    "TriggerPrefabDto.Id:System.String",
+    "TriggerPrefabDto.Kind:System.String",
+    "TriggerPrefabDto.StableKey:System.String",
+    "TriggerPrefabDto.Version:System.Int32",
+    "TriggerPrefabDto.ViewType:System.String",
+    "WrapperDto.Handler:Orc.Cards.PrefabJson+EventPrefabDto",
+    "WrapperDto.Phase:System.String",
+    "WrapperDto.Seam:System.String",
+    "WrapperDto.Target:System.String"
+  ]
+}

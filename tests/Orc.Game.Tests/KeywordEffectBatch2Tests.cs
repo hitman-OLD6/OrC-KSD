@@ -254,19 +254,10 @@ public class KeywordEffectBatch2Tests
         Assert.Equal(2, armored.Keywords.GetValue(KeywordIds.Armor)); // 参值保留
         Assert.Empty(armored.Effects);                            // 行为撤销（效果卸载随动）
 
-        // 死后不再减伤（手动驱动「造成攻击伤害」——handler 已随效果卸载撤销）。
-        var probe = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.WeakId, 2);
-        var resolution = new AttackDamageResolution();
-        await match.CommandManager.AttackDamageTrigger.InvokeAsync(
-            match.Engine,
-            new Dictionary<string, object?>
-            {
-                [CommandDataKeys.Attacker] = probe.Ref,
-                [CommandDataKeys.Target] = armored.Ref,
-                [CommandDataKeys.Resolution] = resolution,
-            });
-
-        Assert.Equal(0, resolution.GetDamageReduction(armored));
+        // 死后不再减伤（R11：重甲 handler 挂 combat.damage——效果卸载后注册随之撤销）。
+        Assert.DoesNotContain(
+            match.CommandManager.DamagePipeline.CombatDamage.Events,
+            entry => entry.Name == "重甲减伤");
     }
 
     // ---------- ③ 免疫（单位侧）：行为随效果独立卸载/复装（真实战斗结算） ----------
@@ -323,19 +314,10 @@ public class KeywordEffectBatch2Tests
         Assert.True(immune.Keywords.Has(KeywordIds.Immune)); // 登记保留
         Assert.Empty(immune.Effects);                        // 行为撤销（效果卸载随动）
 
-        // 死后不再归零（手动驱动「造成攻击伤害」——handler 已随效果卸载撤销）。
-        var probe = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.WeakId, 2);
-        var resolution = new AttackDamageResolution();
-        await match.CommandManager.AttackDamageTrigger.InvokeAsync(
-            match.Engine,
-            new Dictionary<string, object?>
-            {
-                [CommandDataKeys.Attacker] = probe.Ref,
-                [CommandDataKeys.Target] = immune.Ref,
-                [CommandDataKeys.Resolution] = resolution,
-            });
-
-        Assert.False(resolution.IsDamageZeroed(immune));
+        // 死后不再归零（R11：单位免疫挂 damage.apply——效果卸载后注册随之撤销）。
+        Assert.DoesNotContain(
+            match.CommandManager.DamagePipeline.Apply.Events,
+            entry => entry.Name == "免疫归零");
     }
 
     // ---------- ③ 免疫（HQ 侧）：改写器随授予/移除（来源＝效果实例——改签） ----------

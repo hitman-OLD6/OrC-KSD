@@ -30,7 +30,7 @@ public class CardSkeletonTests
         var library = CreateMixedLibrary(out _);
 
         Assert.IsType<UnitCard>(library.Instantiate("u1"));
-        Assert.IsType<CommandCard>(library.Instantiate("c1"));
+        Assert.IsType<OrderCard>(library.Instantiate("c1"));
         Assert.IsType<CounterCard>(library.Instantiate("x1"));
     }
 
@@ -64,7 +64,7 @@ public class CardSkeletonTests
     public void Command_Card_Declares_PrePlay_And_Play_Triggers_InPlace()
     {
         var library = CreateMixedLibrary(out _);
-        var command = Assert.IsType<CommandCard>(library.Instantiate("c1"));
+        var command = Assert.IsType<OrderCard>(library.Instantiate("c1"));
 
         Assert.NotNull(command.PrePlayTrigger);
         Assert.NotNull(command.PlayTrigger);

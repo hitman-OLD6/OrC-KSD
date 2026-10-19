@@ -95,7 +95,7 @@ public class FactionCostComponentTests
     public async Task DeployCost_Base_Write_Propagates_Through_Pipeline_And_Chain_Follows()
     {
         var engine = new LogicEngine();
-        var card = ModifierTestKit.CreateCommandCard(engine); // 部署费 2（基准）；独立构造——构造期常驻
+        var card = ModifierTestKit.CreateOrderCard(engine); // 部署费 2（基准）；独立构造——构造期常驻
         using var recorder = new UpdateRecorder(engine);
 
         // 先建立修饰机制初始基线（「装配完成点建立初始快照」先例——此后基准修改可被管线检测：
@@ -146,17 +146,17 @@ public class FactionCostComponentTests
         var match = PlayChainTestKit.CreatePlayMatch();
         await match.Initialize();
         var player = match.Players[0]; // 回合 1：点数 1
-        var command = await PlayChainTestKit.InstantiateLoadedAsync<CommandCard>(
+        var command = await PlayChainTestKit.InstantiateLoadedAsync<OrderCard>(
             match, player, PlayChainTestKit.CommandCostlyId); // 部署费 5
 
         // 未修改：点数 1 < 5 → 预打出拒绝（留手、零副作用）
-        var rejected = await match.PlayManager.PlayCommandAsync(command);
+        var rejected = await match.PlayManager.PlayOrderAsync(command);
         Assert.Equal(PlayResultStatus.Failed, rejected.Status);
         Assert.Equal(PlayFailureReason.PrePlayPointShortage, rejected.FailureReason);
 
         // 基准修改为 1（受控写面）：消费点读有效值（基准→链→有效）→ 校验通过 → 扣费读 1
         await command.SetDeployCostBaseAsync(1);
-        var played = await match.PlayManager.PlayCommandAsync(command);
+        var played = await match.PlayManager.PlayOrderAsync(command);
         Assert.Equal(PlayResultStatus.Success, played.Status);
         Assert.Equal(1, command.GetData<FactionCostData>().DeployCost);
         Assert.Equal(0, player.Points);

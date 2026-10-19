@@ -1,3 +1,4 @@
+using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Board;
 using Orc.Game.Cards;
@@ -51,4 +52,27 @@ public class CardTriggerView
     [Optional]
     [Read]
     public virtual IReadOnlyList<Selector>? SelectorSlots { get; set; }
+
+    /// <summary>
+    /// 事件引发者（R9 加性可选面）：信号载荷 <c>Source</c> 的引发卡（只读、可空）。
+    /// 与 <see cref="TriggerCard"/> 分工：本面答「谁引发了这次事件」，后者答「当前 handler 的触发者」。
+    /// </summary>
+    [Optional]
+    [Read]
+    public virtual Card? Source { get; set; }
+
+    /// <summary>
+    /// 承受方（P4 加性可选面）：反制适配视图经此携带「被反制指令的施放目标」（可空）。
+    /// 非反制路径＝null（不改变既有卡牌触发语义）。
+    /// </summary>
+    [Optional]
+    [Read]
+    public virtual Card? Target { get; set; }
+
+    /// <summary>
+    /// 当前 handler 的触发者卡牌（R9 加性可选面）：帧值（卡/效果注册项＝该卡/效果宿主卡；链上最后者胜），可空。
+    /// </summary>
+    [Optional]
+    [Read]
+    public virtual Card? TriggerCard { get; set; }
 }

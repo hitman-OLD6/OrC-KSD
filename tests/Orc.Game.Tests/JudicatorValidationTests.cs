@@ -30,8 +30,8 @@ public class JudicatorValidationTests
         var player = match.Players[0]; // 回合 1：点数 1
 
         var empty = Array.Empty<Ref<Entity>>();
-        var cheap = await PlayChainTestKit.InstantiateLoadedAsync<CommandCard>(match, player, PlayChainTestKit.CommandCheapId, toHand: false);   // 费 1
-        var costly = await PlayChainTestKit.InstantiateLoadedAsync<CommandCard>(match, player, PlayChainTestKit.CommandCostlyId, toHand: false); // 费 5
+        var cheap = await PlayChainTestKit.InstantiateLoadedAsync<OrderCard>(match, player, PlayChainTestKit.CommandCheapId, toHand: false);   // 费 1
+        var costly = await PlayChainTestKit.InstantiateLoadedAsync<OrderCard>(match, player, PlayChainTestKit.CommandCostlyId, toHand: false); // 费 5
 
         Assert.True(cheap.PrePlayTrigger.Validate(empty));    // 费用 1 ≤ 1：通过（预打出）
         Assert.True(cheap.PlayTrigger.Validate(empty));       //                通过（打出）
@@ -50,7 +50,7 @@ public class JudicatorValidationTests
         var player = match.Players[0];
 
         var unit = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(match, player, PlayChainTestKit.UnitCostlyId, toHand: false);       // 费 5
-        var command = await PlayChainTestKit.InstantiateLoadedAsync<CommandCard>(match, player, PlayChainTestKit.CommandCostlyId, toHand: false); // 费 5
+        var command = await PlayChainTestKit.InstantiateLoadedAsync<OrderCard>(match, player, PlayChainTestKit.CommandCostlyId, toHand: false); // 费 5
         var instances = new[] { unit.PrePlayTrigger, unit.PlayTrigger, command.PrePlayTrigger, command.PlayTrigger };
         var empty = Array.Empty<Ref<Entity>>();
 
@@ -157,13 +157,13 @@ public class JudicatorValidationTests
         var empty = Array.Empty<Ref<Entity>>();
 
         // 独立构造（不经 CardLibrary/注册表）＋加载：费用/反制默认判定器内置可绑定（构造期完成绑定）。
-        var cheap = new CommandCard(match.Engine, new CardDefinition(
+        var cheap = new OrderCard(match.Engine, new CardDefinition(
             "独立轻指令", deployCost: 1, operateCost: 0, attack: 0, defense: 0,
             CardCategory.Command, faction: Faction.Germany, rarity: Rarity.Standard));
         await cheap.LoadAsync(player);
         Assert.True(cheap.PrePlayTrigger.Validate(empty)); // 费用 1 ≤ 1：通过（默认费用逻辑在跑）
 
-        var costly = new CommandCard(match.Engine, new CardDefinition(
+        var costly = new OrderCard(match.Engine, new CardDefinition(
             "独立重指令", deployCost: 5, operateCost: 0, attack: 0, defense: 0,
             CardCategory.Command, faction: Faction.Germany, rarity: Rarity.Standard));
         await costly.LoadAsync(player);

@@ -63,7 +63,10 @@ public interface IMatchPluginContext : IPluginRegistrationContext
 /// </summary>
 public interface IMatchBindingServices
 {
-    /// <summary>把四类内置流程触发器（指挥／单位移动／单位攻击／造成攻击伤害）按给定分层登记到对局触发器注册表。</summary>
+    /// <summary>
+    /// 按**动作目录**把八个动作的两端触发器（加入手牌／抽牌／伤害／死亡／攻击／移动／加入战场／指令）
+    /// 按给定分层登记到对局触发器注册表；不暴露目录本体。
+    /// </summary>
     void RegisterFlowTriggers(TriggerLayer layer);
 
     /// <summary>装配词条效果库（行为引用注册 ＋ 数据壳库装载 ＋ 绑定核验）。</summary>

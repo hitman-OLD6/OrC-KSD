@@ -1,6 +1,8 @@
-using Orc.Cards;
+﻿using Orc.Cards;
 using Orc.Core;
+using Orc.Game.Actions;
 using Orc.Game.Commanding;
+using Orc.Game.Damage;
 using Orc.Game.Players;
 
 namespace Orc.Game.Cards;
@@ -311,9 +313,8 @@ public sealed class IntelligenceTriggerEffect : KeywordSignalEffect
 /// </summary>
 public abstract class KeywordDamageRewriteEffect : PassiveEffect
 {
+    private readonly List<Action> _detach = new();
     private KeywordLoadContext? _context;
-    private Trigger<AttackDamageTriggerView>? _trigger;
-    private TriggerRegistration? _registration;
 
     /// <summary>创建词条伤害改写效果。</summary>
     protected KeywordDamageRewriteEffect(string name)
@@ -340,24 +341,50 @@ public abstract class KeywordDamageRewriteEffect : PassiveEffect
 
         _context = context;
         OnLoaded(context); // 装载钩子（注册建立前——此间不引入注册残留风险）
-        _trigger = context.AttackDamageTrigger;
-        _registration = _trigger.Register(HandlerName, HandleAttackDamageAsync); // 注册建立（随效果装载）
+        AttachHandlers(context); // 注册（R11：伏击→unit.attack；重甲→combat.damage；免疫→damage.apply）
     }
 
     /// <inheritdoc />
     protected override void OnUnmount()
     {
         // 注册撤销（随效果卸载；幂等——未注册＝无操作）；上下文/通道引用清位（与注册状态一致）。
-        var trigger = _trigger;
-        var registration = _registration;
-        _trigger = null;
-        _registration = null;
+        var detach = _detach.ToArray();
+        _detach.Clear();
         _context = null;
         OnUnloading();
-        if (trigger is not null && registration is not null)
+        foreach (var action in detach)
         {
-            trigger.Unregister(registration);
+            action();
         }
+    }
+
+    /// <summary>
+    /// 注册改写 handler（默认：攻击处理触发器 <see cref="ActionHandleBands.Rewrite"/> 段——伏击；
+    /// 派生类可按 R11 改挂到伤害三端/处理端）。
+    /// 注册随效果装载建立、随卸载撤销（顺序与装载相反）。
+    /// </summary>
+    protected virtual void AttachHandlers(KeywordLoadContext context)
+        => AttachTo(context.AttackDamageTrigger, HandlerName, ActionHandleBands.Rewrite, HandleAttackDamageAsync);
+
+    /// <summary>向指定触发器注册 handler 并登记撤销动作（registrant＝本效果——R9 执行归属）。</summary>
+    protected void AttachTo<TView>(
+        Trigger<TView> trigger, string name, Func<TView, Context, CancellationToken, Task> handler)
+        where TView : class
+    {
+        ArgumentNullException.ThrowIfNull(trigger);
+        var registration = trigger.Register(name, handler, registrant: this);
+        _detach.Add(() => trigger.Unregister(registration));
+    }
+
+    /// <summary>向声明了专门 band 方案的触发器注册 handler（须显式 band——触发器约定）。</summary>
+    protected void AttachTo<TView>(
+        Trigger<TView> trigger, string name, Enum band, Func<TView, Context, CancellationToken, Task> handler)
+        where TView : class
+    {
+        ArgumentNullException.ThrowIfNull(trigger);
+        ArgumentNullException.ThrowIfNull(band);
+        var registration = trigger.Register(name, handler, band, registrant: this);
+        _detach.Add(() => trigger.Unregister(registration));
     }
 
     /// <summary>装载准备检查（派生类可选覆写；false＝不注册——防御语义〔如判定器通道缺失〕；默认通过）。</summary>
@@ -373,25 +400,29 @@ public abstract class KeywordDamageRewriteEffect : PassiveEffect
     {
     }
 
-    /// <summary>伤害改写处理（派生类覆写；「造成攻击伤害」触发器内、默认互伤之前执行——由注册优先级与改写标志保证顺序）。</summary>
-    protected abstract Task HandleAttackDamageAsync(
-        AttackDamageTriggerView view, Context ctx, CancellationToken ct);
+    /// <summary>伤害改写处理（派生类覆写；伏击＝攻击伤害触发器内、默认互伤之前执行——由注册优先级与改写标志保证顺序）。</summary>
+    protected virtual Task HandleAttackDamageAsync(
+        AttackDamageTriggerView view, Context ctx, CancellationToken ct) => Task.CompletedTask;
 }
 
 /// <summary>
 /// 伏击·伤害改写效果（批 2；由 <see cref="AmbushKeywordComponent"/> 内嵌装配）：
-/// 「造成攻击伤害」触发器内注册改写逻辑（注册随效果装载、撤销随效果卸载）——改写判定（先资格、后条件）：
+/// 「造成攻击伤害」处理端 <see cref="ActionHandleBands.Rewrite"/> 段注册改写逻辑（注册随效果装载、撤销随效果卸载）——
+/// 改写判定（先资格、后条件）：
 /// 被攻击单位（目标侧，＝本卡）含伏击 ∧ 目标方按反击豁免判定表具有反击资格
 /// （K2：经 <c>combat.counter.eligibility</c> 判定器通道——豁免约束改写，无资格＝不发生反击、改写不成立、按表单方结算）
 /// ∧ 条件命中（K2：经 <c>combat.ambush.condition</c> 判定器通道——被攻击单位攻击力有效值 ＞ 攻击者防御力有效值，互扣前）
-/// → 置改写标志（攻击者死亡、被攻击者不受伤）；资格通过但条件不成立＝正常基础互伤。
+/// → **由效果自己执行死亡**：经 <see cref="KeywordLoadContext.DeathAction"/> 走 `IDeathAction.ExecuteAsync`
+/// **完整两端**（触发端 → 处理端；不是直调处理端），随后置 <c>IsRewritten</c> 与 <c>Handled</c>
+/// （攻击者死亡、被攻击者不受伤；处理端据此跳过伤害）。
 /// 判定器通道经装载上下文取用（<c>KeywordLoadContext.CounterEligibility</c>／<c>KeywordLoadContext.AmbushCondition</c>）；
-/// 无装载上下文或通道缺失＝不注册（防御、不抛错、不回退直调——单源约束）。不区分攻击者类型；HQ 攻击不走该流程。
+/// 无装载上下文或通道缺失＝不注册（防御、不抛错、不回退直调——单源约束）。不区分攻击者类型；HQ 目标不改写。
 /// </summary>
 public sealed class AmbushRewriteEffect : KeywordDamageRewriteEffect
 {
     private Func<UnitCard, UnitCard, bool>? _counterEligibility; // K2：反击资格判定通道（combat.counter.eligibility——资格→C5）
     private Func<UnitCard, UnitCard, bool>? _ambushCondition;    // K2：伏击条件判定通道（combat.ambush.condition——条件→C6）
+    private Orc.Game.Actions.IDeathAction? _deathAction;         // S11：死亡动作（改写方自己走完整两端）
 
     /// <summary>创建伏击·伤害改写效果。</summary>
     internal AmbushRewriteEffect()
@@ -405,13 +436,15 @@ public sealed class AmbushRewriteEffect : KeywordDamageRewriteEffect
     /// <inheritdoc />
     protected override bool OnLoading(KeywordLoadContext context)
     {
-        if (context.CounterEligibility is null || context.AmbushCondition is null)
+        if (context.CounterEligibility is null || context.AmbushCondition is null
+            || context.DeathAction is null)
         {
-            return false; // K2：判定器通道缺失：不注册（防御、不抛错、不回退直调——与「无装载上下文」同构）
+            return false; // K2/S11：通道缺失：不注册（防御、不抛错、不回退直调——与「无装载上下文」同构）
         }
 
         _counterEligibility = context.CounterEligibility;
         _ambushCondition = context.AmbushCondition;
+        _deathAction = context.DeathAction;
         return true;
     }
 
@@ -420,55 +453,62 @@ public sealed class AmbushRewriteEffect : KeywordDamageRewriteEffect
     {
         _counterEligibility = null; // K2：通道引用清位（与注册状态一致；重复卸载幂等）
         _ambushCondition = null;
+        _deathAction = null;
     }
 
     /// <inheritdoc />
-    protected override Task HandleAttackDamageAsync(
+    protected override async Task HandleAttackDamageAsync(
         AttackDamageTriggerView view, Context ctx, CancellationToken ct)
     {
         if (Host is not UnitCard self || !self.TryGetData<UnitStateData>(out var selfState) || selfState.IsDestroyed)
         {
-            return Task.CompletedTask; // 死亡后不再改写（双保险：装载已注销 + 存活判定）
+            return; // 死亡后不再改写（双保险：装载已注销 + 存活判定）
         }
 
         if (view.Target is not { IsAlive: true } targetRef
             || targetRef.Value is not UnitCard target
             || !ReferenceEquals(target, self))
         {
-            return Task.CompletedTask; // 仅处理「本卡被攻击」的目标侧
+            return; // 仅处理「本卡被攻击」的目标侧（HQ 目标不进入）
         }
 
         if (view.Attacker is not { IsAlive: true } attackerRef || attackerRef.Value is not UnitCard attacker
             || !attacker.TryGetData<UnitStateData>(out _)) // 攻击者须已单位化（未单位化＝不改写、不抛错）
         {
-            return Task.CompletedTask;
+            return;
         }
 
         if (view.Resolution is not AttackDamageResolution resolution || resolution.IsRewritten)
         {
-            return Task.CompletedTask; // 目标侧单命中（多源不叠加；已改写＝跳过）
+            return; // 目标侧单命中（多源不叠加；已改写＝跳过）
         }
 
         var counterEligibility = _counterEligibility;
         var ambushCondition = _ambushCondition;
-        if (counterEligibility is null || ambushCondition is null)
+        var deathAction = _deathAction;
+        if (counterEligibility is null || ambushCondition is null || deathAction is null)
         {
-            return Task.CompletedTask; // K2：判定器通道缺失（防御：装载时已不注册——双保险；不回退直调）
+            return; // K2/S11：通道缺失（防御：装载时已不注册——双保险；不回退直调）
         }
 
         // 先资格（K2：经 combat.counter.eligibility 判定器通道——豁免约束改写）：目标方（本卡）具有反击资格。
         if (!counterEligibility(attacker, self))
         {
-            return Task.CompletedTask;
+            return;
         }
 
         // 后条件（K2：经 combat.ambush.condition 判定器通道——单源）：伏击条件命中＝改写成立。
-        if (ambushCondition(self, attacker))
+        if (!ambushCondition(self, attacker))
         {
-            resolution.MarkRewritten();
+            return;
         }
 
-        return Task.CompletedTask;
+        resolution.MarkRewritten();
+
+        // S11：改写方**自己执行死亡**——经死亡动作走**完整两端**（触发端 → 处理端），不复用默认互伤、
+        // 不直调处理端。随后置 Handled＝已完整处置（处理端据此跳过伤害；免死时攻击者仍存活 → 另发幸存信号）。
+        await deathAction.ExecuteAsync(attacker, killer: self, view.TriggerCard, ct).ConfigureAwait(false);
+        resolution.MarkHandled();
     }
 }
 
@@ -491,9 +531,16 @@ public sealed class ArmorReductionEffect : KeywordDamageRewriteEffect
     /// <inheritdoc />
     protected override string HandlerName => "重甲减伤";
 
-    /// <inheritdoc />
-    protected override Task HandleAttackDamageAsync(
-        AttackDamageTriggerView view, Context ctx, CancellationToken ct)
+    /// <summary>R11：重甲只挂 <c>combat.damage</c>——效果伤害与战斗伤害不减免。</summary>
+    protected override void AttachHandlers(KeywordLoadContext context)
+    {
+        if (context.DamageAction is { } pipeline)
+        {
+            AttachTo(pipeline.CombatDamage, HandlerName, ActionTriggerBands.Initiate, HandleCombatDamageAsync);
+        }
+    }
+
+    private Task HandleCombatDamageAsync(DamageEventView view, Context ctx, CancellationToken ct)
     {
         // 参值运行期读取（每次伤害结算时读取当前参值——非装载时快照；null／0＝无减伤效果〔「重甲 0」语义等效〕）。
         if (Host is not { } self
@@ -503,26 +550,19 @@ public sealed class ArmorReductionEffect : KeywordDamageRewriteEffect
             return Task.CompletedTask;
         }
 
-        if (view.Resolution is not AttackDamageResolution resolution)
+        // 只减「打在本卡身上」的那一向（反击方向是另一次 CombatAsync，Target 同样指向本卡）。
+        if (!ReferenceEquals(view.Target, self))
         {
             return Task.CompletedTask;
         }
 
-        // 目标方向（本卡被攻击——攻击伤害减免；判定读点：攻击者侧「无视重甲」——默认不无视）
-        var attackerIgnoresArmor = view.Attacker?.Value is UnitCard attacker && ArmorRules.IgnoresArmor(attacker);
-        if (!attackerIgnoresArmor
-            && view.Target is { IsAlive: true } targetRef
-            && ReferenceEquals(targetRef.Value, self))
+        // 判定读点：攻击者侧「无视重甲」——默认不无视。
+        if (view.Source is UnitCard attacker && ArmorRules.IgnoresArmor(attacker))
         {
-            resolution.AddDamageReduction(self, armor);
+            return Task.CompletedTask;
         }
 
-        // 攻击者方向（本卡受反击——反击伤害同属对战伤害、同减）
-        if (view.Attacker is { IsAlive: true } attackerRef && ReferenceEquals(attackerRef.Value, self))
-        {
-            resolution.AddDamageReduction(self, armor);
-        }
-
+        view.Amount = Math.Max(0, view.Amount - armor);
         return Task.CompletedTask;
     }
 }
@@ -548,6 +588,26 @@ public sealed class ImmuneZeroingEffect : KeywordDamageRewriteEffect
 
     /// <inheritdoc />
     protected override string HandlerName => "免疫归零";
+
+    /// <summary>R11：单位免疫挂 <c>damage.apply</c>（全伤害种类——对战/效果/战斗）。</summary>
+    protected override void AttachHandlers(KeywordLoadContext context)
+    {
+        if (context.DamageAction is { } pipeline)
+        {
+            AttachTo(pipeline.Apply, HandlerName, ActionHandleBands.Rewrite, HandleApplyAsync);
+        }
+    }
+
+    private Task HandleApplyAsync(DamageApplyView view, Context ctx, CancellationToken ct)
+    {
+        if (Host is { } self && ReferenceEquals(view.Target, self))
+        {
+            view.IsZeroed = true; // 目标方向：本卡（免疫）不受伤
+            view.Amount = 0;
+        }
+
+        return Task.CompletedTask;
+    }
 
     /// <inheritdoc />
     protected override void OnMount()
@@ -575,28 +635,6 @@ public sealed class ImmuneZeroingEffect : KeywordDamageRewriteEffect
         }
 
         base.OnUnmount();
-    }
-
-    /// <inheritdoc />
-    protected override Task HandleAttackDamageAsync(
-        AttackDamageTriggerView view, Context ctx, CancellationToken ct)
-    {
-        if (Host is not { } self || view.Resolution is not AttackDamageResolution resolution)
-        {
-            return Task.CompletedTask;
-        }
-
-        if (view.Target is { IsAlive: true } targetRef && ReferenceEquals(targetRef.Value, self))
-        {
-            resolution.MarkDamageZeroed(self); // 目标方向：本卡（免疫）不受伤
-        }
-
-        if (view.Attacker is { IsAlive: true } attackerRef && ReferenceEquals(attackerRef.Value, self))
-        {
-            resolution.MarkDamageZeroed(self); // 攻击者方向（反击）：本卡（免疫）亦不受伤
-        }
-
-        return Task.CompletedTask;
     }
 }
 

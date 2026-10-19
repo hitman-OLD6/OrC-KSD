@@ -711,7 +711,7 @@ public class CardServiceTests
 
         // 放置类别约束不匹配（非单位定义放置到支援线）＝业务失败（结果对象）——预防式：先判定不创建实例（零副作用）
         var result = await match.CardService.CreateAndPlaceToSupportLineAsync(
-            CommandTestKit.CommandCardId, playerA, match.Battlefield.GetSupportLine(playerA)[1]);
+            CommandTestKit.OrderCardId, playerA, match.Battlefield.GetSupportLine(playerA)[1]);
 
         Assert.Equal(CardPlaceStatus.Rejected, result.Status);
         Assert.Equal(CardPlaceFailureReason.CategoryMismatch, result.FailureReason);

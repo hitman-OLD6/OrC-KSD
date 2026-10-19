@@ -1,4 +1,4 @@
-using Orc.Cards;
+﻿using Orc.Cards;
 using Orc.Core;
 using Xunit;
 
@@ -29,7 +29,7 @@ public class EffectLifecycleTests
         Assert.Equal(1, heal.MountCount);
         Assert.Contains("攻击时回血/dispose", engine.Bus.GetSubscribers(Updates.CardDestroyed));
 
-        await engine.AttackFlow.ExecuteAsync(attacker, defender, 3); // 装载已生效：回血
+        await KernelFlow.AttackAsync(engine, attacker, defender, 3); // 装载已生效：回血
         Assert.Equal(1, heal.HealCount);
         Assert.Equal(15, attacker.GetData<HealthData>().Hp);
 
@@ -58,7 +58,7 @@ public class EffectLifecycleTests
 
         var defender = new Card(engine, "哥布林");
         defender.AddData(new HealthData { Hp = 10 });
-        await engine.AttackFlow.ExecuteAsync(card, defender, 3);
+        await KernelFlow.AttackAsync(engine, card, defender, 3);
         Assert.Equal(1, heal.HealCount); // 即时装载后立即生效
     }
 
@@ -165,7 +165,7 @@ public class EffectLifecycleTests
         Assert.True(heal.InjectionRefCleared);
         Assert.DoesNotContain("攻击时回血/dispose", engine.Bus.GetSubscribers(Updates.CardDestroyed));
 
-        await engine.AttackFlow.ExecuteAsync(attacker, defender, 3); // 清理后不再回血、不再进入 handler
+        await KernelFlow.AttackAsync(engine, attacker, defender, 3); // 清理后不再回血、不再进入 handler
         Assert.Equal(0, heal.HealCount);
         Assert.Equal(10, attacker.GetData<HealthData>().Hp);
     }
@@ -194,7 +194,7 @@ public class EffectLifecycleTests
             engine.RootStream.Entries,
             e => e.Keywords.Contains("loadout") && e.Keywords.Contains("cleanup") && e.Keywords.Contains("攻击时回血"));
 
-        await engine.AttackFlow.ExecuteAsync(attacker, defender, 3); // 清理后不再回血
+        await KernelFlow.AttackAsync(engine, attacker, defender, 3); // 清理后不再回血
         Assert.Equal(0, heal.HealCount);
         Assert.Equal(10, attacker.GetData<HealthData>().Hp);
     }
@@ -215,7 +215,7 @@ public class EffectLifecycleTests
         attacker.AddEffect(heal2);
         await S4TestHelpers.Place(engine, attacker);
 
-        await engine.AttackFlow.ExecuteAsync(attacker, defender, 3);
+        await KernelFlow.AttackAsync(engine, attacker, defender, 3);
         Assert.Equal(17, attacker.GetData<HealthData>().Hp); // 5 + 2
         Assert.Equal(1, heal5.HealCount);
         Assert.Equal(1, heal2.HealCount);
@@ -225,7 +225,7 @@ public class EffectLifecycleTests
         Assert.False(heal5.IsMounted);
         Assert.True(heal2.IsMounted); // 另一效果不受影响
 
-        await engine.AttackFlow.ExecuteAsync(attacker, defender, 3);
+        await KernelFlow.AttackAsync(engine, attacker, defender, 3);
         Assert.Equal(19, attacker.GetData<HealthData>().Hp); // 只回 2
         Assert.Equal(1, heal5.HealCount); // 不再进入被移除的 handler
         Assert.Equal(2, heal2.HealCount);
@@ -256,7 +256,7 @@ public class EffectLifecycleTests
         Assert.True(healB.IsMounted);       // 乙：不受影响
         Assert.Equal(new Effect[] { healB }, b.Effects);
 
-        await engine.AttackFlow.ExecuteAsync(b, target, 3); // 乙仍生效
+        await KernelFlow.AttackAsync(engine, b, target, 3); // 乙仍生效
         Assert.Equal(12, b.GetData<HealthData>().Hp);
         Assert.Equal(1, healB.HealCount);
         Assert.Equal(0, healA.HealCount);
@@ -311,7 +311,7 @@ public class EffectLifecycleTests
 
         var defender = new Card(engine, "哥布林");
         defender.AddData(new HealthData { Hp = 10 });
-        await engine.AttackFlow.ExecuteAsync(card, defender, 3); // 好效果照常生效
+        await KernelFlow.AttackAsync(engine, card, defender, 3); // 好效果照常生效
         Assert.Equal(1, good.HealCount);
     }
 
@@ -370,7 +370,7 @@ public class EffectLifecycleTests
     {
         var engine = new LogicEngine();
         var caster = new Card(engine, "法师");
-        var order = new DamageOrder(engine.DamageFlow);
+        var order = new DamageOrder(engine);
         caster.AddEffect(order);
 
         await S4TestHelpers.Place(engine, caster); // 放置处理：主动效果不做装载动作

@@ -229,12 +229,14 @@ public static class CommandDataKeys
     public const string Resolution = "Resolution";
 
     /// <summary>
-    /// 触发者卡牌（X1 加性；值＝<c>Ref&lt;Entity&gt;</c>——引发本次操作的效果宿主卡实例的引用；4 个内置流程触发器共用）：
+    /// 触发者卡牌（X1 加性；R9 起值＝<see cref="Orc.Cards.Card"/> 对象引用——引发本次操作的效果宿主卡；4 个内置流程触发器共用）。
     /// 非空＝效果引发（且知来源卡）；空＝玩家主动操作（非效果引发）——两集合互斥穷尽。
     /// 填充规则：主动指挥（含其嵌套调用）＝缺省空（不携带）；效果引发＝调用方（效果侧）显式携带、逐次指定，
     /// 且同一效果链内传递（「攻击→伤害」链内一致；出现新的独立直接因由时以新因由为准）。缺省调用（未携带）＝空（向后兼容）。
+    /// 写入边界＝<c>SourceNormalizer.ToCard</c>（唯一归一化点；失效/错型降级 null 并留痕）。
+    /// 字面值与内核 <c>TriggerPayloadKeys.TriggerCard</c> 一致（同一载荷键：入口初值／帧解析共用）。
     /// </summary>
-    public const string TriggerCard = "TriggerCard";
+    public const string TriggerCard = Orc.Core.TriggerPayloadKeys.TriggerCard;
 }
 
 /// <summary>
@@ -248,50 +250,24 @@ internal sealed class CommandFlowBox
 }
 
 /// <summary>
-/// 攻击伤害结算记录（「造成攻击伤害」触发器数据面；伏击改写标志承载；A2 加性：伤害归零/减伤承载）：
-/// 伏击逻辑（按改写条件命中时）置 <see cref="IsRewritten"/>；默认基础互伤处理器读取——已改写＝替代默认（攻击者死亡、被攻击者不受伤）。
-/// 改写先判定——成立＝替代默认；不成立＝执行默认基础互伤（目标侧单命中；不引入多源改写并存排序）。
-/// A2 伤害介入承载（handler 注入——免疫归零／重甲减伤，均为「默认结算 handler 之前」登记、默认结算读取）：
-/// 归零＝该卡在本轮结算中受到的伤害整体置 0（含攻击方向与反击方向，按卡引用判定）；
-/// 减伤＝登记对该卡伤害的减免量（累加；结算时下限 0 自然收敛）。两者随结算记录同生同灭、不跨轮存续。
+/// 攻击伤害结算记录（「造成攻击伤害」触发器数据面；**只承载伏击改写标志**）。
+/// R11 起：免疫归零迁至 <c>damage.apply</c>、重甲减伤迁至 <c>combat.damage</c>——
+/// 本类型不再承载「本轮归零/减伤」容器（伤害归属按来源分层，不再挤在攻击记录里）。
 /// </summary>
 public sealed class AttackDamageResolution
 {
-    private readonly HashSet<Card> _damageZeroed = new(ReferenceEqualityComparer.Instance);
-    private readonly Dictionary<Card, int> _damageReductions = new(ReferenceEqualityComparer.Instance);
-
     /// <summary>是否已改写（伏击命中；默认互伤的替代标志）。</summary>
     public bool IsRewritten { get; private set; }
+
+    /// <summary>
+    /// 改写方是否已**完整处置**本次攻击（S11 加性；伏击＝已走完死亡两端）。
+    /// 与 <see cref="IsRewritten"/> 不混用：<c>IsRewritten</c>＝伏击已改写判定，<c>Handled</c>＝改写方已落地后果。
+    /// </summary>
+    public bool Handled { get; private set; }
 
     /// <summary>置改写标志（伏击逻辑命中时调用）。</summary>
     public void MarkRewritten() => IsRewritten = true;
 
-    /// <summary>标记该卡在本轮结算中受到的伤害归零（免疫 handler 注入；幂等）。</summary>
-    public void MarkDamageZeroed(Card card)
-    {
-        ArgumentNullException.ThrowIfNull(card);
-        _damageZeroed.Add(card);
-    }
-
-    /// <summary>该卡在本轮结算中受到的伤害是否已归零（默认结算读取）。</summary>
-    public bool IsDamageZeroed(Card card)
-    {
-        ArgumentNullException.ThrowIfNull(card);
-        return _damageZeroed.Contains(card);
-    }
-
-    /// <summary>登记对该卡伤害的减免量（重甲 handler 注入；累加、下限 0）。</summary>
-    public void AddDamageReduction(Card card, int amount)
-    {
-        ArgumentNullException.ThrowIfNull(card);
-        ArgumentOutOfRangeException.ThrowIfNegative(amount);
-        _damageReductions[card] = GetDamageReduction(card) + amount;
-    }
-
-    /// <summary>读取对该卡伤害的减免量（无登记＝0；默认结算读取）。</summary>
-    public int GetDamageReduction(Card card)
-    {
-        ArgumentNullException.ThrowIfNull(card);
-        return _damageReductions.TryGetValue(card, out var amount) ? amount : 0;
-    }
+    /// <summary>置「已完整处置」标志（改写方完成后果落地后调用）。</summary>
+    public void MarkHandled() => Handled = true;
 }

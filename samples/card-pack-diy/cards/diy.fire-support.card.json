@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "diy.fire-support",
+  "name": "火力支援",
+  "components": [
+    {
+      "component": "typeCategory",
+      "type": [
+        "order"
+      ]
+    },
+    {
+      "component": "factionCost",
+      "faction": "Germany",
+      "kredits": 1
+    },
+    {
+      "component": "tagData",
+      "rarity": "Standard"
+    },
+    {
+      "component": "effects",
+      "prefabs": [
+        "diy.fire-support.effect"
+      ]
+    }
+  ]
+}

@@ -86,7 +86,7 @@ public class RandomEffectScenarioTests
             return Task.CompletedTask;
         });
 
-        var card = (CommandCard)match.CardLibrary.Instantiate(EliminateCardId);
+        var card = (OrderCard)match.CardLibrary.Instantiate(EliminateCardId);
         await card.LoadAsync(playerA);
         var effect = Assert.IsType<RandomEliminateEffect>(Assert.Single(card.Effects));
 
@@ -135,7 +135,7 @@ public class RandomEffectScenarioTests
         var candidates = RandomSceneKit.CollectAliveUnits(match.Battlefield, playerA, sameSide: true);
         var before = candidates.Select(unit => unit.Modifiers.GetEffectiveValue(CardStatFields.Defense)).ToArray();
 
-        var card = (CommandCard)match.CardLibrary.Instantiate(DistributeCardId);
+        var card = (OrderCard)match.CardLibrary.Instantiate(DistributeCardId);
         await card.LoadAsync(playerA);
         var effect = Assert.IsType<RandomDistributeEffect>(Assert.Single(card.Effects));
 
@@ -181,7 +181,7 @@ public class RandomEffectScenarioTests
         var candidates = RandomSceneKit.CollectAliveUnits(match.Battlefield, playerA, sameSide: false); // 敌对方＝playerA 视角非己方
         var before = candidates.Select(unit => unit.Modifiers.GetEffectiveValue(CardStatFields.Defense)).ToArray();
 
-        var card = (CommandCard)match.CardLibrary.Instantiate(TransferCardId);
+        var card = (OrderCard)match.CardLibrary.Instantiate(TransferCardId);
         await card.LoadAsync(playerA);
         var effect = Assert.IsType<RandomTransferEffect>(Assert.Single(card.Effects));
 
@@ -250,7 +250,7 @@ public class RandomEffectScenarioTests
         var keywordEffect = Assert.IsType<RandomKeywordGrantEffect>(Assert.Single(host.Effects));
         await keywordEffect.CastAsync(match.Engine);
 
-        var distributeCard = (CommandCard)match.CardLibrary.Instantiate(DistributeCardId);
+        var distributeCard = (OrderCard)match.CardLibrary.Instantiate(DistributeCardId);
         await distributeCard.LoadAsync(playerA);
         var distributeEffect = Assert.IsType<RandomDistributeEffect>(Assert.Single(distributeCard.Effects));
         await distributeEffect.CastAsync(match.Engine); // ②（6 次取样 → 防御增量）

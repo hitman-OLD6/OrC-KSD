@@ -1,4 +1,4 @@
-using Orc.Game.Judicators;
+﻿using Orc.Game.Judicators;
 using Orc.Game.Triggers;
 
 namespace Orc.Game;
@@ -264,14 +264,17 @@ public static class GameHooks
     /// <summary>载荷键：击杀者（E1-47）。</summary>
     public const string PayloadKiller = GameUpdates.PayloadKiller;
 
-    /// <summary>载荷键全量（17 条；稳定序＝定义序）。</summary>
+    /// <summary>载荷键：来源（R9——事件引发者，可空；恒写、缺省 null）。</summary>
+    public const string PayloadSource = GameUpdates.PayloadSource;
+
+    /// <summary>载荷键全量（18 条；稳定序＝定义序；R9 追加 Source）。</summary>
     public static IReadOnlyList<string> PayloadKeys { get; } = new[]
     {
         PayloadPlayer, PayloadTurnNumber, PayloadCard, PayloadUnit, PayloadPosition,
         PayloadKeyword,
         PayloadOldPosition, PayloadNewPosition, PayloadChangedFields, PayloadDeck, PayloadAddedType,
         PayloadAmount, PayloadOldSlots, PayloadNewSlots, PayloadOldPoints, PayloadNewPoints,
-        PayloadKiller,
+        PayloadKiller, PayloadSource,
     };
 
     // ---------- 判定器名（22 条；转发引用 JudicatorNames） ----------
@@ -389,7 +392,7 @@ public static class GameHooks
 
     // ---------- 流程位标识（非信号；待补层对位用） ----------
 
-    /// <summary>流程位：单位攻击触发器（<c>UnitAttackTrigger</c>「攻击执行」——非信号、可直接介入的专用流程触发器）。</summary>
+    /// <summary>流程位：单位攻击触发器（<c>UnitAttackTrigger</c>「转发到处理端」——非信号、可直接介入的专用流程触发器）。</summary>
     public const string FlowUnitAttack = "UnitAttackTrigger";
 
     // ---------- 待补层：kards-diy 27 项监听触发器（仅登记，不接线） ----------

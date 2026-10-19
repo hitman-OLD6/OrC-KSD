@@ -13,6 +13,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Orc.Game\Orc.Game.csproj" />
+    <!-- P5b：动作实现集（移动动作已迁出宿主）；宿主要在建局前注册。 -->
+    <ProjectReference Include="..\..\src\Orc.Foundation.Actions\Orc.Foundation.Actions.csproj" />
     <!-- 资产化 S12c：内置判定器经内置插件包提供（宿主/样例负责装载；Match 自身＝空目录）。 -->
     <ProjectReference Include="..\..\src\Orc.Plugins.BuiltIn\Orc.Plugins.BuiltIn.csproj" />
   </ItemGroup>

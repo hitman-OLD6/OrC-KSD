@@ -1,4 +1,4 @@
-{
+﻿{
   "schemaVersion": 1,
   "id": "attack_basic",
   "actorFrom": "effectHost",
@@ -18,7 +18,7 @@
     "otherTriggers": [],
     "wrappers":[],
     "injects": [
-      { "target": "单位攻击触发器", "event": "e1" }
+      { "target": "单位攻击触发器", "event": "e1", "band": "Initiate" }
     ]
   }
 }

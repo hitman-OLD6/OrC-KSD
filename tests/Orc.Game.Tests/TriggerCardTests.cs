@@ -1,3 +1,4 @@
+﻿using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Cards;
 using Orc.Game.Commanding;
@@ -63,13 +64,13 @@ public class TriggerCardTests
             {
                 [CommandDataKeys.Attacker] = attacker.Ref,
                 [CommandDataKeys.Target] = target.Ref,
-                [CommandDataKeys.TriggerCard] = effectHost.Ref,
+                [CommandDataKeys.TriggerCard] = effectHost,
             });
 
         // 攻击链路照常执行（复验兼容触发者引用）；触发者随「攻击→伤害」链传递（两链路同引用实例）
         Assert.Equal(ExecutionOutcome.Normal, stream.Outcome);
-        Assert.Same(effectHost.Ref, Assert.Single(attackLog));
-        Assert.Same(effectHost.Ref, Assert.Single(damageLog));
+        Assert.Same(effectHost, Assert.Single(attackLog));
+        Assert.Same(effectHost, Assert.Single(damageLog));
         Assert.Equal(3, target.GetData<UnitStateData>().Defense); // 真实结算：5 − 2
     }
 
@@ -94,11 +95,11 @@ public class TriggerCardTests
                 [CommandDataKeys.Attacker] = attacker.Ref,
                 [CommandDataKeys.Target] = target.Ref,
                 [CommandDataKeys.Resolution] = new AttackDamageResolution(),
-                [CommandDataKeys.TriggerCard] = effectHost.Ref,
+                [CommandDataKeys.TriggerCard] = effectHost,
             });
 
         Assert.Equal(ExecutionOutcome.Normal, stream.Outcome);
-        Assert.Same(effectHost.Ref, Assert.Single(damageLog));
+        Assert.Same(effectHost, Assert.Single(damageLog));
     }
 
     [Fact]
@@ -143,11 +144,11 @@ public class TriggerCardTests
                 [CommandDataKeys.Unit] = mover.Ref,
                 [CommandDataKeys.OldPosition] = oldSlot.Ref,
                 [CommandDataKeys.NewPosition] = newSlot.Ref,
-                [CommandDataKeys.TriggerCard] = effectHost.Ref,
+                [CommandDataKeys.TriggerCard] = effectHost,
             });
 
         Assert.Equal(ExecutionOutcome.Normal, stream.Outcome);
-        Assert.Same(effectHost.Ref, Assert.Single(moveLog));
+        Assert.Same(effectHost, Assert.Single(moveLog));
         Assert.Same(mover, newSlot.Occupant);
     }
 
@@ -177,8 +178,8 @@ public class TriggerCardTests
 
         // 指挥视图＝E；同一效果链内传递：嵌套移动调用随指挥链透传（链内一致）
         Assert.Equal(CommandResultStatus.Success, result.Status);
-        Assert.Same(effectHost.Ref, Assert.Single(commandLog));
-        Assert.Same(effectHost.Ref, Assert.Single(moveLog));
+        Assert.Same(effectHost, Assert.Single(commandLog));
+        Assert.Same(effectHost, Assert.Single(moveLog));
         Assert.Same(mover, frontSlot.Occupant);
     }
 
@@ -206,9 +207,9 @@ public class TriggerCardTests
 
     // ---------- 探测辅助（注册在默认链之后的读取探针：链路执行完成后读取视图触发者字段） ----------
 
-    private static List<Ref<Entity>?> ProbeCommand(CommandManager commandManager)
+    private static List<Card?> ProbeCommand(CommandManager commandManager)
     {
-        var log = new List<Ref<Entity>?>();
+        var log = new List<Card?>();
         commandManager.CommandTrigger.Register("X1探测-指挥", (view, ctx, ct) =>
         {
             log.Add(view.TriggerCard);
@@ -217,9 +218,9 @@ public class TriggerCardTests
         return log;
     }
 
-    private static List<Ref<Entity>?> ProbeMove(CommandManager commandManager)
+    private static List<Card?> ProbeMove(CommandManager commandManager)
     {
-        var log = new List<Ref<Entity>?>();
+        var log = new List<Card?>();
         commandManager.UnitMoveTrigger.Register("X1探测-移动", (view, ctx, ct) =>
         {
             log.Add(view.TriggerCard);
@@ -228,25 +229,25 @@ public class TriggerCardTests
         return log;
     }
 
-    private static List<Ref<Entity>?> ProbeAttack(CommandManager commandManager)
+    private static List<Card?> ProbeAttack(CommandManager commandManager)
     {
-        var log = new List<Ref<Entity>?>();
+        var log = new List<Card?>();
         commandManager.UnitAttackTrigger.Register("X1探测-攻击", (view, ctx, ct) =>
         {
             log.Add(view.TriggerCard);
             return Task.CompletedTask;
-        });
+        }, Orc.Game.Actions.ActionTriggerBands.Initiate);
         return log;
     }
 
-    private static List<Ref<Entity>?> ProbeDamage(CommandManager commandManager)
+    private static List<Card?> ProbeDamage(CommandManager commandManager)
     {
-        var log = new List<Ref<Entity>?>();
+        var log = new List<Card?>();
         commandManager.AttackDamageTrigger.Register("X1探测-伤害", (view, ctx, ct) =>
         {
             log.Add(view.TriggerCard);
             return Task.CompletedTask;
-        });
+        }, Orc.Game.Actions.ActionHandleBands.Apply);
         return log;
     }
 }

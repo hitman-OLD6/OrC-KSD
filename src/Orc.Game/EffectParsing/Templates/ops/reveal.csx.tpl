@@ -12,7 +12,7 @@ if (runtime is not null)
             break;
         }
 
-        await runtime.RevealAsync(revealUnit, ct);
+        await runtime.RevealAsync(revealUnit, ct, self);
         revealCount++;
     }
 }

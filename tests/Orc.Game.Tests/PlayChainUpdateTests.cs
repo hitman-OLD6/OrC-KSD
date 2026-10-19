@@ -93,10 +93,10 @@ public class PlayChainUpdateTests
         var match = PlayChainTestKit.CreatePlayMatch();
         await match.Initialize();
         var player = match.Players[0];
-        var command = await PlayChainTestKit.InstantiateLoadedAsync<CommandCard>(match, player, PlayChainTestKit.CommandCheapId);
+        var command = await PlayChainTestKit.InstantiateLoadedAsync<OrderCard>(match, player, PlayChainTestKit.CommandCheapId);
         using var recorder = new UpdateRecorder(match.Engine);
 
-        var result = await match.PlayManager.PlayCommandAsync(command);
+        var result = await match.PlayManager.PlayOrderAsync(command);
 
         Assert.Equal(PlayResultStatus.Success, result.Status);
         // 指令＝card.played ×1 ＋ 末条 point.changed（收尾扣部署费；E1-25 后续）；不发 unit 类更新。

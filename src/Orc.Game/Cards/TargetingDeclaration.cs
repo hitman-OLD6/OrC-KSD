@@ -116,7 +116,7 @@ public sealed class TargetingDeclaration
 
     private bool MatchesSourceKind(Card viewer) => _sourceKind switch
     {
-        "command" => viewer is CommandCard,
+        "command" => viewer is OrderCard,
         "unit-effect" => viewer is UnitCard,
         _ => true,
     };

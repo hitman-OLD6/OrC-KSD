@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "diy.field-rescue",
+  "name": "战地救护",
+  "components": [
+    {
+      "component": "typeCategory",
+      "type": [
+        "infantry"
+      ]
+    },
+    {
+      "component": "factionCost",
+      "faction": "Germany",
+      "kredits": 1
+    },
+    {
+      "component": "battleStats",
+      "operationCost": 1,
+      "attack": 1,
+      "defense": 2
+    },
+    {
+      "component": "tagData",
+      "rarity": "Standard"
+    },
+    {
+      "component": "effects",
+      "prefabs": [
+        "diy.field-rescue.effect"
+      ]
+    }
+  ]
+}

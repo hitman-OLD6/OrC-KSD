@@ -4,7 +4,7 @@ namespace Orc.Game.Cards;
 /// 卡牌类别（三大类卡牌体系在定义层的区分：单位 / 指令 / 反制）——**字符串常量类**
 /// （资产化 批次 4：由 <c>enum</c> 改为 string 常量；真源＝资产服务，本类＝内置项可读符号）。
 /// 定义层经 <see cref="CardDefinition.Category"/> 承载；实例化经 <see cref="CardLibrary.Instantiate"/>
-/// 产出对应基类实例（<see cref="UnitCard"/> / <see cref="CommandCard"/> / <see cref="CounterCard"/>）。
+/// 产出对应基类实例（<see cref="UnitCard"/> / <see cref="OrderCard"/> / <see cref="CounterCard"/>）。
 /// 未定义值在定义期（构造）被拒绝（配置错误不吞）。
 /// </summary>
 public static class CardCategory

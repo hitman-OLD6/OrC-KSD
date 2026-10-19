@@ -215,15 +215,15 @@ public sealed class ProgramKeywordComponent : KeywordComponent
                     case "unlink":_linked=null;break;
                     case "attack":if(_host is UnitCard attacker)await KeywordProgramRuntime.MatchFor(_host.Engine).CommandManager.AttackByEffectAsync(attacker,target,ct,a.BypassRange);break;
                     case "retreat":
-                        // 效果位移门户（S1b 遗留已收口）：不扣费、不清行动位；槽位变更与位置更新
-                        // 由引擎 CommandManager.MoveByEffectAsync 单一执行面完成，本处不再直写槽位。
+                        // 效果位移入口（S6）：不扣费、不清行动位、不受压制阻断；槽位变更与位置更新
+                        // 由底层移动动作的唯一落地口完成，本处不再直写槽位。
                         if(target is UnitCard retreat&&retreat.Owner is { } retreatOwner)
                         {
                             var retreatMatch=KeywordProgramRuntime.MatchFor(_host.Engine);
                             var support=retreatMatch.Battlefield.GetSupportLine(retreatOwner);
                             var retreatPosition=retreat.GetData<UnitStateData>().Position;
                             if(retreatPosition is not null&&!support.Contains(retreatPosition)&&support.FirstOrDefault(s=>s.IsEmpty) is { } destination)
-                                await retreatMatch.CommandManager.MoveByEffectAsync(retreat,destination,ct);
+                                await retreatMatch.CommandManager.MoveUnitAsync(retreat,destination,ct);
                         }break;
                     case "replace":
                         if(target is UnitCard original&&original.Owner is { } originalOwner&&original.GetData<UnitStateData>().Position is { } oldSlot)
@@ -257,12 +257,12 @@ public sealed class ProgramKeywordComponent : KeywordComponent
                             await buffCard.Modifiers.AddModifiersAsync([new AddModifier(CardStatFields.Attack,n,_temporarySource,expiry),new AddModifier(CardStatFields.Defense,second,_temporarySource,expiry)],ct);
                             KeywordProgramRuntime.TrackTemporary(_host);
                         }
-                        else await Runtime.BuffAsync(target,n,second,ct:ct);break;
-                    case "keyword.grant":await Runtime.GrantAsync(target,a.Key,n,ct);break;
-                    case "keyword.remove":await Runtime.RevokeAsync(target,a.Key.Length>0?a.Key:Keyword,ct);break;
-                    case "move":await Runtime.MoveAsync(target,a.Key,ct);break;
-                    case "draw":await Runtime.DrawAsync(target,Math.Max(0,n),ct);break;
-                    case "points":if(n>=0)await Runtime.GainPointsAsync(target,n,ct);else await Runtime.LosePointsAsync(target,-n,ct);break;
+                        else await Runtime.BuffAsync(target,n,second,ct:ct,source:_host);break;
+                    case "keyword.grant":await Runtime.GrantAsync(target,a.Key,n,ct,_host);break;
+                    case "keyword.remove":await Runtime.RevokeAsync(target,a.Key.Length>0?a.Key:Keyword,ct,_host);break;
+                    case "move":await Runtime.MoveAsync(target,a.Key,ct,_host);break;
+                    case "draw":await Runtime.DrawAsync(target,Math.Max(0,n),ct,_host);break;
+                    case "points":if(n>=0)await Runtime.GainPointsAsync(target,n,ct,_host);else await Runtime.LosePointsAsync(target,-n,ct,_host);break;
                     case "attach.prefab":await Runtime.AttachPrefabAsync(target,a.Key,ct:ct);break;
                     case "copy.hand":case "create.hand":
                         var match=KeywordProgramRuntime.MatchFor(_host.Engine);var owner=(target as CardBase)?.Owner??Owner??throw new InvalidOperationException("无归属");
@@ -344,7 +344,7 @@ public sealed class ProgramKeywordComponent : KeywordComponent
     /// not a battlefield arrow. No selections, random draws, state changes or payments occur here.</summary>
     public (bool Required, IReadOnlyList<Card>? Targets) ReadFirstPlayInput()
     {
-        if (_host is not CommandCard || _context is null) return (false, null);
+        if (_host is not OrderCard || _context is null) return (false, null);
         foreach (var handler in _program.Handlers.Where(h => h.Event is "card.played" or "unit.deployed" or "card.placed"
             && h.Subject is "self" or "friendly" or "any"))
         {
@@ -415,7 +415,7 @@ public sealed class ProgramKeywordComponent : KeywordComponent
         {
             if(!await PrepareSelections(skill.Actions,ct,_host)||!CanUseCore(id,true))return false;
             var cost=Math.Max(0,Number(skill.Cost));
-            if(cost>0)await Runtime.LosePointsAsync(_host,cost,ct);
+            if(cost>0)await Runtime.LosePointsAsync(_host,cost,ct,_host);
             var command=_host.GetData<CommandData>();if(skill.SpendMove)command.CanMove=false;if(skill.SpendAttack)command.CanAttack=false;
             await Execute(skill.Actions,_host,null,ct);return true;
         }

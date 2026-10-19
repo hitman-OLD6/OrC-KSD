@@ -138,7 +138,7 @@ public class VeteranMechanismTests
 
         // 读取面降级：null/非单位卡＝false 降级、不抛错。
         Assert.False(VeteranRules.IsVeteran(null));
-        var command = new CommandCard(
+        var command = new OrderCard(
             engine,
             new CardDefinition("指令", 1, 0, 0, 0, CardCategory.Command, faction: Faction.Germany, rarity: Rarity.Standard));
         Assert.False(VeteranRules.IsVeteran(command));
@@ -725,8 +725,9 @@ public class VeteranMechanismTests
         {
         }
 
-        // 跨程序集覆写：protected internal 在外部程序集表现为 protected。
-        protected override void OnGrant()
+        // 跨程序集覆写：R11 起 Orc.Game 对本测试程序集开放内部访问（InternalsVisibleTo），
+        // protected internal 成员在友元程序集须以 protected internal 覆写。
+        protected internal override void OnGrant()
             => throw new InvalidOperationException($"测试构造：词条 '{Keyword}' 授予失败（执行段意外）。");
     }
 }

@@ -439,7 +439,9 @@ public sealed class Match
             () => _playerManager?.NextCardId()
                 ?? throw new InvalidOperationException("卡牌 ID 分配不可用：玩家管理器尚未创建（加载链时序错误）。"),
             cardId => new CardEffectLoadContext(_effectRegistry, cardId),
-            ResolveJudicatorBinding);
+            ResolveJudicatorBinding,
+            // P4：反制卡一次性消耗的弃置委托——复用 PlayerManager.DiscardCardAsync（延迟读取：玩家管理器后置创建）。
+            (cardPlayer, card, source, ct) => _playerManager!.DiscardCardAsync(cardPlayer, card, ct, source));
         foreach (var entry in _cardDefinitions)
         {
             _cardLibrary.Register(entry.Id, entry.Definition);
@@ -447,7 +449,7 @@ public sealed class Match
 
         // E1-25：资源管理器注入引擎（发槽信号）＋判定器延迟读取面（判定器注册表在本行之后创建——延迟求值）。
         _resourceManager = new ResourceManager(Engine, () => _judicators, _options.MaxPointSlots);
-        _playerManager = new PlayerManager(Engine, _cardLibrary);
+        _playerManager = new PlayerManager(Engine, _cardLibrary, () => _commandManager?.DrawAction);
         _playerManager.CreatePlayers(_deckForPlayerA, _deckForPlayerB);
         // E1-25 后续：资源管理器注入各玩家（「卡 → 玩家 → 服务」路径——卡级扣费/退点经 ResourceManager.ResolveFor 取用）。
         foreach (var player in _playerManager.Players)
@@ -499,7 +501,9 @@ public sealed class Match
             (player, ct) => ShuffleDeckAsync(player, ct),
             () => _lifecycle.State,
             // 前端资产迁移 S4：运行期卡注册需登记效果声明（卡 → 预制体 id）。
-            _effectRegistry);
+            _effectRegistry,
+            // S7：加入手牌动作面（对局装配＝指挥管理器持有的同一动作实例）。
+            () => _commandManager?.AddToHandAction);
         foreach (var player in _playerManager.Players)
         {
             player.ConfigureCardService(_cardService);

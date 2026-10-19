@@ -193,8 +193,8 @@ public class GameHooksTests
 
         // 34 = 原 31 + card.dying（卸载前宿主结算）+ card.leaving（离场前）+ keyword.attack.finished（临时增益到期）。
         Assert.Equal(34, signals.Count);
-        // 17 = 原 16 + Keyword（keyword.* 载荷）。
-        Assert.Equal(17, payloadKeys.Count);
+        // 18 = 原 17 + Source（R9：事件引发者，恒写、可空）。
+        Assert.Equal(18, payloadKeys.Count);
         Assert.Equal(signals.OrderBy(v => v, StringComparer.Ordinal),
             GameHooks.Signals.OrderBy(v => v, StringComparer.Ordinal));
         Assert.Equal(payloadKeys.OrderBy(v => v, StringComparer.Ordinal),

@@ -159,7 +159,7 @@ public class StatUpdatePipelineTests
         Assert.Throws<InvalidOperationException>(() => raw.Modifiers.GetEffectiveValue(CardStatFields.Attack));
 
         // 指令卡：无单位数据组件 → 同字段域挂载同样明确错误；未知字段域亦明确错误
-        var command = ModifierTestKit.CreateCommandCard(engine);
+        var command = ModifierTestKit.CreateOrderCard(engine);
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => command.Modifiers.AddModifierAsync(new AddModifier(CardStatFields.Attack, 2, new object())));
         await Assert.ThrowsAsync<InvalidOperationException>(

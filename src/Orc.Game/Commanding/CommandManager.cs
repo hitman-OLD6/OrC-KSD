@@ -1,7 +1,9 @@
-using Orc.Cards;
+﻿using Orc.Cards;
 using Orc.Core;
+using Orc.Game.Actions;
 using Orc.Game.Board;
 using Orc.Game.Cards;
+using Orc.Game.Damage;
 using Orc.Game.Judicators;
 using Orc.Game.Players;
 using Orc.Game.Targeting;
@@ -20,8 +22,8 @@ namespace Orc.Game.Commanding;
 //   攻击目标筛选含轰炸机拦截（后置项 C：目标所在战线存在敌方战斗机时该战线非战斗机目标置黑——含 HQ）；
 // ④移动执行（仅推进：支援线→前线；前置＝前线不存在存活敌方单位〔后置项 C；候选＋执行复验双保险〕；
 //   候选＝前线空槽；无后撤/横移候选；发射 unit.position.changed——恰一次）；
-// ⑤攻击执行（单位 vs 单位必经「造成攻击伤害」触发器中转；HQ 简路＝伤害经 HQ 数值路径与管线
-//   〔改写→介入→应用→跑链集中触发〕、不反击、不走「造成攻击伤害」）；攻击结算＝按反击豁免判定表
+// ⑤攻击执行（S11：攻击动作＝「单位攻击触发器」触发端 +「造成攻击伤害触发器」处理端——两端的默认链在
+//   AttackAction 内；HQ／单位目标分支都在处理端，HQ 不反击、不发 unit.combat.survived）；攻击结算＝按反击豁免判定表
 //   （后置项 A：目标轰炸机永不反击 / 攻击者炮兵不受反击 / 攻击者轰炸机不受反击〔目标战斗机例外〕/
 //   攻击者具冲击不受反击〔批 5——豁免族最高优先〕/ 其余正常；
 //   多类型逐条适用、豁免优先；同时互伤框架——豁免方不结算反击伤害）→ 执行段公共尾部＝冲击消耗
@@ -71,15 +73,8 @@ namespace Orc.Game.Commanding;
 /// </summary>
 public sealed class CommandManager
 {
-    /// <summary>默认基础互伤在「造成攻击伤害」触发器内的事件优先级（数值大者后执行——伏击改写先判定）。</summary>
-    private const int DefaultDamagePriority = 100;
-
-    /// <summary>
-    /// 「攻击执行」默认链在「单位攻击触发器」内的事件优先级（数值大者后执行）。
-    /// 效果预制体 injects 默认优先级为 0，因此攻击前类效果（如 H39 sWG「抑制被本单位攻击的单位」）
-    /// 先于伤害结算执行——否则目标的防御增益会先吸收一次伤害，剥光失去意义。
-    /// </summary>
-    private const int AttackExecutionPriority = 100;
+    /// <summary>S8：内置「词条程序取消消灭」在死亡处理端 <c>Rewrite</c> 段的优先级（注册面/插件默认 0＝在前）。</summary>
+    private const int DeathRewritePriority = 100;
 
     private readonly LogicEngine _engine;
     private readonly Battlefield _battlefield;
@@ -102,6 +97,8 @@ public sealed class CommandManager
     private readonly HashSet<UnitCard> _guardedUnits = new();
     private readonly HashSet<Hq> _guardedHqs = new(); // W3-3：被守护 HQ 以 HQ 实体为单元
     private readonly PincerRegistry _pincers = new(); // A2：钳击关系注册表（对局级——一对一占用约束）
+    private readonly OperateFinalizer _operateFinalizer; // S5：行动入口收尾的统一调用者（扣费/写位/unit.acted）
+    private readonly MatchActionServices _actionServices; // S4：动作服务面（对局级单实例——五个动作共用）
 
     /// <summary>
     /// 创建指挥管理器（创建四个内置流程触发器并装配默认链；订阅位置/入场/死亡更新以维护被守护状态）。
@@ -172,6 +169,9 @@ public sealed class CommandManager
         _retrigger = retrigger;
         _validationJudicatorResolver = validationJudicatorResolver;
 
+        // S5：行动状态（费用/CanMove/CanAttack/unit.acted）只经本收尾单元写；入口只算差异（OperateProfile）。
+        _operateFinalizer = new OperateFinalizer(new OperateEntryServices(engine));
+
         // K1 加性（A 档 C1-C4：交战合法性判定族）：目标合法性判定通道——对局路径＝注入的条目调用委托
         // （经注册表条目句柄——每次调用经统一解析点，moding 动态生效、候选/复验两链同步）；
         // 独立构造路径＝内置默认判定器（构造即可用——注入本管理器对局级只读设施引用；子规则内置实例经实例主方法调用——不内联）。
@@ -203,18 +203,60 @@ public sealed class CommandManager
             refs => refs.Count > 0 && refs[0].Value is CardBase card ? card.Owner?.Index : null);
         UnitMoveTrigger.Register("移动执行", HandleUnitMoveAsync);
 
-        // ③ 单位攻击触发器（执行前复验＝验证判定器承载——按名绑定攻击复验判定器〔J2〕；默认链＝攻击执行）
-        UnitAttackTrigger = new Trigger<UnitAttackTriggerView>("单位攻击触发器");
+        // ③ 单位攻击触发器（执行前复验＝验证判定器承载——按名绑定攻击复验判定器〔J2〕）
+        //    S11：本触发器升为**攻击动作触发端**（ActionTriggerBands：Initiate 校验 → Commit 转发）；
+        //    默认链（校验／转发）由 AttackAction 在装配时注册，此处只建本体与验证绑定。
+        UnitAttackTrigger = new Trigger<UnitAttackTriggerView>(
+            "单位攻击触发器", bandType: typeof(ActionTriggerBands));
         UnitAttackTrigger.BindValidation(
             ResolveRecheckBinding(JudicatorNames.AttackRecheck),
             refs => refs.Count > 0 ? refs[0] : null,
             refs => refs.Count > 0 && refs[0].Value is CardBase card ? card.Owner?.Index : null);
-        UnitAttackTrigger.Register("攻击执行", HandleUnitAttackAsync, AttackExecutionPriority);
 
-        // ④ 造成攻击伤害触发器（与对局同生的内置共享流程触发器；伏击加载时在此注册改写逻辑）
-        //    默认基础互伤＝高优先级（后执行）——伏击改写（注册默认优先级）先判定；改写生效＝替代默认。
-        AttackDamageTrigger = new Trigger<AttackDamageTriggerView>("造成攻击伤害触发器");
-        AttackDamageTrigger.Register("默认基础互伤", HandleDefaultAttackDamageAsync, DefaultDamagePriority);
+        // ④ 造成攻击伤害触发器（S11：升为**攻击动作处理端**——ActionHandleBands：Rewrite/Veto/Apply）。
+        //    伏击改写挂 Rewrite 段；默认攻击结算（互伤/存活/死亡）挂 Apply 段，由 AttackAction 装配。
+        AttackDamageTrigger = new Trigger<AttackDamageTriggerView>(
+            "造成攻击伤害触发器", bandType: typeof(ActionHandleBands));
+
+        // ⑤ 伤害动作（R11/S5a）：三触发端＋一处理端；处理端默认执行体＝唯一门户调用点
+        //    （DamageAction → 动作服务面 MatchActionServices.ApplyDamageAsync）。
+        //    触发端默认转发（ActionTriggerBands.Commit / priority 100）与处理端默认落地
+        //    （ActionHandleBands.Apply / priority 100）都在 DamageAction 构造内注册——保证「改写永远在默认之前」。
+        //
+        // S4/S6–S8：动作服务面对局级单实例（伤害/移动/抽牌/加入手牌/死亡共用）；
+        // S15 起动作实例不在本类构造——由下方动作目录按依赖序统一构造。
+        _actionServices = new MatchActionServices(
+            engine,
+            (dealer, action) => WithDamageSourceAsync(dealer, action),
+            _pincers,
+            _retrigger);
+
+        // S15：动作实例一律由目录按依赖序构造（本类不再 new）；目录每对局一份、随本管理器销毁。
+        // P5b：工厂经 ActionImplementationRegistry.Resolve() 解析（默认实现集 + 单动作覆盖）；
+        // 未注册任何实现集时在此 fail-fast（错误信息含「未注册动作实现」）。
+        Actions = new MatchActionCatalog(
+            engine,
+            _actionServices,
+            UnitAttackTrigger,
+            AttackDamageTrigger,
+            (attacker, targetRef) => IsAttackTargetLegal(attacker, targetRef),
+            _combatCounterEligibility);
+
+        AddToHandAction = Actions.AddToHand;
+        DrawAction = Actions.Draw;
+        MoveAction = Actions.Move;
+        DeathAction = Actions.Death;
+        JoinBattlefieldAction = Actions.JoinBattlefield;
+        AttackAction = Actions.Attack;
+
+        // S8：死亡处理端的 Rewrite 段是**唯一**改写位——旧的「拦截器属性 + 词条 death.cancel」两个并列取消口
+        // 收敛为同一段的 handler。内置词条 handler 用较高 priority：插件/注册面（默认 0）先判定，
+        // 保持「注册面在前、内置词条面在后、任一取消即终止」的既有裁决次序。
+        DeathAction.Handle.Register(
+            "词条程序取消消灭", HandleKeywordDeathCancelAsync, ActionHandleBands.Rewrite, DeathRewritePriority);
+
+        // S5a/P5：管道只是目录中伤害动作的门面（同一实例；既不自建扣数值实体，也不接受目录外实例）。
+        DamagePipeline = new DamagePipeline(Actions.Damage);
 
         // 词条装载上下文（卡牌加载时取用；伏击注册「造成攻击伤害」改写）。
         // A2 加性：随带对局服务——钳击（同伴选择交互/候选枚举/关系注册表）与被压制（当前行动方）效果的运行逻辑取用；
@@ -228,7 +270,11 @@ public sealed class CommandManager
             _combatCounterEligibility, _combatAmbushCondition,
             keywordChangeObserver: MaintainGuardState,
             // S5：注入本局词条快照——授予链/绑定查询读快照，运行期覆盖不影响进行中对局。
-            keywordSnapshot: keywordSnapshot);
+            keywordSnapshot: keywordSnapshot,
+            // R11：伤害三层管道——重甲挂 combat.damage、免疫挂 damage.apply。
+            damageAction: Actions.Damage,
+            // S11：死亡动作——伏击改写经它走**完整两端**（触发端 → 处理端）执行「以死代伤」。
+            deathAction: DeathAction);
 
         // 守护维护：由位置/入场/死亡/升级更新驱动（凡影响占用布局或守护者身份的变动均等效触达——
         // 批 4 加性：升级可能经词条集替换改变守护者身份，unit.upgraded 纳入订阅；词条授予-移除-复装
@@ -300,11 +346,51 @@ public sealed class CommandManager
     /// <summary>单位移动触发器（内置；执行段＝槽位变更＋发射 unit.position.changed；复验＝执行前兜底）。</summary>
     public Trigger<UnitMoveTriggerView> UnitMoveTrigger { get; }
 
-    /// <summary>单位攻击触发器（内置；执行段＝HQ 简路〔伤害经 HQ 数值路径〕/ 单位互伤经「造成攻击伤害」）。</summary>
+    /// <summary>
+    /// 单位攻击触发器（S11：攻击动作**触发端**；<see cref="ActionTriggerBands"/>）——
+    /// <c>Initiate</c> 结构校验、<c>Commit</c> 转发到处理端；外部效果经 <c>Initiate</c> 段注入。
+    /// </summary>
     public Trigger<UnitAttackTriggerView> UnitAttackTrigger { get; }
 
-    /// <summary>「造成攻击伤害」共享流程触发器（内置；单位 vs 单位攻击结算必经；伏击效果的改写注册口）。</summary>
+    /// <summary>
+    /// 「造成攻击伤害」触发器（S11：攻击动作**处理端**；<see cref="ActionHandleBands"/>）——
+    /// <c>Rewrite</c> 伏击改写、<c>Veto</c> 否决、<c>Apply</c> 默认结算（唯一落地段）。
+    /// </summary>
     public Trigger<AttackDamageTriggerView> AttackDamageTrigger { get; }
+
+    /// <summary>
+    /// 伤害三层管道（R11；对局级，与攻击伤害触发器同层）：<c>combat/effect/battle</c> 三触发端 ＋
+    /// <c>damage.apply</c> 处理端。处理端是**唯一**调用数值门户的地方——外部程序集不能旁路（门户为 internal）。
+    /// </summary>
+    public DamagePipeline DamagePipeline { get; }
+
+    /// <summary>
+    /// 动作目录（S15；对局级、本管理器持有）：八个动作实例与其两端触发器的装配真源。
+    /// 内部面——宿主经 <c>IMatchBindingServices.RegisterFlowTriggers</c> 按目录装配，不向插件交出目录本体。
+    /// </summary>
+    internal MatchActionCatalog Actions { get; }
+
+    /// <summary>卡牌移动动作（S6）：三入口（被指挥／被控／撤退）共用的触发端 ＋ 唯一落地处理端。
+    /// P5b：实现可由插件程序集提供，本属性只暴露宿主契约 <see cref="IMoveAction"/>。</summary>
+    public IMoveAction MoveAction { get; }
+
+    /// <summary>加入战场动作（S9）：部署／加入两触发端 ＋ 共享处理端（单位化 + 落位 + <c>card.placed</c>）。</summary>
+    public IJoinBattlefieldAction JoinBattlefieldAction { get; }
+
+    /// <summary>攻击动作（S11）：<see cref="UnitAttackTrigger"/> 触发端 ＋ <see cref="AttackDamageTrigger"/> 处理端。</summary>
+    public IAttackAction AttackAction { get; }
+
+    /// <summary>抽牌动作（S7）：卡组顶／指定牌两触发端 ＋ 共享处理端。</summary>
+    public IDrawAction DrawAction { get; }
+
+    /// <summary>加入手牌动作（S7）：独立可复用（爆牌＝其失败分支）。</summary>
+    public IAddToHandAction AddToHandAction { get; }
+
+    /// <summary>
+    /// 死亡动作（S8）：处理端 <c>Rewrite</c> 段是唯一改写位（是否死亡／击杀者／处置指向）；
+    /// 插件经 <c>DeathAction.Handle.Register(..., ActionHandleBands.Rewrite)</c> 注入。
+    /// </summary>
+    public IDeathAction DeathAction { get; }
 
     /// <summary>词条装载上下文（卡牌加载时取用；经对局装配注入卡牌库）。
     /// A2 加性：随带对局服务面（目标选择管理器／战场／钳击关系注册表／当前行动方提供器——钳击与被压制效果的运行逻辑取用）。</summary>
@@ -429,10 +515,9 @@ public sealed class CommandManager
             [CommandDataKeys.Player] = unit.Owner,
             [CommandDataKeys.FlowBox] = box,
         };
-        if (triggerCard is not null)
-        {
-            data[CommandDataKeys.TriggerCard] = triggerCard; // X1：效果引发情形显式携带（玩家主动操作＝缺省空）
-        }
+        // X1 入口初值（R9）：唯一归一化点——Ref 在写入边界转 Card；失效/错型降级 null 并留痕（不抛）。
+        // 玩家主动操作（缺省 null）＝空来源；效果引发＝调用方显式携带。
+        data[CommandDataKeys.TriggerCard] = SourceNormalizer.ToCard(triggerCard, _engine, "command.triggerCard");
 
         await CommandTrigger.InvokeAsync(_engine, data, ct);
 
@@ -1000,7 +1085,7 @@ public sealed class CommandManager
 
     private async Task DispatchSelectedAsync(
         UnitCard unit, Ref<Entity> selected, CommandFlowBox box, Context ctx,
-        CancellationToken ct, Ref<Entity>? triggerCard)
+        CancellationToken ct, Card? triggerCard)
     {
         var owner = unit.Owner;
         var enemy = owner is null ? null : EnemyOf(owner);
@@ -1036,7 +1121,7 @@ public sealed class CommandManager
 
     private async Task DispatchMoveAsync(
         UnitCard unit, Ref<Entity> newPositionRef, CommandFlowBox box, Context ctx,
-        CancellationToken ct, Ref<Entity>? triggerCard)
+        CancellationToken ct, Card? triggerCard)
     {
         var state = unit.GetData<UnitStateData>();
         var oldSlot = state.Position;
@@ -1053,9 +1138,11 @@ public sealed class CommandManager
             [CommandDataKeys.OldPosition] = oldSlot.Ref,
             [CommandDataKeys.NewPosition] = newPositionRef,
         };
+        // X1 兼容入口（R9）：逐层手工透传保留；帧继承已覆盖（不写键时子帧继承父帧值），
+        // 此处仅在非空时显式写入，值已是归一化后的 Card。
         if (triggerCard is not null)
         {
-            data[CommandDataKeys.TriggerCard] = triggerCard; // X1：效果引发情形随指挥链透传（主动指挥＝缺省空）
+            data[CommandDataKeys.TriggerCard] = triggerCard;
         }
 
         var stream = await UnitMoveTrigger.InvokeAsync(_engine, data, ct);
@@ -1068,76 +1155,51 @@ public sealed class CommandManager
             return;
         }
 
-        // 外层收尾（执行成功后）：扣费 → 两 bool 更新（恰一次、只在外层）
-        await FinalizeMoveAsync(unit, ct);
-        box.Result = CommandResult.Success();
+        // 外层收尾（执行成功后）：扣费 → 两 bool 更新 → unit.acted（恰一次、只在外层；经 S5 统一收尾单元）
+        var command = unit.GetData<CommandData>();
+        var isTank = HasUnitType(unit, UnitType.Tank);
+        var profile = new OperateProfile(
+            DeductCost: true,
+            CanMove: false,
+            CanAttack: isTank ? command.CanAttack : false, // 非坦克二选一：清攻击位（坦克仅清移动位）
+            EmitActed: true);
 
-        if (!unit.GetData<UnitStateData>().IsDestroyed)
-        {
-            await GameUpdates.EmitUnitActed(_engine, unit, ct); // E1-33：行动后（移动；已阵亡不豁免语义＝不为亡者发射）
-        }
+        await _operateFinalizer.FinalizeAsync(unit, profile, ct);
+        box.Result = CommandResult.Success();
+        await _operateFinalizer.EmitActedAsync(unit, profile, ct); // E1-33：已阵亡不发射（不为亡者发射）
     }
 
     private async Task DispatchAttackAsync(
         UnitCard unit, Ref<Entity> targetRef, CommandFlowBox box, Context ctx,
-        CancellationToken ct, Ref<Entity>? triggerCard)
+        CancellationToken ct, Card? triggerCard)
     {
-        // 嵌套执行（复验＝攻击触发器验证承载——拒绝＝仅本次取消、零副作用＋留痕）
-        var data = new Dictionary<string, object?>
-        {
-            [CommandDataKeys.Attacker] = unit.Ref,
-            [CommandDataKeys.Target] = targetRef,
-        };
-        if (triggerCard is not null)
-        {
-            data[CommandDataKeys.TriggerCard] = triggerCard; // X1：效果引发情形随指挥链透传（主动指挥＝缺省空）
-        }
+        // 嵌套执行（复验＝攻击触发端验证承载——拒绝＝仅本次取消、零副作用＋留痕）。
+        // S11：指挥入口只调**攻击动作**（触发端 → 处理端），不在入口内做结算。
+        var action = await AttackAction.CommandAsync(unit, targetRef, triggerCard, ct).ConfigureAwait(false);
 
-        var stream = await UnitAttackTrigger.InvokeAsync(_engine, data, ct);
-
-        if (ctx.Interrupted || stream.Outcome != ExecutionOutcome.Normal)
+        var outcome = action.Targets[0];
+        if (outcome.Outcome != ActionOutcomeKind.Applied)
         {
-            box.Result = stream.Outcome == ExecutionOutcome.ValidationRejected
+            box.Result = outcome.Reason == ActionFailureKind.ValidationRejected
                 ? CommandResult.Failure(CommandFailureReason.ExecutionRejected)
                 : CommandResult.Failure(CommandFailureReason.CommandFlowFault);
             return;
         }
 
-        // 外层收尾（执行成功后；攻击者死亡不豁免）：扣费 → 两 bool 更新（恰一次、只在外层）
-        await FinalizeAttackAsync(unit, ct);
+        // 外层收尾（执行成功后；攻击者死亡不豁免）：扣费 → 两 bool 更新 → unit.acted（恰一次、只在外层；经 S5 统一收尾单元）
+        var command = unit.GetData<CommandData>();
+        var isTank = HasUnitType(unit, UnitType.Tank);
+        var profile = new OperateProfile(
+            DeductCost: true,
+            CanMove: isTank ? command.CanMove : false, // 非坦克二选一：清移动位（坦克仅更新攻击位）
+            CanAttack: KeywordRules.ResolveCanAttackAfterAttack(unit)
+                || KeywordProgramRuntime.Components(unit).Any(
+                    c => c.Attacks<KeywordProgramRuntime.Resolve(unit, "attack.limit", 1)),
+            EmitActed: true);
+
+        await _operateFinalizer.FinalizeAsync(unit, profile, ct);
         box.Result = CommandResult.Success();
-
-        if (!unit.GetData<UnitStateData>().IsDestroyed)
-        {
-            await GameUpdates.EmitUnitActed(_engine, unit, ct); // E1-33：行动后（攻击；已阵亡＝不为亡者发射）
-        }
-    }
-
-    /// <summary>移动收尾（外层）：扣费（行动方扣除、恰一次；W2b：读行动费有效值；K4：经 OperateCosts 共享单元；E1-25 后续：经点数通用入口发 point.changed）→ 两 bool 更新（非坦克＝二选一：另一动作同被清）。</summary>
-    private static async Task FinalizeMoveAsync(UnitCard unit, CancellationToken ct)
-    {
-        var command = unit.GetData<CommandData>();
-
-        await OperateCosts.DeductAsync(unit, ct);
-        command.CanMove = false;
-        if (!HasUnitType(unit, UnitType.Tank))
-        {
-            command.CanAttack = false;
-        }
-    }
-
-    /// <summary>攻击收尾（外层）：扣费（行动方扣除、恰一次；W2b：读行动费有效值；K4：经 OperateCosts 共享单元；E1-25 后续：经点数通用入口发 point.changed）→ CanAttack 更新（奋战读取记账）→ 非坦克二选一清 CanMove。</summary>
-    private static async Task FinalizeAttackAsync(UnitCard unit, CancellationToken ct)
-    {
-        var command = unit.GetData<CommandData>();
-
-        await OperateCosts.DeductAsync(unit, ct);
-        command.CanAttack = KeywordRules.ResolveCanAttackAfterAttack(unit)
-            || KeywordProgramRuntime.Components(unit).Any(c=>c.Attacks<KeywordProgramRuntime.Resolve(unit,"attack.limit",1));
-        if (!HasUnitType(unit, UnitType.Tank))
-        {
-            command.CanMove = false;
-        }
+        await _operateFinalizer.EmitActedAsync(unit, profile, ct); // E1-33：已阵亡＝不为亡者发射
     }
 
     // ---------- ⑥ 单位移动触发器默认链（执行段） ----------
@@ -1145,216 +1207,31 @@ public sealed class CommandManager
     private async Task HandleUnitMoveAsync(UnitMoveTriggerView view, Context ctx, CancellationToken ct)
     {
         if (view.Unit is not { IsAlive: true } unitRef || unitRef.Value is not UnitCard unit
-            || view.OldPosition is not { IsAlive: true } oldRef || oldRef.Value is not Slot oldSlot
-            || view.NewPosition is not { IsAlive: true } newRef || newRef.Value is not Slot newSlot)
+            || view.NewPosition is not { IsAlive: true } newRef || newRef.Value is not Slot newSlot
+            || view.OldPosition is not { IsAlive: true })
         {
             ctx.Interrupt(); // 载荷缺失（结构性错误）：链中止、移动不发生
             return;
         }
 
-        // 执行段：槽位变更（旧槽移除 → 放入目标空槽；原槽变为空槽、参与后续邻位计算）→ 发射更新（恰一次；先于收尾段）
-        await ApplyPositionChangeAsync(unit, oldSlot, newSlot, ct);
-        // 守护维护由本更新驱动（订阅重算——布局已变更、收尾未发生）
+        // 执行段＝**底层移动动作**（S6）：指挥入口只负责前置（复验绑定）与收尾（OperateFinalizer）；
+        // 槽位变更与位置更新全部落在移动动作的处理端（唯一落地口）。此处不再自行写槽位。
+        var result = await MoveAction.CommandAsync(unit, newSlot, view.TriggerCard, ct).ConfigureAwait(false);
+        if (result.Targets.Count == 0 || result.Targets[0].Outcome != ActionOutcomeKind.Applied)
+        {
+            ctx.Interrupt(); // 底层动作未落地：本次指挥移动失败、零收尾（不扣费、不改行动位）
+        }
+
+        // 守护维护由 unit.position.changed 更新驱动（订阅重算——布局已变更、收尾未发生）
     }
 
-    /// <summary>槽位变更与位置更新的**单一执行面**（指挥移动与效果位移共用；不扣费、不发 unit.acted）。</summary>
-    private async Task ApplyPositionChangeAsync(UnitCard unit, Slot oldSlot, Slot newSlot, CancellationToken ct)
-    {
-        var state = unit.GetData<UnitStateData>();
-        oldSlot.Clear();
-        newSlot.Place(unit);
-        state.Position = newSlot;
-        await GameUpdates.EmitUnitPositionChanged(_engine, unit, oldSlot, newSlot, ct);
-    }
-
-    // ---------- ⑦ 单位攻击触发器默认链（执行段） ----------
-
-    private async Task HandleUnitAttackAsync(UnitAttackTriggerView view, Context ctx, CancellationToken ct)
-    {
-        if (view.Attacker is not { IsAlive: true } attackerRef || attackerRef.Value is not UnitCard attacker
-            || view.Target is not { IsAlive: true } targetRef)
-        {
-            ctx.Interrupt();
-            return;
-        }
-
-        var targetEntity = targetRef.Value;
-        var combatCompleted=false;
-        try
-        {
-        await KeywordProgramRuntime.AttackEvent(attacker,targetEntity as Card,true,ct);
-
-        // S2（隐蔽机制·揭示触发点）：攻击执行段入口（复验后、伤害结算前——E2-Q3a 裁定）——
-        // 参与攻击的隐蔽单位各自揭示：先攻击者（动作发起方）、后被攻击者（受动作方——单位目标）；
-        // HQ 不作被揭示方（攻击 HQ 时仅攻击者揭示）；载荷缺失/结构性中断＝未进入本段、不揭示。
-        await CovertRules.RevealAsync(attacker, ct);
-        if (targetEntity is UnitCard targetUnit)
-        {
-            await CovertRules.RevealAsync(targetUnit, ct);
-        }
-
-        if (targetEntity is Hq hq && !ReferenceEquals(hq.Owner, attacker.Owner))
-        {
-            // HQ 简路（W3-3 实体化）：伤害＝攻击者攻击力有效值；HQ 不反击；不走「造成攻击伤害」（无单位互伤链）；
-            // 伤害数值改走 HQ 数值路径与管线（改写→介入→应用→跑链集中触发——不建专用 HQ 伤害流程）。
-            // 归零→终局：不内联于攻击流程——HQ 侧统一响应（数值变化下游；与「先数值变化、后终局记录」
-            // 观察序一致）。当次结算收尾照常完成（内部步骤不经门禁）。
-            var damage = attacker.Modifiers.GetEffectiveValue(CardStatFields.Attack);
-            var healthBefore = hq.Health;
-            await hq.ApplyDamageAsync(damage, ct);
-            var dealt = healthBefore - hq.Health;
-            if (dealt > 0)
-            {
-                await GameUpdates.EmitUnitDamageDealt(_engine, attacker, hq, dealt, ct); // E1-47：HQ 路径的来源侧
-            }
-        }
-        else if (targetEntity is UnitCard)
-        {
-            // 单位 vs 单位：必经「造成攻击伤害」（伏击效果的改写注册口；同一目标承载）
-            // X1：触发者随链路传递（同一效果链内一致——攻击链读数透传至伤害链；主动指挥＝空、照常透传）
-            var damageData = new Dictionary<string, object?>
-            {
-                [CommandDataKeys.Attacker] = attackerRef,
-                [CommandDataKeys.Target] = targetRef,
-                [CommandDataKeys.Resolution] = new AttackDamageResolution(),
-            };
-            if (view.TriggerCard is not null)
-            {
-                damageData[CommandDataKeys.TriggerCard] = view.TriggerCard;
-            }
-
-            await AttackDamageTrigger.InvokeAsync(_engine, damageData, ct);
-        }
-        else
-        {
-            ctx.Interrupt();
-            return;
-        }
-
-        combatCompleted=true;
-        }
-        finally
-        {
-            try
-            {
-                if(combatCompleted)await KeywordProgramRuntime.AttackEvent(attacker,targetEntity as Card,false,ct);
-                else foreach(var component in KeywordProgramRuntime.Components(attacker))await component.ClearTemporary(ct);
-            }
-            finally { if(KeywordProgramRuntime.TakeTemporary(attacker))await GameUpdates.EmitKeywordAttackFinished(_engine,attacker,CancellationToken.None); }
-        }
-        // 执行段记账（词条侧）：奋战——本轮已攻次数 +1（先执行（含记账）→ 后更新）
-        KeywordRules.RecordAttack(attacker);
-
-        // 冲击消耗（批 5；X1＝攻击即消耗）：到达执行段公共尾部即消耗——与对象类型（单位/HQ/伏击者）、
-        // 反击/伏击是否起效均无关（「到达尾部」为唯一判据）；「未抵达尾部」（发起前拒绝/复验拒绝/
-        // 执行段载荷中断）＝不消耗、未触发不失去。存活防御：攻击者已死亡＝防御性跳过（真实对局不可达——
-        // 带冲击攻击者因 C5 豁免不被反击致死；终态卡移除链会被拒绝——防御）；幂等（无冲击＝零操作）。
-        // 顺序口径（Q&A-6(b) 裁量）：先记账（RecordAttack）后消耗——既有记账块收口保持不动，
-        // 消耗作为执行段最后副作用落地（消耗触发词条变更通知——如守护维护随动重算）。
-        if (KeywordRules.HasKeyword(attacker, KeywordIds.Shock)
-            && !attacker.GetData<UnitStateData>().IsDestroyed)
-        {
-            await attacker.Keywords.RevokeAsync(KeywordIds.Shock);
-        }
-    }
-
-    // ---------- ⑧ 「造成攻击伤害」默认链（基础互伤；伏击改写的替代面） ----------
-
-    private async Task HandleDefaultAttackDamageAsync(AttackDamageTriggerView view, Context ctx, CancellationToken ct)
-    {
-        if (view.Attacker is not { IsAlive: true } attackerRef || attackerRef.Value is not UnitCard attacker
-            || view.Target is not { IsAlive: true } targetRef || targetRef.Value is not UnitCard target
-            || view.Resolution is not AttackDamageResolution resolution)
-        {
-            ctx.Interrupt(); // 载荷缺失（HQ 不走本流程——防御）
-            return;
-        }
-
-        // 死亡冻结（W2b）：任一方已死亡＝尸体不参与数值结算（对已死单位的伤害门户亦将明确拒绝——此处为流程侧防护；
-        // 真实对局不可达〔候选过滤〕——防御于测试/异常驱动路径）。
-        if (attacker.GetData<UnitStateData>().IsDestroyed || target.GetData<UnitStateData>().IsDestroyed)
-        {
-            return;
-        }
-
-        if (resolution.IsRewritten)
-        {
-            // 伏击改写（已判定成立）：替代默认——攻击者死亡（统一死亡流程、无 HP 逐步扣减语义）、被攻击者不受伤
-            await ProcessDeathAsync(attacker, ct, killer: target); // E1-47：被攻击者为击杀者（伏击反杀）
-            await EmitCombatSurvivedAsync(_engine, target, ct); // E1-39：被攻击者确经交战且未阵亡 ⇒ 幸存
-            return;
-        }
-
-        // 默认基础互伤：按反击豁免判定表（后置项 A；K2：经 combat.counter.eligibility 判定器条目——单源、moding 动态生效）
-        // ——同时结算、以互扣前有效值为基准；豁免方不结算反击伤害
-        // （判定表：目标轰炸机永不反击 / 攻击者炮兵不受反击 / 攻击者轰炸机不受反击〔目标战斗机例外〕/
-        //  攻击者具冲击不受反击〔批 5——豁免族最高优先〕/ 其余正常）
-        // W2b：伤害值与扣减一律接改——伤害读「攻击力有效值」；扣减经门户（损伤量→跑链→有变更集中触发）。
-        // A2：伤害修正读取（handler 链介入——免疫归零／重甲减伤在默认结算 handler 之前登记；修正后照常走
-        // 「0 伤害」路径——净伤害＝0 不算「受到伤害」，与动员失去等消费一致）。
-        var damageToTarget = ResolveIncomingDamage(resolution, attacker, target);
-        var damageToAttacker = ResolveIncomingDamage(resolution, target, attacker);
-        var counterAttacks = _combatCounterEligibility(attacker, target); // K2：反击资格判定通道（对局＝条目句柄；独立构造＝内置默认）
-
-        var targetDefenseBefore = target.Modifiers.GetEffectiveValue(CardStatFields.Defense);
-        // E1-47：结算窗口内设置**伤害来源游标**——门户触发的「防御归零统一死亡衔接」在同一同步调用链内执行，
-        // 故游标可把"谁造成了这次伤害"带给死亡衔接（游标外恒 null＝非归属驱动）。
-        await WithDamageSourceAsync(
-            attacker, () => target.ApplyDefenseDamageAsync(damageToTarget, ct));
-        await EmitDamageDealtAsync(_engine, attacker, target, targetDefenseBefore, ct); // E1-47：**来源侧**实际造成量
-
-        if (counterAttacks)
-        {
-            var attackerDefenseBefore = attacker.Modifiers.GetEffectiveValue(CardStatFields.Defense);
-            await WithDamageSourceAsync(
-                target, () => attacker.ApplyDefenseDamageAsync(damageToAttacker, ct));
-            await EmitDamageDealtAsync(_engine, target, attacker, attackerDefenseBefore, ct); // E1-47：反击方向
-        }
-
-        // 死亡判定（互扣后防御有效值 ≤0；数值表现钳制后 ≤0 即 ==0）；同归于尽＝两枚 card.died 均发射，顺序：被攻击者在前、攻击者在后。
-        // 防御归零的统一死亡衔接由 stat.changed 订阅先行处理（含修饰撤销/到期等非伤害来源）；此处判定＝结算路径内防护兜底——
-        // 已死亡＝跳过（保证死亡恰一次、发射顺序稳定）。
-        if (!target.GetData<UnitStateData>().IsDestroyed
-            && target.Modifiers.GetEffectiveValue(CardStatFields.Defense) <= 0)
-        {
-            await ProcessDeathAsync(target, ct, killer: attacker); // E1-47：对战致死 ⇒ 攻击者胜出
-        }
-
-        if (counterAttacks && !attacker.GetData<UnitStateData>().IsDestroyed
-            && attacker.Modifiers.GetEffectiveValue(CardStatFields.Defense) <= 0)
-        {
-            await ProcessDeathAsync(attacker, ct, killer: target); // E1-47：反击致死 ⇒ 被攻击者胜出
-        }
-
-        // E1-47：来源侧伤害信号（发射点＝各处扣减之后——实际变化量 > 0 才发）。
-        // E1-39：交战存活信号（死亡判定**之后**才发——已阵亡者不发射，不误导"幸存"）。
-        // 双方**皆参战**（反击豁免只影响"是否互伤"，不影响"是否参战"），故各自按存活与否发射。
-        // 观察序＝被攻击者在前、攻击者在后（与同归于尽的 card.died 观察序一致）。
-        await EmitCombatSurvivedAsync(_engine, target, ct);
-        await EmitCombatSurvivedAsync(_engine, attacker, ct);
-    }
-
-    /// <summary>
-    /// 受方伤害解析（A2 加性）：基准＝来源方攻击力有效值；修正＝结算记录中登记的归零（免疫——置 0）与
-    /// 减伤（重甲——扣减）。归零优先（结果 0）；减伤下限 0 自然收敛（不足减则归 0；与免疫叠加结果一致）。
-    /// 归零/减伤均在默认结算 handler 之前由对应词条 handler 登记（「伤害结算 handler 之前把伤害设为 0」）。
-    /// </summary>
-    private static int ResolveIncomingDamage(
-        AttackDamageResolution resolution, UnitCard source, UnitCard receiver)
-    {
-        if (resolution.IsDamageZeroed(receiver))
-        {
-            return 0; // 免疫归零
-        }
-
-        var raw = source.Modifiers.GetEffectiveValue(CardStatFields.Attack);
-        return Math.Max(0, raw - resolution.GetDamageReduction(receiver)); // 重甲减伤（下限 0）
-    }
+    // ---------- ⑦ 攻击结算（S11：触发端/处理端的默认链在 AttackAction 内；此处只保留指挥入口可见性） ----------
 
     /// <summary>
     /// **伤害来源游标**（E1-47）：伤害门户触发的「防御归零统一死亡衔接」与本调用**同一同步调用链**，
     /// 故以结算窗口内的临时游标承载"本次伤害的施动方"（窗口外恒 null ⇒ 死亡无击杀者归属）。
     /// 用**恢复式**赋值（try/finally 还原上一值）——嵌套伤害（如伤害链内的再触发）亦保持作用域正确。
+    /// 唯一使用点＝处理端核心 <see cref="MatchActionServices.ApplyDamageAsync"/>（R11 门户收口后）。
     /// </summary>
     private UnitCard? _damageSourceCursor;
 
@@ -1373,35 +1250,9 @@ public sealed class CommandManager
     }
 
     /// <summary>
-    /// 发射 unit.damage.dealt（E1-47；**来源侧**）：实际防御变化量 &gt; 0 才发（改变才传播）。
-    /// 受方为 HQ 时亦适用（调用侧另行给出 HQ 路径的发射点）。
-    /// </summary>
-    private static Task EmitDamageDealtAsync(
-        LogicEngine engine, UnitCard dealer, UnitCard target, int defenseBefore, CancellationToken ct)
-    {
-        var dealt = defenseBefore - target.Modifiers.GetEffectiveValue(CardStatFields.Defense);
-        return dealt > 0
-            ? GameUpdates.EmitUnitDamageDealt(engine, dealer, target, dealt, ct)
-            : Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// 发射 unit.combat.survived（E1-39）：仅对**未阵亡**的参战单位发射（恰一次；已死亡＝零发射）。
-    /// </summary>
-    private static Task EmitCombatSurvivedAsync(LogicEngine engine, UnitCard unit, CancellationToken ct)
-        => unit.GetData<UnitStateData>().IsDestroyed
-            ? Task.CompletedTask
-            : GameUpdates.EmitUnitCombatSurvived(engine, unit, ct);
-
-    /// <summary>
-    /// 死亡链替换口（消灭确认前、槽位释放与卸载前）：返回 <c>true</c> ＝ 取消本次消灭。
-    /// 与词条程序的 <c>death.cancel</c> 串联——注册面在前、内置词条面在后，任一取消即终止。
-    /// </summary>
-    public Func<UnitCard, Card?, CancellationToken, Task<bool>>? DeathInterceptor { get; set; }
-
-    /// <summary>
-    /// 统一死亡流程（攻击结算判定死亡后调用；伏击改写的攻击者死亡同走此流程）。
-    /// 完整次序（A4 定稿·唯一权威口径——《需求文档》Q&A-1）：
+    /// 统一死亡流程（攻击结算判定死亡后调用；伏击改写的攻击者死亡同走此流程）——S8 起收敛为**死亡动作**入口：
+    /// 触发端 → 处理端（<c>Rewrite</c> 唯一改写位 → <c>Veto</c> 免死守卫 → <c>Apply</c> 死亡链）。
+    /// 完整次序（A4 定稿·唯一权威口径——《需求文档》Q&A-1，落地实现见 <see cref="MatchActionServices.ApplyDeathAsync"/>）：
     /// ①槽位释放（变空槽）→ ②IsDestroyed 置位 → ③**亡计结算**（新增步：仅含亡计词条的卡驱动其内部效果动作一次；
     /// 「死亡前可观察状态」完整时执行——位置字段可读、词条行为态仍在、修饰仍生效、效果仍装载、IsDestroyed 已置位；
     /// 异常隔离〔记录、不中断死亡流程〕；恰一次保证＝流程内步骤位次＋执行面行为态解析〔死亡注销后天然跳过〕＋执行中重入防护）→
@@ -1417,72 +1268,80 @@ public sealed class CommandManager
         await ProcessDeathAsync(unit, ct, killer).ConfigureAwait(false);
     }
 
-    /// <summary>Effect-origin combat: no turn/action/point payment, but normal target legality and combat resolution.</summary>
+    /// <summary>
+    /// 效果发起的攻击（R16）：**零行动经济面**（不扣指挥点、不写行动位、不发 <c>unit.acted</c>）——
+    /// 代价属于「指挥」，不属于攻击动作；**不受压制阻断**：压制只影响「能否被指挥」
+    /// （<c>attack.leg.eligibility</c> 与候选名单），被压制单位仍可被效果强制攻击。
+    /// </summary>
     internal async Task<bool> AttackByEffectAsync(UnitCard unit,Orc.Cards.Card target,CancellationToken ct,bool bypassRange=false)
     {
         if(_lifecycle?.IsActionAllowed==false||!unit.TryGetData<UnitStateData>(out var state)||state.IsDestroyed||state.Position is null)return false;
-        if(KeywordRules.HasKeyword(unit,KeywordIds.Suppressed))return false;
-        using var origin=KeywordProgramRuntime.BeginEffectAttack(unit,bypassRange);
-        if(!IsAttackTargetLegal(unit,target.Ref))return false;
         await using var scope=_engine.BeginAction();
-        var result=await UnitAttackTrigger.InvokeAsync(_engine,new Dictionary<string,object?>
-        {
-            [CommandDataKeys.Attacker]=unit.Ref,[CommandDataKeys.Target]=target.Ref,[CommandDataKeys.TriggerCard]=unit.Ref
-        },ct);
-        return result.Outcome==ExecutionOutcome.Normal;
+        var result=await AttackAction.EffectAsync(unit,target.Ref,bypassRange,triggerCard:unit,ct).ConfigureAwait(false);
+        return result.Targets[0].Outcome==ActionOutcomeKind.Applied;
     }
 
     /// <summary>
-    /// 效果发起的位移（`retreat` 等；与 <see cref="AttackByEffectAsync"/> 同构的门户）：
-    /// 不扣行动费、不清行动位、不做推进资格判定（目标为支援线空槽，方向与"推进"相反）；
-    /// 槽位变更与位置更新走与指挥移动共用的单一执行面。返回是否实际位移。
+    /// 效果发起的位移（`retreat`、被控移动等；S6 效果入口）：**零资源消耗**——不扣指挥点、不写行动位、
+    /// 不发 <c>unit.acted</c>、不要求 <c>CanMove</c>、**不受压制阻断**（压制只决定「能否被指挥」，R16）。
+    /// 前置只判「单位在场未毁、目标槽存在/为空/非原槽、方向约束＝己方支援线」；落地经底层移动动作。
     /// </summary>
-    public async Task<bool> MoveByEffectAsync(UnitCard unit, Slot destination, CancellationToken ct = default)
+    internal async Task<bool> MoveUnitAsync(UnitCard unit, Slot destination, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(unit);
         ArgumentNullException.ThrowIfNull(destination);
-        if (_lifecycle?.IsEnded == true) return false;
-        if (!unit.TryGetData<UnitStateData>(out var state) || state.IsDestroyed || state.Position is not { } oldSlot) return false;
-        if (ReferenceEquals(oldSlot, destination) || !destination.IsEmpty) return false;
         if (unit.Owner is not { } owner || !_battlefield.GetSupportLine(owner).Contains(destination)) return false;
 
-        await using var scope = _engine.BeginAction();
-        await ApplyPositionChangeAsync(unit, oldSlot, destination, ct);
-        return true;
+        return await EffectMoveAsync(unit, destination, ct).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// 无头伤害（效果运行期受控入口；经 <c>Orc.Game.Effects.EffectRuntime.DamageAsync</c> 在有**来源**时调用，E1-50）：
-    /// 在**伤害来源游标**作用下执行单位伤害门户（⇒ 致死时死亡衔接拿到击杀者）→ 发射 <c>unit.damage.dealt</c>。
+    /// 效果移动的**共用执行体**（S6）：两个入口重载都走这里 → <see cref="MoveAction.EffectAsync"/>（同一底层动作）。
+    /// 前置只判「单位在场未毁、目标槽存在/为空/非原槽」；方向约束由各重载自己表达。
     /// </summary>
-    internal async Task DealDamageAsync(UnitCard target, int amount, UnitCard source, CancellationToken ct = default)
+    private async Task<bool> EffectMoveAsync(UnitCard unit, Slot destination, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(target);
-        ArgumentNullException.ThrowIfNull(source);
+        if (_lifecycle?.IsEnded == true) return false;
+        if (!unit.TryGetData<UnitStateData>(out var state) || state.IsDestroyed || state.Position is not { } oldSlot) return false;
+        if (ReferenceEquals(oldSlot, destination) || !destination.IsEmpty) return false;
 
-        var before = target.Modifiers.GetEffectiveValue(CardStatFields.Defense);
-        await WithDamageSourceAsync(source, () => target.ApplyDefenseDamageAsync(amount, ct)).ConfigureAwait(false);
-        await EmitDamageDealtAsync(_engine, source, target, before, ct).ConfigureAwait(false);
+        await using var scope = _engine.BeginAction();
+        var result = await MoveAction.EffectAsync(unit, destination, triggerCard: null, ct).ConfigureAwait(false);
+        return result.Targets.Count > 0 && result.Targets[0].Outcome == ActionOutcomeKind.Applied;
     }
 
-    /// <summary>无头 HQ 伤害（效果运行期；经 <c>EffectRuntime.DamageAsync</c> 在有来源时调用，E1-50）。</summary>
-    internal async Task DealDamageToHqAsync(Hq hq, int amount, UnitCard source, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(hq);
-        ArgumentNullException.ThrowIfNull(source);
+    /// <summary>
+    /// 无头伤害（效果运行期受控入口；经 <c>Orc.Game.Effects.EffectRuntime.DamageAsync</c> 调用）：
+    /// 走 <see cref="DamagePipeline.EffectAsync"/>（<c>effect.damage</c> → <c>damage.apply</c>），
+    /// 与对战/战斗共用同一处理端（免疫、重甲语义一致）。
+    /// </summary>
+    internal Task<bool> DamageByEffectAsync(Card? source, Card target, int amount, CancellationToken ct = default)
+        => DamagePipeline.EffectAsync(source, target, amount, ct);
 
-        var healthBefore = hq.Health;
-        await hq.ApplyDamageAsync(amount, ct).ConfigureAwait(false);
-        var dealt = healthBefore - hq.Health;
-        if (dealt > 0)
-        {
-            await GameUpdates.EmitUnitDamageDealt(_engine, source, hq, dealt, ct).ConfigureAwait(false);
-        }
+    /// <summary>
+    /// 战斗（R10；经 <c>Orc.Game.Effects.EffectRuntime.BattleAsync</c> 调用）：双方快照攻击力后各打一次
+    /// <c>battle.damage</c>（同时结算——先死者不影响反向输出）；不发攻击类信号、不扣行动代价。
+    /// </summary>
+    internal async Task<bool> BattleByEffectAsync(UnitCard first, UnitCard second, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(first);
+        ArgumentNullException.ThrowIfNull(second);
+
+        var firstAttack = Math.Max(0, first.Modifiers.GetEffectiveValue(CardStatFields.Attack));
+        var secondAttack = Math.Max(0, second.Modifiers.GetEffectiveValue(CardStatFields.Attack));
+
+        var forward = await DamagePipeline.BattleAsync(first, second, firstAttack, ct).ConfigureAwait(false);
+        var backward = await DamagePipeline.BattleAsync(second, first, secondAttack, ct).ConfigureAwait(false);
+        return forward && backward;
     }
 
     /// <summary>
     /// 无头移动（效果运行期受控入口；经 <c>Orc.Game.Effects.EffectRuntime.MoveAsync</c> 暴露——internal 以免零散扩张 public 面）：
-    /// 依目标区域取**首个空槽**，走与指挥同一执行链（<see cref="DispatchMoveAsync"/>：复验触发器 → 外层收尾）。
+    /// 依目标区域取**首个空槽**后走指定槽效果入口（S6：zone 重载只是选择器，不新增语义入口）。
+    /// <para>
+    /// P2 有意变更：本入口不再走指挥移动链（不扣费、不清行动位、不发 <c>unit.acted</c>）——
+    /// 效果移动是动作的后果而非行动，代价属于「指挥」（R16）。
+    /// </para>
     /// 不可移动（无位置 / 无空槽 / 区域未知）＝false（不抛错）。
     /// </summary>
     internal async Task<bool> MoveUnitAsync(UnitCard unit, string zone, CancellationToken ct = default)
@@ -1521,58 +1380,25 @@ public sealed class CommandManager
             return false;
         }
 
-        var ctx = new Context();
-        var box = new CommandFlowBox();
-        await DispatchMoveAsync(unit, target.Ref, box, ctx, ct, triggerCard: null).ConfigureAwait(false);
-        return box.Result is { IsSuccess: true };
+        // zone 重载只是选择器：不经「己方支援线」方向约束（推进到前线由 zone 语义表达）。
+        return await EffectMoveAsync(unit, target, ct).ConfigureAwait(false);
     }
 
     /// <param name="killer">击杀者（E1-47 加性；null＝非归属驱动来源——如修饰到期致防御归零）。</param>
-    private async Task ProcessDeathAsync(UnitCard unit, CancellationToken ct, UnitCard? killer = null)
+    private async Task ProcessDeathAsync(UnitCard unit, CancellationToken ct, Card? killer = null)
+        => await DeathAction.ExecuteAsync(unit, killer, triggerCard: null, ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// 死亡处理端 <c>Rewrite</c> 段的内置 handler（S8）：把旧「词条程序 <c>death.cancel</c>」取消口
+    /// 改为改写位——取消＝<c>ShouldDie=false</c>，并按既有次序中止本段后续（免死守卫在 <c>Veto</c> 段收口留痕）。
+    /// </summary>
+    private async Task HandleKeywordDeathCancelAsync(DeathHandleView view, Context ctx, CancellationToken ct)
     {
-        var state = unit.GetData<UnitStateData>();
-        if (state.IsDestroyed) return;
-
-        // 死亡链（消灭确认前、卸载前）：注册面（moding/插件）在前，内置词条面（death.cancel）在后；
-        // 任一取消即终止，且都发生在 IsDestroyed 置位与任何清理之前。
-        if (DeathInterceptor is not null && await DeathInterceptor(unit, killer, ct)) return;
-        if (await KeywordProgramRuntime.BeforeDestroy(unit,killer,ct)) return;
-        state.Position?.Clear();
-        state.IsDestroyed = true;
-
-        // Host-bound death effects must settle while their registrations still exist.
-        // The completed-death observation remains after cleanup in card.died.
-        await GameUpdates.EmitCardDying(_engine, unit, killer, ct);
-
-        // A4：亡计结算（新增步——置毁之后、词条死亡注销之前；清理前结算）。
-        // 经再触发服务统一执行面（单源＋重入防护）；独立构造（无服务）＝直调执行面降级（无重入防护）。
-        if (_retrigger is not null)
+        if (await KeywordProgramRuntime.BeforeDestroy(view.Unit, view.Killer, ct).ConfigureAwait(false))
         {
-            await _retrigger.ExecuteDeathrattleAsync(unit, ct);
+            view.ShouldDie = false;
+            ctx.Stop();
         }
-        else
-        {
-            await DeathrattleRules.ExecuteAsync(unit, _engine, ct);
-        }
-
-        KeywordRules.RevokeAllOnDeath(unit); // 2C-A1：词条死亡注销（经静态助手转发——仅行为撤销：OnRevoke 序列＋运行逻辑注销＋内嵌效果卸载；登记/参值保留可查询）
-
-        await unit.Modifiers.ClearAllForDeathAsync(ct); // W2b：注销全部修饰器（含期限订阅随销）＋数值整合至最终态（零新发射）
-
-        // A2：钳击关系失效通知（一方离场〔不再在场〕——另一方即时失去；同事务内落定）。置于死亡清理之后：
-        // 离场方自身修饰器已清（本通知对其幂等、零新发射——「发射契约以致死变更为界」保持）；对侧撤销正常落定。
-        await PincerRules.OnUnitLeftBattlefieldAsync(unit, _pincers, ct);
-
-        // X2：效果卸载（统一卸载链收口——容器移除＋OnUnmount＋撤销登记＋总线卸载；含托管清理〔幂等：
-        // 修饰器已清、零操作〕）——清理就绪后方发 card.died（「先数值变化→清理→card.died」观察序保持）。
-        foreach (var effect in unit.Effects.ToArray())
-        {
-            unit.RemoveEffect(effect);
-        }
-
-        state.Position = null;
-        await GameUpdates.EmitCardDied(_engine, unit, killer, ct); // E1-47：死亡 ＋ **归属**（Killer 可为 null）
-        // 守护维护由本更新驱动（清位后等效触达——被守护状态可观测变化）
     }
 
     /// <summary>

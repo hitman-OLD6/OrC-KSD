@@ -347,28 +347,32 @@ public class TriggerWrapperTests
         var defender = new Card(engine, "乙");
         defender.AddData(new HealthData { Hp = 10 });
 
-        // 屏蔽「伤害生效」：经句柄把伤害结算流程的默认处理器替换为无操作（不新增前后 handler）
-        var applyM = engine.DamageFlow.Trigger.RegisterReplaceWrapper(
-            engine.DamageFlow.ApplyRegistration,
+        // 屏蔽「施放结算」：经句柄把内核流程的默认处理器替换为无操作（不新增前后 handler）
+        var applyM = engine.OrderFlow.Trigger.RegisterReplaceWrapper(
+            engine.OrderFlow.ResolveRegistration,
             (view, ctx, ct) => Task.CompletedTask);
         Assert.NotNull(applyM);
 
-        await engine.AttackFlow.ExecuteAsync(attacker, defender, 5);
-        Assert.Equal(10, defender.GetData<HealthData>().Hp); // 替换生效：伤害不生效
+        await KernelFlow.AttackAsync(engine, attacker, defender, 5);
+        Assert.Equal(10, defender.GetData<HealthData>().Hp); // 替换生效：结算不落地
 
         // 注销 → 回退原逻辑：伤害照常
-        Assert.True(engine.DamageFlow.Trigger.UnregisterWrapper(applyM!));
-        await engine.AttackFlow.ExecuteAsync(attacker, defender, 5);
+        Assert.True(engine.OrderFlow.Trigger.UnregisterWrapper(applyM!));
+        await KernelFlow.AttackAsync(engine, attacker, defender, 5);
         Assert.Equal(5, defender.GetData<HealthData>().Hp);
 
-        // 屏蔽「伤害结算」调用：经攻击流程内置句柄替换为无操作 → 攻击不再引发伤害结算
-        var resolveM = engine.AttackFlow.Trigger.RegisterReplaceWrapper(
-            engine.AttackFlow.ResolveRegistration,
+        // 再次屏蔽：替换后再注销 → 再次回退（同句柄作用域、幂等注销）
+        var resolveM = engine.OrderFlow.Trigger.RegisterReplaceWrapper(
+            engine.OrderFlow.ResolveRegistration,
             (view, ctx, ct) => Task.CompletedTask);
         Assert.NotNull(resolveM);
 
-        await engine.AttackFlow.ExecuteAsync(attacker, defender, 5);
-        Assert.Equal(5, defender.GetData<HealthData>().Hp); // 伤害保持（攻击结算不调用伤害结算流程）
+        await KernelFlow.AttackAsync(engine, attacker, defender, 5);
+        Assert.Equal(5, defender.GetData<HealthData>().Hp); // 结算被屏蔽：伤害保持
+
+        Assert.True(engine.OrderFlow.Trigger.UnregisterWrapper(resolveM!));
+        await KernelFlow.AttackAsync(engine, attacker, defender, 5);
+        Assert.Equal(0, defender.GetData<HealthData>().Hp);
     }
 
     // ---------- 替换作用域：仅该注册项；名称/排序位置不变 ----------

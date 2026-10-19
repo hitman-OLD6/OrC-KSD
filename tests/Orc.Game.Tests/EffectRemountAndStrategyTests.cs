@@ -530,7 +530,7 @@ internal sealed class RollbackSilentKeywordComponent : KeywordComponent
         EmbedEffect(new RollbackSilentProbeEffect());
     }
 
-    protected override void OnGrant() => throw new InvalidOperationException("OnGrant 爆炸（回滚静默用例）");
+    protected internal override void OnGrant() => throw new InvalidOperationException("OnGrant 爆炸（回滚静默用例）");
 }
 
 internal sealed class RollbackSilentProbeEffect : PassiveEffect

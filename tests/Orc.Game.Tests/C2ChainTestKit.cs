@@ -69,9 +69,9 @@ internal static class C2Kit
     }
 
     /// <summary>实例化发射源＋装载（含效果装载链），返回（卡，效果）；测试装配引用随配。</summary>
-    public static async Task<(CommandCard Card, C2DevelopEffect Effect)> PrepareEmitterAsync(Match match, Player owner)
+    public static async Task<(OrderCard Card, C2DevelopEffect Effect)> PrepareEmitterAsync(Match match, Player owner)
     {
-        var card = (CommandCard)match.CardLibrary.Instantiate(EmitterId);
+        var card = (OrderCard)match.CardLibrary.Instantiate(EmitterId);
         await card.LoadAsync(owner);
         var effect = Assert.IsType<C2DevelopEffect>(Assert.Single(card.Effects));
         return (card, effect);

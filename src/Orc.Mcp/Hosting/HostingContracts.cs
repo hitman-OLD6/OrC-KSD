@@ -108,10 +108,10 @@ public interface IMcpActions
     /// <summary>单位加入（引擎入口 <c>PlayManager.JoinUnitAsync</c>）。</summary>
     Task<ActionOutcome> JoinUnitAsync(string cardRef, int ownerIndex, int slotIndex, CancellationToken ct = default);
 
-    /// <summary>指令预打出（引擎入口 <c>PlayManager.BeginCommandPrePlayAsync</c>）。</summary>
+    /// <summary>指令预打出（引擎入口 <c>PlayManager.BeginOrderPrePlayAsync</c>）。</summary>
     Task<ActionOutcome> PlayCommandPreAsync(string cardRef, CancellationToken ct = default);
 
-    /// <summary>指令打出（引擎入口 <c>PlayManager.PlayCommandAsync</c>）。</summary>
+    /// <summary>指令打出（引擎入口 <c>PlayManager.PlayOrderAsync</c>）。</summary>
     Task<ActionOutcome> PlayCommandAsync(string cardRef, CancellationToken ct = default);
 
     /// <summary>使用反制（引擎入口 <c>PlayManager.UseCounterAsync</c>）。</summary>

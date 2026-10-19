@@ -27,7 +27,7 @@ internal static class ModifierTestKit
         => new(engine, new CardDefinition("未单位化单位", 1, 2, 3, 4, faction: Faction.Germany, rarity: Rarity.Standard));
 
     /// <summary>构造指令卡（非单位卡承载用例）。</summary>
-    public static CommandCard CreateCommandCard(LogicEngine engine, string name = "测试指令")
+    public static OrderCard CreateOrderCard(LogicEngine engine, string name = "测试指令")
         => new(engine, new CardDefinition(name, 2, 0, 0, 0, CardCategory.Command, faction: Faction.Germany, rarity: Rarity.Standard));
 
     /// <summary>从 card.stat.changed 载荷读取变化字段集合（类型化读取——载荷契约断言辅助）。</summary>
@@ -111,19 +111,19 @@ internal sealed class RecordingModifier : Modifier
 
     public Func<Card, int, int>? Transform { get; set; }
 
-    protected override void OnMount(ModifierMountContext context)
+    protected internal override void OnMount(ModifierMountContext context)
     {
         MountCalls += 1;
         SubscribeExpiry(context); // 期限能力（有声明＝自订阅；模板子类同走该辅助）
     }
 
-    protected override void OnUnmount()
+    protected internal override void OnUnmount()
     {
         UnmountCalls += 1;
         UnsubscribeExpiry();
     }
 
-    protected override int Apply(Card card, int current)
+    protected internal override int Apply(Card card, int current)
         => Transform is null ? current : Transform(card, current);
 }
 
@@ -137,14 +137,14 @@ internal sealed class FailingModifier : Modifier
     {
     }
 
-    protected override void OnMount(ModifierMountContext context)
+    protected internal override void OnMount(ModifierMountContext context)
         => throw new InvalidOperationException(FailureMessage);
 
-    protected override void OnUnmount()
+    protected internal override void OnUnmount()
     {
     }
 
-    protected override int Apply(Card card, int current) => current;
+    protected internal override int Apply(Card card, int current) => current;
 }
 
 /// <summary>
@@ -164,11 +164,11 @@ internal sealed class ReentrancyProbeModifier : Modifier
     /// <summary>挂载请求是否被同步拒绝（链节内调用 AddModifierAsync）。</summary>
     public bool AddRejectedSync { get; private set; }
 
-    protected override void OnMount(ModifierMountContext context) => SubscribeExpiry(context);
+    protected internal override void OnMount(ModifierMountContext context) => SubscribeExpiry(context);
 
-    protected override void OnUnmount() => UnsubscribeExpiry();
+    protected internal override void OnUnmount() => UnsubscribeExpiry();
 
-    protected override int Apply(Card card, int current)
+    protected internal override int Apply(Card card, int current)
     {
         // W3-3 泛化随改：机制宿主为引擎薄容器 Card；本测试类宿主为卡类（CardBase 系）——经 cast 访问修饰容器（行为等价）。
         var host = (CardBase)card;

@@ -1,5 +1,6 @@
-using Orc.Cards;
+﻿using Orc.Cards;
 using Orc.Core;
+using Orc.Game.Actions;
 using Orc.Game.Cards;
 using Orc.Game.Collections;
 using Orc.Game.Players;
@@ -103,15 +104,24 @@ public sealed class PlayerManager
 {
     private readonly LogicEngine _engine;
     private readonly CardLibrary _library;
+    private readonly Func<IDrawAction?>? _drawActionProvider;
     private readonly List<Player> _players = new();
     private int _lastIssuedCardId;
     private int? _cardIdWatermark;
 
-    internal PlayerManager(LogicEngine engine, CardLibrary library)
+    internal PlayerManager(LogicEngine engine, CardLibrary library, Func<IDrawAction?>? drawActionProvider = null)
     {
         _engine = engine;
         _library = library;
+        _drawActionProvider = drawActionProvider;
     }
+
+    /// <summary>
+    /// 抽牌动作面（S7）：对局路径＝装配链注入的同一实例；独立构造/装配早期＝经动作目录查询面按默认实现集
+    /// 创建并登记（同一实体、同一实现——不存在第二条抽牌实现）。
+    /// </summary>
+    private IDrawAction DrawAction()
+        => _drawActionProvider?.Invoke() ?? ActionRuntime.ResolveDraw(_engine);
 
     /// <summary>双玩家（[0]＝玩家A/第一位玩家、[1]＝玩家B；顺序＝创建序）。</summary>
     public IReadOnlyList<Player> Players => _players;
@@ -223,9 +233,10 @@ public sealed class PlayerManager
     }
 
     /// <summary>
-    /// 回合抽牌（G7 起含 HandLimit 爆牌裁决）：抽 1 张——未满手＝加入手牌并发 card.drawn → card.hand.add
-    /// （顺序：drawn 先、hand.add 后；载荷均＝{ 玩家, 卡牌实例 }）；满手（≥ HandLimit〔9〕）＝KARDS 爆牌语义
-    /// （直爆口径：不经手牌、手牌全程保持上限——发 card.drawn 恰一次 → 销毁〔引擎既有机制〕→ 发 card.burned 恰一次；card.hand.add 零次）。
+    /// 回合抽牌（G7 起含 HandLimit 爆牌裁决）——入口适配器（S7）：只把 <see cref="ActionResult"/> 翻译为此前的结果面。
+    /// 抽牌本身＝<see cref="IDrawAction.DrawTopAsync"/>（卡组顶触发端 → 共享抽牌处理端 → 加入手牌子动作）；
+    /// 未满手＝<c>card.drawn</c> → 入列表 → <c>card.hand.add</c>；满手＝<c>card.drawn</c> → 销毁 → <c>card.burned</c>
+    /// （<c>card.hand.add</c> 零次）。
     /// 返回抽到的卡牌实例（爆牌路径＝被爆卡引用——爆掉的牌「算被抽到」、不算「进过手牌」）。
     /// </summary>
     /// <exception cref="ArgumentNullException">player 为 null。</exception>
@@ -234,21 +245,9 @@ public sealed class PlayerManager
     {
         ArgumentNullException.ThrowIfNull(player);
 
-        var card = player.Deck.DrawInstance(); // 空集合 / 未加载抛错（集合契约）；「移除」由抽取步骤自然完成
-        if (HandLimitBurn.IsAtLimit(player))
-        {
-            // HandLimit 爆牌（直爆：不经手牌——手牌全程保持 9、无瞬时第 10 张；「算被抽到」路径＝
-            // drawn → 销毁 → burned——经共享爆牌单元〔K0·B12 统一；Kb 独立信号输出〕）
-            await HandLimitBurn.BurnAsync(_engine, player, card, emitDrawn: true, ct);
-        }
-        else
-        {
-            player.Hand.Add(card);
-            await GameUpdates.EmitCardDrawn(_engine, player, card, ct);
-            await GameUpdates.EmitCardHandAdd(_engine, player, card, ct);
-        }
-
-        return card;
+        var result = await DrawAction().DrawTopAsync(player, triggerCard: null, ct).ConfigureAwait(false);
+        return result.Targets[0].Subject
+            ?? throw new InvalidOperationException("抽牌结果缺少卡牌实例（动作契约错误）。");
     }
 
     // ---------- 手牌动作面（G7：弃置 / 回迁；范围修正后——KARDS 官方无弃牌堆/墓地语义） ----------
@@ -260,10 +259,13 @@ public sealed class PlayerManager
     /// 归属口径＝「卡当前所在手牌」（不设「仅己方」限制——他方手牌的弃置经调用方组合合法可达）。
     /// 前提校验失败（卡不在所声明玩家手牌中）＝明确拒绝（可区分成功/拒绝；不静默、非幂等）；
     /// 对同一卡重复弃置＝第二次因前提失败而拒绝。次序：移除 → 销毁（含资源清理）→ 信号（观察者所见即终态）。
+    /// R9：<paramref name="source"/>＝施动方（可空）——恒写入 <c>card.discarded</c> 载荷的 <c>Source</c>；
+    /// 不传＝null（不猜测、不回退到被弃卡/玩家）。
     /// </summary>
     /// <exception cref="ArgumentNullException">player / card 为 null。</exception>
     /// <exception cref="InvalidOperationException">卡不在该玩家手牌中（前提校验失败——明确拒绝）。</exception>
-    public async Task DiscardCardAsync(Player player, CardBase card, CancellationToken ct = default)
+    public async Task DiscardCardAsync(
+        Player player, CardBase card, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(player);
         ArgumentNullException.ThrowIfNull(card);
@@ -275,7 +277,7 @@ public sealed class PlayerManager
         }
 
         player.Hand.Remove(card); // 前提已校验：必命中（移除）——移除后处置链无失败点（成功即完整弃置）
-        await HandLimitBurn.DestroyAndEmitDiscardedAsync(_engine, player, card, ct);
+        await HandLimitBurn.DestroyAndEmitDiscardedAsync(_engine, player, card, ct, source);
     }
 
     /// <summary>
@@ -388,20 +390,16 @@ public sealed class PlayerManager
             return DeckFetchResult.Rejected(DeckFetchFailureReason.NotInDeck, card);
         }
 
-        // 执行段：前置校验全部通过——先移除（基础件必命中、无失败点），再按满手裁决分支。
-        player.Deck.RemoveInstance(card);
-        if (HandLimitBurn.IsAtLimit(player))
+        // 执行段：前置校验全部通过——抽牌动作（指定牌触发端 → 共享处理端 → 加入手牌子动作）。
+        // 满手＝爆牌（对齐抽牌路径「算被抽到」：drawn → 销毁 → burned；hand.add 零次）。
+        var drawn = await DrawAction().DrawSpecificAsync(card, player, triggerCard: null, ct).ConfigureAwait(false);
+        var outcome = drawn.Targets[0];
+        return outcome.Outcome switch
         {
-            // 满手＝爆牌（对齐 DrawCard 路径「算被抽到」：drawn → 销毁 → burned；hand.add 零次；
-            // 经共享爆牌单元〔K0·B12 统一；Kb 独立信号输出〕）。
-            await HandLimitBurn.BurnAsync(_engine, player, card, emitDrawn: true, ct).ConfigureAwait(false);
-            return DeckFetchResult.Burned(card);
-        }
-
-        player.Hand.Add(card);
-        await GameUpdates.EmitCardDrawn(_engine, player, card, ct).ConfigureAwait(false);
-        await GameUpdates.EmitCardHandAdd(_engine, player, card, ct).ConfigureAwait(false);
-        return DeckFetchResult.Fetched(card);
+            ActionOutcomeKind.Applied => DeckFetchResult.Fetched(card),
+            _ when outcome.Reason == ActionFailureKind.HandFull => DeckFetchResult.Burned(card),
+            _ => DeckFetchResult.Rejected(DeckFetchFailureReason.Unavailable, card),
+        };
     }
 
     /// <summary>抽牌核心链路（静默）：卡组条目取件（加载实例通道）→ 加入手牌。</summary>

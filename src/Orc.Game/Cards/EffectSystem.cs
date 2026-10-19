@@ -1,4 +1,4 @@
-using Orc.Cards;
+﻿using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Board;
 
@@ -308,14 +308,6 @@ internal static class CardEffectLoader
 
         foreach (var inject in snapshot.Root.Injects)
         {
-            if (!string.IsNullOrWhiteSpace(inject.BandName))
-            {
-                WriteInjectError(
-                    engine, card,
-                    $"注入区段 '{inject.BandName}' 不受支持（本版仅默认区段——隔离）。", inject.TargetTriggerName);
-                continue;
-            }
-
             if (!card.TryFindNamedTrigger(inject.TargetTriggerName, out var target, out var viewType)
                 && !TryFindMatchTrigger(card, inject.TargetTriggerName, out target, out viewType))
             {
@@ -333,7 +325,9 @@ internal static class CardEffectLoader
 
             try
             {
-                effect.InjectByFramework(target!, viewType!, inject.EventId, handler, inject.Priority);
+                // S11：band 名随声明落地（专门 band 方案的触发器要求显式区段；未声明＝默认区段）。
+                effect.InjectByFramework(
+                    target!, viewType!, inject.EventId, handler, inject.Priority, inject.BandName);
             }
             catch (Exception ex)
             {

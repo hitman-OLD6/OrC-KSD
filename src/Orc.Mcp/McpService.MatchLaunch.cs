@@ -1,4 +1,5 @@
-using System.Text.Json.Nodes;
+﻿using System.Text.Json.Nodes;
+using Orc.Foundation.Actions;
 using Orc.Game;
 using Orc.Game.Cards;
 using Orc.Game.Collections;
@@ -52,6 +53,7 @@ public sealed partial class McpService
 
         // 进程级资产（词条/组件注册面）：预检与卡数据装载都依赖它，须早于装载。
         BuiltInPlugin.RegisterProcessDefaults();
+        FoundationActions.Register();
         NoteProcessStateChange("builtin.process-defaults（内置词条/组件进程级注册，幂等）");
 
         MatchContentLoadResult content;
@@ -83,9 +85,11 @@ public sealed partial class McpService
             effectRegistry.DeclarePrefab(cardId, prefabIds);
         }
 
+        // P5b：底层逻辑集包随核心包同批装载（依赖 orc.builtin.core ⇒ 解析/装配序在前）。
         var packageActivator = new SnapshotPackageActivator(AssetCatalogSnapshot.FromPackages(new[]
         {
             BuiltInPluginPackage.Load(Options.PluginsRoot),
+            FoundationActionsPluginPackage.Load(Options.PluginsRoot),
             Orc.UI.UiPluginPackage.Load(Options.PluginsRoot),
         }));
 

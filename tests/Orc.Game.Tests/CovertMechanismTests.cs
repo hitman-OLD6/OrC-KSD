@@ -115,7 +115,7 @@ public class CovertMechanismTests
 
         // 读取面降级：null/非隐蔽卡＝false 降级、不抛错。
         Assert.False(CovertRules.IsCovert(null));
-        var command = new CommandCard(
+        var command = new OrderCard(
             engine,
             new CardDefinition("指令", 1, 0, 0, 0, CardCategory.Command, faction: Faction.Germany, rarity: Rarity.Standard));
         Assert.False(CovertRules.IsCovert(command));
@@ -659,7 +659,7 @@ public class CovertMechanismTests
         Assert.Equal(updatesBefore, recorder.Updates.Count); // 零新增（无任何信号）
 
         // 非单位（指令卡）＝NoOp（经 EffectRuntime 门面——降级不抛错）。
-        var commandCard = (CommandCard)match.CardLibrary.Instantiate(CommandTestKit.CommandCardId);
+        var commandCard = (OrderCard)match.CardLibrary.Instantiate(CommandTestKit.OrderCardId);
         await commandCard.LoadAsync(playerA);
         var commandRuntime = EffectRuntime.ResolveFor(commandCard);
         Assert.NotNull(commandRuntime);

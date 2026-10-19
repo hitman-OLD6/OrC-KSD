@@ -76,7 +76,7 @@ internal static class CommandTestKit
     public const string AmbushBomberId = "u_ambbmb";
 
     /// <summary>轻指令（部署费 1——打出链终局门禁用例）。</summary>
-    public const string CommandCardId = "u_cmd";
+    public const string OrderCardId = "u_cmd";
 
     /// <summary>轻反制（部署费 1——反制终局门禁用例）。</summary>
     public const string CounterCardId = "u_cnt";
@@ -107,7 +107,7 @@ internal static class CommandTestKit
         new CardDefinitionEntry(MixAirId, new CardDefinition("混成空军", 1, 1, 2, 5, unitTypes: new[] { UnitType.Artillery, UnitType.Bomber }, faction: Faction.Germany, rarity: Rarity.Standard)),
         new CardDefinitionEntry(AmbushFighterId, new CardDefinition("伏击战斗机", 1, 1, 5, 2, unitTypes: new[] { UnitType.Fighter }, keywords: new[] { new KeywordDeclaration(KeywordIds.Ambush) }, faction: Faction.Germany, rarity: Rarity.Standard)),
         new CardDefinitionEntry(AmbushBomberId, new CardDefinition("伏击轰炸机", 1, 1, 4, 2, unitTypes: new[] { UnitType.Bomber }, keywords: new[] { new KeywordDeclaration(KeywordIds.Ambush) }, faction: Faction.Germany, rarity: Rarity.Standard)),
-        new CardDefinitionEntry(CommandCardId, new CardDefinition("轻指令", 1, 0, 0, 0, CardCategory.Command, faction: Faction.Germany, rarity: Rarity.Standard)),
+        new CardDefinitionEntry(OrderCardId, new CardDefinition("轻指令", 1, 0, 0, 0, CardCategory.Command, faction: Faction.Germany, rarity: Rarity.Standard)),
         new CardDefinitionEntry(CounterCardId, new CardDefinition("轻反制", 1, 0, 0, 0, CardCategory.Counter, faction: Faction.Germany, rarity: Rarity.Standard)),
         new CardDefinitionEntry(FuryTankId, new CardDefinition("奋击坦克", 1, 1, 2, 5, unitTypes: new[] { UnitType.Tank }, keywords: new[] { new KeywordDeclaration(KeywordIds.Fury) }, faction: Faction.Germany, rarity: Rarity.Standard)),
     };

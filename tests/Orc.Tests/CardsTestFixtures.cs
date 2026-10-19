@@ -6,8 +6,9 @@ using Orc.Core;
 namespace Orc.Tests;
 
 /// <summary>
-/// 场景 2『攻击时回血』效果：被动效果——OnMount 中把「回血 handler」经 Inject 注入攻击流程的 Resolve band
-/// （位置语义＝攻击结算完成时：同 band 内以 priority=100 排于默认「伤害结算」事件之后、Finalize band 之前）。
+/// 场景 2『攻击时回血』效果：被动效果——OnMount 中把「回血 handler」经 Inject 注入
+/// 内核唯一流程（<see cref="OrderFlow"/>）的 Resolve band（位置语义＝结算完成时：同 band 内以 priority=100
+/// 排于默认「施放结算」之后、Finalize band 之前；P5 删除 AttackFlow 后以指令流程作为内核流程驱动器）。
 /// 同时记录钩子次数/次序信号/上下文可获得性等观察点（供 D 组断言）。
 /// </summary>
 public sealed class AttackHealEffect : PassiveEffect
@@ -43,7 +44,7 @@ public sealed class AttackHealEffect : PassiveEffect
         SawPlacedAtMount = Host.IsPlaced;
         MountHp = Host.GetData<HealthData>().Hp;
         _lastInjection = Inject(
-            _engine.AttackFlow.Trigger, "回血", AttackFlowBands.Resolve, OnAttackResolve, priority: 100);
+            _engine.OrderFlow.Trigger, "回血", OrderFlowBands.Resolve, OnFlowResolve, priority: 100);
     }
 
     protected override void OnUnmount()
@@ -58,15 +59,15 @@ public sealed class AttackHealEffect : PassiveEffect
 
     public bool InjectionRefCleared => _lastInjection is null;
 
-    private Task OnAttackResolve(AttackFlowView view, Context ctx, CancellationToken ct)
+    private Task OnFlowResolve(OrderFlowView view, Context ctx, CancellationToken ct)
     {
         if (!ReferenceEquals(view.Source, Host))
         {
-            return Task.CompletedTask; // 只响应本宿主发起的攻击（多单位隔离）
+            return Task.CompletedTask; // 只响应本宿主发起的动作（多单位隔离）
         }
 
         HealCount++;
-        TargetHpAtHealTime = view.Target.GetData<HealthData>().Hp; // 伤害已生效的状态观测
+        TargetHpAtHealTime = view.Target?.GetData<HealthData>().Hp; // 结算已生效的状态观测
         Host.GetData<HealthData>().Hp += _amount;
         _engine.RootStream.WriteLog(
             "测试效果/攻击时回血",
@@ -166,19 +167,23 @@ public class OrderView
     public virtual int Amount { get; set; }
 }
 
-/// <summary>伤害指令（主动效果施放用例）：施放事件 → 对目标调用伤害结算流程（复用同一伤害结算）。</summary>
+/// <summary>
+/// 伤害指令（主动效果施放用例）：施放事件 → 直接扣减目标生命（P5：DamageFlow 删除后，
+/// 内核测试不再有独立伤害流程；伤害数值本身由游戏层动作实体承载，此处保留原可观测口径：
+/// 先写「结算前」条目、再写「伤害生效」条目并扣血）。
+/// </summary>
 public sealed class DamageOrder : ActiveEffect<OrderView>
 {
-    private readonly DamageFlow _damageFlow;
+    private readonly LogicEngine _engine;
 
     public int CastCount;
     public int MountCount;   // 主动效果不应被调用（恒 0）
     public int UnmountCount; // 主动效果不应被调用（恒 0）
 
-    public DamageOrder(DamageFlow damageFlow, string name = "火球术")
+    public DamageOrder(LogicEngine engine, string name = "火球术")
         : base(name)
     {
-        _damageFlow = damageFlow;
+        _engine = engine;
         CastTrigger.Register("施放", OnCast);
     }
 
@@ -189,7 +194,59 @@ public sealed class DamageOrder : ActiveEffect<OrderView>
     private Task OnCast(OrderView view, Context ctx, CancellationToken ct)
     {
         CastCount++;
-        return _damageFlow.ResolveAsync(view.Source, view.Target, view.Amount, ct);
+        KernelFlow.ApplyDamage(_engine, view.Target, view.Amount);
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>
+/// 内核流程驱动器（P5）：<c>AttackFlow</c>／<c>DamageFlow</c> 删除后，内核测试以唯一保留的
+/// <see cref="OrderFlow"/> 作为「流程注入 → handler 执行」的驱动器，并以一次性主动效果承载数值落地。
+/// </summary>
+internal static class KernelFlow
+{
+    /// <summary>驱动一次「攻击」等价流程：来源发起 → 施放结算（扣目标生命）→ 注入 handler（回血等）。</summary>
+    internal static Task<EventStream> AttackAsync(LogicEngine engine, Card source, Card target, int amount)
+        => engine.OrderFlow.ExecuteAsync(source, new DirectDamageCast(engine, target, amount), target, amount);
+
+    /// <summary>伤害落地（原 DamageFlow 的同序可观测口径：结算前 → 伤害生效）。</summary>
+    internal static void ApplyDamage(LogicEngine engine, Card target, int amount)
+    {
+        var damage = Math.Max(0, amount);
+        engine.RootStream.WriteLog(
+            "damage-flow", $"结算前：待结算伤害 {damage}。", LogLevel.Info, new[] { "damage", "preapply", target.Name });
+
+        var health = target.GetData<HealthData>();
+        var before = health.Hp;
+        health.Hp -= damage;
+        engine.RootStream.WriteLog(
+            "damage-flow",
+            $"伤害生效：'{target.Name}' 承受 {damage}（HP {before}→{health.Hp}）。",
+            LogLevel.Info,
+            new[] { "damage", "apply", target.Name });
+    }
+
+    /// <summary>一次性伤害施放动作（不入效果列表；仅作为流程的主动效果载荷）。</summary>
+    private sealed class DirectDamageCast : ActiveEffect<OrderView>
+    {
+        private readonly LogicEngine _engine;
+        private readonly Card _target;
+        private readonly int _amount;
+
+        internal DirectDamageCast(LogicEngine engine, Card target, int amount)
+            : base("直接伤害")
+        {
+            _engine = engine;
+            _target = target;
+            _amount = amount;
+            CastTrigger.Register("施放", OnCast);
+        }
+
+        private Task OnCast(OrderView view, Context ctx, CancellationToken ct)
+        {
+            ApplyDamage(_engine, _target, _amount);
+            return Task.CompletedTask;
+        }
     }
 }
 
