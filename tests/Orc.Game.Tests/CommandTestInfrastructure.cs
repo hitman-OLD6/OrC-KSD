@@ -185,9 +185,17 @@ internal static class CommandTestKit
     /// <summary>“激活”单位（置两 bool——模拟本回合可行动状态；供不经回合恢复的用例）。</summary>
     public static void Activate(UnitCard unit, bool canMove = true, bool canAttack = true)
     {
+        KeywordRules.ResetActionQuotas(unit);
         var command = unit.GetData<CommandData>();
-        command.CanMove = canMove;
-        command.CanAttack = canAttack;
+        if (!canMove)
+        {
+            command.SetMoveQuota(0);
+        }
+
+        if (!canAttack)
+        {
+            command.SetAttackQuota(0);
+        }
     }
 
     // ---------- 候选脚本（前端提交超集：全槽位＋全单位引用） ----------

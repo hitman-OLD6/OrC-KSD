@@ -670,16 +670,12 @@ public sealed class BlitzDeployEffect
     /// </summary>
     internal static Task HandleDeploySetAsync(CardEventView view, Context ctx, CancellationToken ct)
     {
-        if (view.Unit is not Card deployed || !ReferenceEquals(deployed, view.Host))
+        if (view.Unit is not UnitCard deployed || !ReferenceEquals(deployed, view.Host))
         {
             return Task.CompletedTask; // 非本单位部署：不处理（Host==载荷过滤——其他单位部署不误置位）
         }
 
-        if (deployed.TryGetData<CommandData>(out var command))
-        {
-            command.CanMove = true; // 置位（覆盖部署初值 false/false；重复信号幂等——已是 true 再置 true 无副作用）
-            command.CanAttack = true;
-        }
+        KeywordRules.ResetActionQuotas(deployed); // 置额度（覆盖部署初值 0/0；重复信号幂等）
 
         return Task.CompletedTask; // 无 CommandData（防御——非单位/未单位化）：跳过、不抛错
     }

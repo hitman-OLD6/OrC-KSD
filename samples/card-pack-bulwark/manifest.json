@@ -1,0 +1,9 @@
+{
+  "kind": "cardpack",
+  "id": "orc.bulwark",
+  "name": "铜墙铁壁系列",
+  "guid": "0c7a0000-0000-4000-8000-000000000001",
+  "version": "1.0.0",
+  "dependsOn": [],
+  "assets": []
+}

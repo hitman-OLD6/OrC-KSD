@@ -28,6 +28,10 @@ public static class JudicatorNames
     /// <summary>攻击复验（单位攻击验证点专属；执行前兜底复验——与移动复验相互独立改写）。</summary>
     public const string AttackRecheck = "validation.attack.recheck";
 
+    /// <summary>抑制资格判定（签名＝（目标单位）→ <c>InhibitEligibilityFailure?</c>〔null＝可抑制〕）：
+    /// 默认只判死亡与内建「无法被抑制」；固守等词条经 <c>judicatorWrappers</c> 自注册改写（返回 <c>Immune</c>）。</summary>
+    public const string InhibitLegEligibility = "inhibit.leg.eligibility";
+
     // ---------- J3（两示范落地）：示范判定器（两条；注册经既有装配期注册面〔外部装配段〕——见 J3 实现记录） ----------
 
     /// <summary>卡组顶特点判定（示范①；签名＝（玩家，特点标识）→ bool）：默认按真实卡组顶求值（TagData 开放 tag）；

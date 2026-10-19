@@ -13,7 +13,7 @@
         {
           "id": "onUnitDeployed",
           "entry": "HandleAsync",
-          "csx": "// 闪击·部署置位（csx 行为引用样本）：unit.deployed → Host==载荷单位 → 置位 CanMove/CanAttack。\nFunc<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleAsync = (view, ctx, ct) =>\n{\n    if (view.Unit is not Orc.Cards.Card deployed || !object.ReferenceEquals(deployed, view.Host))\n    {\n        return Task.CompletedTask; // 非本单位部署：不处理（Host==载荷过滤）\n    }\n\n    if (deployed.TryGetData<Orc.Game.Cards.CommandData>(out var command))\n    {\n        command.CanMove = true; // 置位（覆盖部署初值 false/false；重复信号幂等）\n        command.CanAttack = true;\n    }\n\n    return Task.CompletedTask; // 无 CommandData（防御）：跳过、不抛错\n};\n",
+          "csx": "// 闪击·部署置位（csx 行为引用样本）：unit.deployed → Host==载荷单位 → 置位 CanMove/CanAttack。\nFunc<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleAsync = (view, ctx, ct) =>\n{\n    if (view.Unit is not Orc.Cards.Card deployed || !object.ReferenceEquals(deployed, view.Host))\n    {\n        return Task.CompletedTask; // 非本单位部署：不处理（Host==载荷过滤）\n    }\n\n    if (deployed.TryGetData<Orc.Game.Cards.CommandData>(out var command))\n    {\n        command.ResetQuotas(1, 1); // 置额度（覆盖部署初值 0/0；重复信号幂等）\n    }\n\n    return Task.CompletedTask; // 无 CommandData（防御）：跳过、不抛错\n};\n",
           "version": 1
         }
       ],

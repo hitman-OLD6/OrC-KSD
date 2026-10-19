@@ -278,6 +278,7 @@ public class UnitCard : CardBase
         state.Position = slot;
         unit.AddData(state);
         unit.AddData(new CommandData());
+        unit.AddData(new ActionRecordData());
         slot.Place(unit);
 
         // W2b G3 接线：装配完成点请求跑链一次（首轮——以基准状态建立比较基线；本时点无修饰/无损伤＝零变化、零发射）。

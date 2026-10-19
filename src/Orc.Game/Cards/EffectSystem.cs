@@ -264,7 +264,10 @@ internal static class CardEffectLoader
 
             var instantiatedEffect = instantiation.Effect!;
             card.AddEffect(instantiatedEffect); // Add 即装载（被动：挂载动态触发器；主动：列表进出）
-            ApplyFrameworkInjects(card, engine, snapshot, instantiatedEffect); // S5：injects 声明落地
+            if (snapshot is not null)
+            {
+                ApplyFrameworkDeclarations(card, engine, snapshot, instantiatedEffect); // injects ＋ judicatorWrappers
+            }
         }
 
         // ④ 装载兜底（幂等——Add 即装载后多为跳过；对装载失败回滚者＝重试装载；失败＝回滚为未生效、记录、不阻断）。
@@ -292,6 +295,13 @@ internal static class CardEffectLoader
     /// 取本效果内对应事件的 handler、注册进目标触发器默认区段（卸载随效果自动撤销）。
     /// 失败（非动态被动效果／区段非默认／目标未登记／事件无 handler）＝隔离记录、不阻断。
     /// </summary>
+    internal static void ApplyFrameworkDeclarations(
+        CardBase card, LogicEngine engine, EffectSnapshot snapshot, Effect effect)
+    {
+        ApplyFrameworkInjects(card, engine, snapshot, effect);
+        ApplyJudicatorWrappers(card, engine, snapshot, effect);
+    }
+
     private static void ApplyFrameworkInjects(
         CardBase card, LogicEngine engine, EffectSnapshot? snapshot, Effect effect)
     {
@@ -317,7 +327,22 @@ internal static class CardEffectLoader
                 continue;
             }
 
-            if (!dynamic.TryGetEventHandler(inject.EventId, out var handler) || handler is null)
+            // handler 解析：csx 事件按**目标视图类型**重新求值（支持跨视图注入，如 CardEventView 效果注入 ActionQuotaView）；
+            // 程序集来源沿用效果实例已绑定的处理器。
+            Delegate? handler = null;
+            var eventPrefab = FindEventPrefab(snapshot.Root, inject.EventId);
+            if (eventPrefab?.CsxSource is { Length: > 0 } csx && engine.ScriptEvaluator is { } evaluator)
+            {
+                var evaluated = evaluator.Evaluate(
+                    new ScriptRequest(csx, eventPrefab.EntryName, viewType!));
+                if (evaluated.Success)
+                {
+                    handler = evaluated.Handler;
+                }
+            }
+
+            handler ??= dynamic.TryGetEventHandler(inject.EventId, out var boundHandler) ? boundHandler : null;
+            if (handler is null)
             {
                 WriteInjectError(engine, card, $"注入事件 '{inject.EventId}' 无 handler（隔离）。", inject.EventId);
                 continue;
@@ -332,6 +357,100 @@ internal static class CardEffectLoader
             catch (Exception ex)
             {
                 WriteInjectError(engine, card, $"注入失败（隔离）：{ex.Message}", inject.EventId);
+            }
+        }
+    }
+
+    /// <summary>在效果快照内按事件 id 查找事件预制体（主触发器/其它触发器/disposing）。</summary>
+    private static EventPrefab? FindEventPrefab(EffectPrefab root, string eventId)
+    {
+        foreach (var trigger in root.OtherTriggers.Prepend(root.MainTrigger).Append(root.DisposingTrigger))
+        {
+            foreach (var prefab in trigger.Events)
+            {
+                if (string.Equals(prefab.Id, eventId, StringComparison.Ordinal))
+                {
+                    return prefab;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 判定器包装器落地（效果自注册）：按 <c>judicatorWrappers</c> 声明求值同步 csx，注册到指定判定器
+    /// （默认域；运行时 args 末尾追加宿主卡），随效果 teardown 自动注销。失败＝隔离记录、不阻断。
+    /// </summary>
+    private static void ApplyJudicatorWrappers(
+        CardBase card, LogicEngine engine, EffectSnapshot? snapshot, Effect effect)
+    {
+        if (snapshot is null || snapshot.Root.JudicatorWrappers.Count == 0)
+        {
+            return;
+        }
+
+        var judicators = engine.Judicators;
+        if (judicators is null)
+        {
+            WriteInjectError(engine, card, "判定器注册表未装配（judicatorWrappers 跳过）。", "judicator");
+            return;
+        }
+
+        var evaluator = engine.SyncScriptEvaluator;
+        if (evaluator is null)
+        {
+            WriteInjectError(engine, card, "同步脚本求值器未装配（judicatorWrappers 跳过）。", "judicator");
+            return;
+        }
+
+        foreach (var declaration in snapshot.Root.JudicatorWrappers)
+        {
+            var source = declaration.Handler.CsxSource;
+            if (string.IsNullOrWhiteSpace(source))
+            {
+                WriteInjectError(engine, card, "judicatorWrapper 缺少 csx 源码（隔离）。", declaration.JudicatorName);
+                continue;
+            }
+
+            var evaluated = evaluator.Evaluate(new SyncScriptRequest(source, declaration.Handler.EntryName));
+            if (!evaluated.Success || evaluated.Handler is null)
+            {
+                WriteInjectError(
+                    engine, card,
+                    $"judicatorWrapper 求值失败（隔离）：[{evaluated.ErrorCategory}] {evaluated.Error}",
+                    declaration.JudicatorName);
+                continue;
+            }
+
+            try
+            {
+                var entry = judicators.Resolve(declaration.JudicatorName);
+                var handler = evaluated.Handler;
+                Func<object[]?, object[]?, object[]?> bound = (args, result) =>
+                {
+                    var extended = new object?[(args?.Length ?? 0) + 1];
+                    if (args is not null)
+                    {
+                        Array.Copy(args, extended, args.Length);
+                    }
+
+                    extended[^1] = card; // 约定：args 末尾＝宿主卡
+                    return handler(extended, result);
+                };
+
+                var registration = declaration.Phase switch
+                {
+                    "before" => judicators.RegisterBeforeWrapper(entry, a => bound(a, null)),
+                    "replace" => judicators.RegisterReplaceWrapper(entry, a => bound(a, null)),
+                    _ => judicators.RegisterAfterWrapper(entry, bound),
+                };
+                effect.AddTeardownRegistration(() => judicators.UnregisterWrapper(registration));
+            }
+            catch (Exception ex)
+            {
+                WriteInjectError(
+                    engine, card, $"judicatorWrapper 注册失败（隔离）：{ex.Message}", declaration.JudicatorName);
             }
         }
     }

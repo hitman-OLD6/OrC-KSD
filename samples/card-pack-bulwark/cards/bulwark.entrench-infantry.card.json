@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "bulwark.entrench-infantry",
+  "name": "固守步兵",
+  "components": [
+    { "component": "typeCategory", "type": ["infantry"] },
+    { "component": "factionCost", "faction": "germany", "kredits": 2 },
+    { "component": "battleStats", "operationCost": 2, "attack": 3, "defense": 5 },
+    { "component": "tagData", "rarity": "standard" },
+    { "component": "keywords", "keywords": ["固守"] }
+  ]
+}

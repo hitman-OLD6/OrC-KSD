@@ -22,8 +22,8 @@ internal interface IOperateEntryServices
     /// <summary>扣除行动费（行动方、恰一次；读行动费有效值）。</summary>
     Task DeductOperateCostAsync(UnitCard unit, CancellationToken ct = default);
 
-    /// <summary>写入两个行动位布尔（只落值；规则由入口算）。</summary>
-    Task SetOperateFlagsAsync(UnitCard unit, bool canMove, bool canAttack, CancellationToken ct = default);
+    /// <summary>按本次动作消耗额度（只落值；规则由入口算——非坦克两额度各减一、坦克只减对应）。</summary>
+    Task ConsumeOperateQuotaAsync(UnitCard unit, bool isMove, bool isTank, CancellationToken ct = default);
 
     /// <summary>发射 <c>unit.acted</c>（行动层信号；处理端不得发射）。</summary>
     Task EmitActedAsync(UnitCard unit, CancellationToken ct = default);
@@ -33,11 +33,11 @@ internal interface IOperateEntryServices
 /// 入口收尾差异（S5）：移动/攻击入口把差异编码为本结构后交给 <see cref="OperateFinalizer"/>。
 /// </summary>
 /// <param name="DeductCost">是否扣行动费。</param>
-/// <param name="CanMove">收尾后的移动位值。</param>
-/// <param name="CanAttack">收尾后的攻击位值。</param>
+/// <param name="IsMove">本次动作是否为移动（false＝攻击）。</param>
+/// <param name="IsTank">单位是否为坦克（决定额度消耗规则：非坦克两额度各减一、坦克只减对应）。</param>
 /// <param name="EmitActed">是否发射 <c>unit.acted</c>（仍受「已阵亡不发射」约束）。</param>
 internal readonly record struct OperateProfile(
-    bool DeductCost, bool CanMove, bool CanAttack, bool EmitActed);
+    bool DeductCost, bool IsMove, bool IsTank, bool EmitActed);
 
 /// <summary>
 /// 行动入口的统一收尾单元（S5）：移动/攻击入口只构造 <see cref="OperateProfile"/>，
@@ -61,7 +61,7 @@ internal sealed class OperateFinalizer
             await _services.DeductOperateCostAsync(unit, ct).ConfigureAwait(false);
         }
 
-        await _services.SetOperateFlagsAsync(unit, profile.CanMove, profile.CanAttack, ct).ConfigureAwait(false);
+        await _services.ConsumeOperateQuotaAsync(unit, profile.IsMove, profile.IsTank, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -86,11 +86,14 @@ internal sealed class OperateFinalizer
 internal sealed class OperateEntryServices : IOperateEntryServices
 {
     private readonly LogicEngine _engine;
+    private readonly Trigger<ActionQuotaView> _quotaTrigger;
 
-    internal OperateEntryServices(LogicEngine engine)
+    internal OperateEntryServices(LogicEngine engine, Trigger<ActionQuotaView> quotaTrigger)
     {
         ArgumentNullException.ThrowIfNull(engine);
+        ArgumentNullException.ThrowIfNull(quotaTrigger);
         _engine = engine;
+        _quotaTrigger = quotaTrigger;
     }
 
     /// <inheritdoc />
@@ -98,13 +101,34 @@ internal sealed class OperateEntryServices : IOperateEntryServices
         => OperateCosts.DeductAsync(unit, ct);
 
     /// <inheritdoc />
-    public Task SetOperateFlagsAsync(
-        UnitCard unit, bool canMove, bool canAttack, CancellationToken ct = default)
+    public async Task ConsumeOperateQuotaAsync(
+        UnitCard unit, bool isMove, bool isTank, CancellationToken ct = default)
     {
         var command = unit.GetData<CommandData>();
-        command.CanMove = canMove;
-        command.CanAttack = canAttack;
-        return Task.CompletedTask;
+        var (moveDelta, attackDelta) = isTank
+            ? (isMove ? (-1, 0) : (0, -1))
+            : (-1, -1);
+
+        // 额度消耗的可改写点：默认方案先落数据面，注入 handler（如「机动」）就地改写后应用。
+        var data = new Dictionary<string, object?>
+        {
+            ["Unit"] = unit,
+            ["IsMove"] = isMove,
+            ["IsTank"] = isTank,
+            ["MoveDelta"] = moveDelta,
+            ["AttackDelta"] = attackDelta,
+        };
+        await _quotaTrigger.InvokeAsync(_engine, data, ct).ConfigureAwait(false);
+
+        var finalMove = data.TryGetValue("MoveDelta", out var move) && move is int moved ? moved : moveDelta;
+        var finalAttack = data.TryGetValue("AttackDelta", out var attack) && attack is int attacked ? attacked : attackDelta;
+        command.SetMoveQuota(command.MoveQuota + finalMove);
+        command.SetAttackQuota(command.AttackQuota + finalAttack);
+
+        if (!isMove)
+        {
+            UnitTurnStatsTracker.RecordAttack(unit, OperateCosts.Effective(unit)); // 攻击仅指挥路径计入统计
+        }
     }
 
     /// <inheritdoc />

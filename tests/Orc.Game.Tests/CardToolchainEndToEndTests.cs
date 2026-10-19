@@ -346,8 +346,7 @@ public class CardToolchainEndToEndTests
             if (view.Unit is UnitCard joined && ReferenceEquals(joined, view.Host))
             {
                 var command = joined.GetData<CommandData>();
-                command.CanMove = true;
-                command.CanAttack = true;
+                command.ResetQuotas(1, 1);
             }
 
             return Task.CompletedTask;
@@ -386,8 +385,7 @@ Func<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleAsync = (v
 
     if (deployed.TryGetData<Orc.Game.Cards.CommandData>(out var command))
     {
-        command.CanMove = true; // 置位（覆盖部署初值 false/false；重复信号幂等）
-        command.CanAttack = true;
+        command.ResetQuotas(1, 1); // 置额度（覆盖部署初值 0/0；重复信号幂等）
     }
 
     return Task.CompletedTask; // 无 CommandData（防御）：跳过、不抛错

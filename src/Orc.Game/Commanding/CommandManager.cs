@@ -97,7 +97,10 @@ public sealed class CommandManager
     private readonly HashSet<UnitCard> _guardedUnits = new();
     private readonly HashSet<Hq> _guardedHqs = new(); // W3-3：被守护 HQ 以 HQ 实体为单元
     private readonly PincerRegistry _pincers = new(); // A2：钳击关系注册表（对局级——一对一占用约束）
-    private readonly OperateFinalizer _operateFinalizer; // S5：行动入口收尾的统一调用者（扣费/写位/unit.acted）
+    private readonly OperateFinalizer _operateFinalizer; // S5：行动入口收尾的统一调用者（扣费/额度/unit.acted）
+
+    /// <summary>行动额度触发器（对局级；供效果预制体经 <c>injects</c> 注入额度改写 handler）。</summary>
+    public Trigger<ActionQuotaView> ActionQuotaTrigger { get; }
     private readonly MatchActionServices _actionServices; // S4：动作服务面（对局级单实例——五个动作共用）
 
     /// <summary>
@@ -169,8 +172,10 @@ public sealed class CommandManager
         _retrigger = retrigger;
         _validationJudicatorResolver = validationJudicatorResolver;
 
-        // S5：行动状态（费用/CanMove/CanAttack/unit.acted）只经本收尾单元写；入口只算差异（OperateProfile）。
-        _operateFinalizer = new OperateFinalizer(new OperateEntryServices(engine));
+        // S5：行动状态（费用/额度/unit.acted）只经本收尾单元写；入口只算差异（OperateProfile）。
+        // 行动额度触发器：额度消耗的可改写点（效果经 injects 注入 handler——如「机动」使攻击额度消耗减一）。
+        ActionQuotaTrigger = new Trigger<ActionQuotaView>("行动额度触发器");
+        _operateFinalizer = new OperateFinalizer(new OperateEntryServices(engine, ActionQuotaTrigger));
 
         // K1 加性（A 档 C1-C4：交战合法性判定族）：目标合法性判定通道——对局路径＝注入的条目调用委托
         // （经注册表条目句柄——每次调用经统一解析点，moding 动态生效、候选/复验两链同步）；
@@ -972,10 +977,7 @@ public sealed class CommandManager
                 continue;
             }
 
-            var command = unit.GetData<CommandData>();
-            command.CanMove = true;
-            command.CanAttack = true;
-            KeywordRules.ResetTurnCounters(unit);
+            KeywordRules.ResetActionQuotas(unit);
         }
     }
 
@@ -1156,12 +1158,11 @@ public sealed class CommandManager
         }
 
         // 外层收尾（执行成功后）：扣费 → 两 bool 更新 → unit.acted（恰一次、只在外层；经 S5 统一收尾单元）
-        var command = unit.GetData<CommandData>();
         var isTank = HasUnitType(unit, UnitType.Tank);
         var profile = new OperateProfile(
             DeductCost: true,
-            CanMove: false,
-            CanAttack: isTank ? command.CanAttack : false, // 非坦克二选一：清攻击位（坦克仅清移动位）
+            IsMove: true,
+            IsTank: isTank,
             EmitActed: true);
 
         await _operateFinalizer.FinalizeAsync(unit, profile, ct);
@@ -1187,14 +1188,11 @@ public sealed class CommandManager
         }
 
         // 外层收尾（执行成功后；攻击者死亡不豁免）：扣费 → 两 bool 更新 → unit.acted（恰一次、只在外层；经 S5 统一收尾单元）
-        var command = unit.GetData<CommandData>();
         var isTank = HasUnitType(unit, UnitType.Tank);
         var profile = new OperateProfile(
             DeductCost: true,
-            CanMove: isTank ? command.CanMove : false, // 非坦克二选一：清移动位（坦克仅更新攻击位）
-            CanAttack: KeywordRules.ResolveCanAttackAfterAttack(unit)
-                || KeywordProgramRuntime.Components(unit).Any(
-                    c => c.Attacks<KeywordProgramRuntime.Resolve(unit, "attack.limit", 1)),
+            IsMove: false,
+            IsTank: isTank,
             EmitActed: true);
 
         await _operateFinalizer.FinalizeAsync(unit, profile, ct);

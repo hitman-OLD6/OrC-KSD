@@ -110,8 +110,7 @@ public class CardDataComponentTests
         Assert.False(command.CanMove); // 初始 false/false
         Assert.False(command.CanAttack);
 
-        command.CanMove = true;
-        command.CanAttack = true;
+        command.ResetQuotas(1, 1);
         Assert.True(command.CanMove);
         Assert.True(command.CanAttack);
     }

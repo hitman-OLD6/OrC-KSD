@@ -50,6 +50,44 @@ public class CommandTriggerView
 }
 
 /// <summary>
+/// 行动额度触发器视图（额度消耗改写面）：<see cref="Unit"/>/<see cref="IsMove"/>/<see cref="IsTank"/> 只读；
+/// <see cref="MoveDelta"/>/<see cref="AttackDelta"/> 可写（注入 handler 就地改写本次额度消耗；默认＝非坦克 −1/−1、坦克 −1/0 或 0/−1）。
+/// </summary>
+[ContextView]
+public class ActionQuotaView
+{
+    /// <summary>行动单位（可选；值＝单位卡对象）。</summary>
+    [Optional]
+    [Read]
+    public virtual Card? Unit { get; set; }
+
+    /// <summary>本次动作是否为移动（false＝攻击）。</summary>
+    [Optional]
+    [Read]
+    public virtual bool IsMove { get; set; }
+
+    /// <summary>单位是否为坦克（额度消耗规则差异）。</summary>
+    [Optional]
+    [Read]
+    public virtual bool IsTank { get; set; }
+
+    /// <summary>本次移动额度变化量（可改写；默认 −1 或 0）。</summary>
+    [Optional]
+    [Mutate]
+    public virtual int MoveDelta { get; set; }
+
+    /// <summary>本次攻击额度变化量（可改写；默认 −1 或 0）。</summary>
+    [Optional]
+    [Mutate]
+    public virtual int AttackDelta { get; set; }
+
+    /// <summary>效果宿主卡（框架注入；inject 型 handler 取"本单位"用）。</summary>
+    [Optional]
+    [Read]
+    public virtual object? Host { get; set; }
+}
+
+/// <summary>
 /// 单位移动触发器视图（2C）：<see cref="Unit"/>＝移动单位引用；<see cref="OldPosition"/>＝原槽位引用；
 /// <see cref="NewPosition"/>＝目标槽位引用（分派时选中的目标空槽）——均引用形态、与 unit.position.changed 载荷同口径。
 /// 全可选；数据键＝属性名。

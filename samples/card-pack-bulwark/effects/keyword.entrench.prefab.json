@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 3,
+  "root": {
+    "id": "keyword.entrench",
+    "version": 1,
+    "mainTrigger": {
+      "id": "t.main",
+      "stableKey": "固守·不可移动",
+      "kind": "passive",
+      "viewType": "Orc.Cards.CardEventView",
+      "hooks": ["card.destroyed"],
+      "events": []
+    },
+    "otherTriggers": [],
+    "wrappers": [],
+    "injects": [],
+    "judicatorWrappers": [
+      {
+        "judicator": "move.leg.eligibility",
+        "phase": "after",
+        "handler": {
+          "id": "onMoveCheck",
+          "entry": "Handle",
+          "csx": "Func<object[], object[], object[]> Handle = (args, result) =>\n{\n    if (args is null || result is null || args.Length < 2) { return result; }\n\n    var unit = args[0] as Orc.Game.Cards.UnitCard;\n    var host = args[args.Length - 1] as Orc.Game.Cards.UnitCard;\n    if (!object.ReferenceEquals(unit, host)) { return result; }\n\n    // 固守：不能执行指挥移动（含撤退）。\n    return new object[] { Orc.Game.Judicators.LegEligibilityFailure.FlagFalse };\n};\n",
+          "version": 1
+        }
+      },
+      {
+        "judicator": "inhibit.leg.eligibility",
+        "phase": "after",
+        "handler": {
+          "id": "onInhibitCheck",
+          "entry": "Handle",
+          "csx": "Func<object[], object[], object[]> Handle = (args, result) =>\n{\n    if (args is null || result is null || args.Length < 1) { return result; }\n\n    var target = args[0] as Orc.Game.Cards.UnitCard;\n    var host = args[args.Length - 1] as Orc.Game.Cards.UnitCard;\n    if (!object.ReferenceEquals(target, host)) { return result; }\n\n    // 固守：不可被抑制。\n    return new object[] { Orc.Game.Judicators.InhibitEligibilityFailure.Immune };\n};\n",
+          "version": 1
+        }
+      }
+    ]
+  }
+}

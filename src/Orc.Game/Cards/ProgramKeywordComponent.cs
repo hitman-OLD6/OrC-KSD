@@ -81,7 +81,9 @@ public sealed class ProgramKeywordComponent : KeywordComponent
         var match=KeywordProgramRuntime.TryMatchFor(_host.Engine);
         var owner=Owner;
         if(match is null||owner is null)return;
-        var opponent=match.Players.FirstOrDefault(player=>!ReferenceEquals(player,owner));
+        // 装配链内部访问面：卡加载发生在 Initialize 的准备态，公共 Players/Judicators 受准备态门禁，
+        // 内部步骤改走内部面（对外契约不变）。
+        var opponent=match.AssemblyPlayers.FirstOrDefault(player=>!ReferenceEquals(player,owner));
         if(opponent is null)return;
 
         foreach(var rule in _program.Rules)
@@ -89,7 +91,7 @@ public sealed class ProgramKeywordComponent : KeywordComponent
             if(rule.Rule!="targeting.forbid")continue;
             if(NumberFor(rule.Value,_host)==0)continue;
             var declaration=new TargetingDeclaration(
-                match.Judicators,
+                match.AssemblyJudicators,
                 _host,
                 candidate=>Applies(rule.Scope,candidate),
                 ()=>OnBoard,
@@ -122,11 +124,11 @@ public sealed class ProgramKeywordComponent : KeywordComponent
         var match=KeywordProgramRuntime.TryMatchFor(_host.Engine);
         var owner=Owner;
         if(match is null||owner is null)return;
-        var opponent=match.Players.FirstOrDefault(player=>!ReferenceEquals(player,owner));
+        var opponent=match.AssemblyPlayers.FirstOrDefault(player=>!ReferenceEquals(player,owner));
         if(opponent is null)return;
 
         var declaration=new TargetingDeclaration(
-            match.Judicators,
+            match.AssemblyJudicators,
             _host,
             candidate=>ReferenceEquals(candidate,target),
             ()=>OnBoard,
@@ -238,8 +240,8 @@ public sealed class ProgramKeywordComponent : KeywordComponent
                         }break;
                     case "capture":
                         if(!_host.TryGetData<KeywordProgramData>(out var recorded)){recorded=new();_host.AddData(recorded);}recorded.Values[a.Key]=n;break;
-                    case "move.set":if(target.TryGetData<CommandData>(out var move))move.CanMove=n!=0;break;
-                    case "attack.set":if(target.TryGetData<CommandData>(out var attack))attack.CanAttack=n!=0;break;
+                    case "move.set":if(target.TryGetData<CommandData>(out var move))move.SetMoveQuota(n!=0?1:0);break;
+                    case "attack.set":if(target.TryGetData<CommandData>(out var attack))attack.SetAttackQuota(n!=0?1:0);break;
                     case "damage":await Runtime.DamageAsync(target,Math.Max(0,n),_host,ct);break;
                     case "kill":await Runtime.KillAsync(target,_host,ct);break;
                     case "health.set":
@@ -416,7 +418,7 @@ public sealed class ProgramKeywordComponent : KeywordComponent
             if(!await PrepareSelections(skill.Actions,ct,_host)||!CanUseCore(id,true))return false;
             var cost=Math.Max(0,Number(skill.Cost));
             if(cost>0)await Runtime.LosePointsAsync(_host,cost,ct,_host);
-            var command=_host.GetData<CommandData>();if(skill.SpendMove)command.CanMove=false;if(skill.SpendAttack)command.CanAttack=false;
+            var command=_host.GetData<CommandData>();if(skill.SpendMove)command.SetMoveQuota(0);if(skill.SpendAttack)command.SetAttackQuota(0);
             await Execute(skill.Actions,_host,null,ct);return true;
         }
         finally{_skillsRunning.Remove(id);_selection.Value=previous;}

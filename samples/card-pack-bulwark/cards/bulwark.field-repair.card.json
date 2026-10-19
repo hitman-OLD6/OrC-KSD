@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "bulwark.field-repair",
+  "name": "战地抢修班",
+  "components": [
+    { "component": "typeCategory", "type": ["infantry"] },
+    { "component": "factionCost", "faction": "germany", "kredits": 1 },
+    { "component": "battleStats", "operationCost": 1, "attack": 1, "defense": 2 },
+    { "component": "tagData", "rarity": "standard" },
+    { "component": "keywords", "keywords": ["抢修"] }
+  ]
+}

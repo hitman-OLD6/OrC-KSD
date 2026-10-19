@@ -54,7 +54,7 @@ public class KeywordComponentTests
             EffectLifecycleLog.Add("mount");
             if (Host is CardBase card && card.TryGetData<CommandData>(out var command))
             {
-                command.CanMove = true; // 行为生效（可观测载体：指挥状态置位）
+                command.SetMoveQuota(1); // 行为生效（可观测载体：指挥额度置位）
             }
         }
 
@@ -63,7 +63,7 @@ public class KeywordComponentTests
             EffectLifecycleLog.Add("unmount");
             if (Host is CardBase card && card.TryGetData<CommandData>(out var command))
             {
-                command.CanMove = false; // 行为失效（恢复）
+                command.SetMoveQuota(0); // 行为失效（恢复）
             }
         }
     }

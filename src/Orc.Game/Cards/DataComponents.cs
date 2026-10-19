@@ -114,17 +114,106 @@ public sealed class UnitStateData
 }
 
 /// <summary>
-/// 指挥组件：单位的指挥状态——可移动 / 可攻击（两 bool）；初始 false/false。
-/// 「两 bool 只在外层更新」（指挥系统批次）；翻转/置位逻辑属后批次（本批仅承载字段与读写）。
-/// 以引擎数据组件形态挂载；「单位化」时装配（实际挂载时机属后续批次）。
+/// 指挥组件：单位的指挥状态——移动额度 / 攻击额度（int）；初始 0/0。
+/// 额度为唯一真源：<see cref="CanMove"/> / <see cref="CanAttack"/> 为派生只读投影（&gt;0 即可用），
+/// 读取点（UI/AI/判定器/动作）语义不变。
+/// 「非坦克每次行动两额度各减一、坦克只减本次动作对应额度」由 <see cref="Consume"/> 承担；
+/// 回合恢复/部署置位经 <see cref="ResetQuotas"/>。以引擎数据组件形态挂载；「单位化」时装配。
 /// </summary>
 public sealed class CommandData
 {
-    /// <summary>可移动（初始 false）。</summary>
-    public bool CanMove { get; set; }
+    /// <summary>移动额度（初始 0）。</summary>
+    public int MoveQuota { get; private set; }
 
-    /// <summary>可攻击（初始 false）。</summary>
-    public bool CanAttack { get; set; }
+    /// <summary>攻击额度（初始 0）。</summary>
+    public int AttackQuota { get; private set; }
+
+    /// <summary>可移动（派生投影：移动额度 &gt; 0）。</summary>
+    public bool CanMove => MoveQuota > 0;
+
+    /// <summary>可攻击（派生投影：攻击额度 &gt; 0）。</summary>
+    public bool CanAttack => AttackQuota > 0;
+
+    /// <summary>重置两个额度（回合恢复/部署置位；负值钳制为 0）。</summary>
+    public void ResetQuotas(int move, int attack)
+    {
+        MoveQuota = Math.Max(0, move);
+        AttackQuota = Math.Max(0, attack);
+    }
+
+    /// <summary>设置移动额度（负值钳制为 0）。</summary>
+    public void SetMoveQuota(int value) => MoveQuota = Math.Max(0, value);
+
+    /// <summary>设置攻击额度（负值钳制为 0）。</summary>
+    public void SetAttackQuota(int value) => AttackQuota = Math.Max(0, value);
+
+    /// <summary>
+    /// 行动收尾消耗：非坦克**两个额度各减一**（不是清零）；坦克只减本次动作对应的额度。
+    /// </summary>
+    internal void Consume(bool isMove, bool isTank)
+    {
+        if (isTank)
+        {
+            if (isMove)
+            {
+                SetMoveQuota(MoveQuota - 1);
+            }
+            else
+            {
+                SetAttackQuota(AttackQuota - 1);
+            }
+
+            return;
+        }
+
+        SetMoveQuota(MoveQuota - 1);
+        SetAttackQuota(AttackQuota - 1);
+    }
+}
+
+/// <summary>
+/// 单位回合统计（本回合；每己方回合开始清零）：供词条与元效果读取（行动/移动/攻击次数、花费指挥点、累计受伤）。
+/// 写入面 internal（引擎订阅器与指挥收尾维护）；读面 public。
+/// 口径：移动＝任何位置变化（指挥/效果/撤退）；攻击＝仅玩家指挥；行动＝<c>unit.acted</c>。
+/// </summary>
+public sealed class ActionRecordData
+{
+    /// <summary>本回合指挥行动次数（unit.acted）。</summary>
+    public int TurnActions { get; internal set; }
+
+    /// <summary>本回合移动次数（任何位置变化）。</summary>
+    public int TurnMoves { get; internal set; }
+
+    /// <summary>本回合攻击次数（仅玩家指挥）。</summary>
+    public int TurnAttacks { get; internal set; }
+
+    /// <summary>本回合花费的指挥点（指挥行动费）。</summary>
+    public int TurnPointsSpent { get; internal set; }
+
+    /// <summary>本回合累计受到的伤害。</summary>
+    public int TurnDamageTaken { get; internal set; }
+
+    /// <summary>清零（每己方回合开始调用）。</summary>
+    public void Reset()
+    {
+        TurnActions = 0;
+        TurnMoves = 0;
+        TurnAttacks = 0;
+        TurnPointsSpent = 0;
+        TurnDamageTaken = 0;
+    }
+
+    internal void RecordAction() => TurnActions++;
+
+    internal void RecordMove() => TurnMoves++;
+
+    internal void RecordAttack(int cost)
+    {
+        TurnAttacks++;
+        TurnPointsSpent += Math.Max(0, cost);
+    }
+
+    internal void RecordDamage(int amount) => TurnDamageTaken += Math.Max(0, amount);
 }
 
 /// <summary>

@@ -1,6 +1,6 @@
 {
-  "commit": "cce4ddf1e2532772cac59bd34ad3a4b0176354af",
-  "generatedAt": "2026-10-19T15:34:50.7738256+08:00",
+  "commit": "b5e0a5c3bbf0b617fc25d6a6aaf9cfbb36c59940",
+  "generatedAt": "2026-10-19T20:28:26.8108427+08:00",
   "gameUpdates": [
     {
       "name": "CardBurned",
@@ -324,10 +324,10 @@
       "status": "Available"
     },
     {
-      "name": "BeginCommandPrePlayAsync",
+      "name": "BeginOrderPrePlayAsync",
       "category": "出牌",
       "owner": "Orc.Game.Managers.PlayManager",
-      "signature": "BeginCommandPrePlayAsync(card, ct)",
+      "signature": "BeginOrderPrePlayAsync(card, ct)",
       "gate": "非终局 ∧ 归属已加载 ∧ 费用",
       "outcome": "PlayResult（确认⇒自动衔接打出段）",
       "status": "Available"
@@ -360,10 +360,10 @@
       "status": "Available"
     },
     {
-      "name": "PlayCommandAsync",
+      "name": "PlayOrderAsync",
       "category": "出牌",
       "owner": "Orc.Game.Managers.PlayManager",
-      "signature": "PlayCommandAsync(card, ct)〔兼容入口〕",
+      "signature": "PlayOrderAsync(card, ct)",
       "gate": "同 BeginCommandPrePlayAsync",
       "outcome": "PlayResult（与预行为入口同一实现）",
       "status": "Available"
@@ -838,6 +838,7 @@
     "EffectPrefabDto.DisposingTrigger:Orc.Cards.PrefabJson+TriggerPrefabDto",
     "EffectPrefabDto.Id:System.String",
     "EffectPrefabDto.Injects:System.Collections.Generic.List<Orc.Cards.PrefabJson+InjectPrefabDto>",
+    "EffectPrefabDto.JudicatorWrappers:System.Collections.Generic.List<Orc.Cards.PrefabJson+JudicatorWrapperDto>",
     "EffectPrefabDto.MainTrigger:Orc.Cards.PrefabJson+TriggerPrefabDto",
     "EffectPrefabDto.OneShot:System.Boolean",
     "EffectPrefabDto.OtherTriggers:System.Collections.Generic.List<Orc.Cards.PrefabJson+TriggerPrefabDto>",
@@ -855,6 +856,9 @@
     "InjectPrefabDto.Event:System.String",
     "InjectPrefabDto.Priority:System.Int32",
     "InjectPrefabDto.Target:System.String",
+    "JudicatorWrapperDto.Handler:Orc.Cards.PrefabJson+EventPrefabDto",
+    "JudicatorWrapperDto.Judicator:System.String",
+    "JudicatorWrapperDto.Phase:System.String",
     "SnapshotDto.Root:Orc.Cards.PrefabJson+EffectPrefabDto",
     "SnapshotDto.SchemaVersion:System.Int32",
     "TriggerPrefabDto.Events:System.Collections.Generic.List<Orc.Cards.PrefabJson+EventPrefabDto>",

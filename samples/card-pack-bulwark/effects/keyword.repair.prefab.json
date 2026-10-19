@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 3,
+  "root": {
+    "id": "keyword.repair",
+    "version": 1,
+    "mainTrigger": {
+      "id": "t.main",
+      "stableKey": "抢修·回合修复",
+      "kind": "passive",
+      "viewType": "Orc.Cards.CardEventView",
+      "hooks": ["turn.start", "unit.position.changed", "unit.deployed"],
+      "events": [
+        {
+          "id": "onTurnStart",
+          "entry": "HandleAsync",
+          "csx": "Func<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Game.Cards.UnitCard host) { return; }\n    if (view.Player is not Orc.Game.Players.Player current || !object.ReferenceEquals(host.Owner, current)) { return; }\n    if (!host.TryGetData<Orc.Game.Cards.ActionRecordData>(out var record)) { return; }\n    if (record.TurnMoves != 0 || record.TurnAttacks != 0) { return; }\n    if (host.GetData<Orc.Game.Cards.UnitStateData>().IsDestroyed) { return; }\n\n    await host.RepairDefenseAsync(ct); // 抢修：回满\n};\n",
+          "version": 1
+        },
+        {
+          "id": "onMoved",
+          "entry": "HandleMovedAsync",
+          "csx": "Func<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleMovedAsync = async (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Game.Cards.UnitCard host) { return; }\n    if (view.Unit is not Orc.Game.Cards.UnitCard unit || !object.ReferenceEquals(unit, host)) { return; }\n\n    var position = unit.GetData<Orc.Game.Cards.UnitStateData>().Position;\n    if (position is not null && position.Name.StartsWith(\"前线\", StringComparison.Ordinal))\n    {\n        await unit.Keywords.RevokeAsync(\"抢修\"); // 位于前线即失去\n    }\n};\n",
+          "version": 1
+        },
+        {
+          "id": "onDeployed",
+          "entry": "HandleDeployedAsync",
+          "csx": "Func<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleDeployedAsync = async (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Game.Cards.UnitCard host) { return; }\n    if (view.Unit is not Orc.Game.Cards.UnitCard unit || !object.ReferenceEquals(unit, host)) { return; }\n\n    var position = unit.GetData<Orc.Game.Cards.UnitStateData>().Position;\n    if (position is not null && position.Name.StartsWith(\"前线\", StringComparison.Ordinal))\n    {\n        await unit.Keywords.RevokeAsync(\"抢修\"); // 部署在前线即失去\n    }\n};\n",
+          "version": 1
+        }
+      ]
+    },
+    "otherTriggers": [],
+    "wrappers": [],
+    "injects": [],
+    "judicatorWrappers": []
+  }
+}

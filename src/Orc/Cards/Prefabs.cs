@@ -288,6 +288,16 @@ public sealed record WrapperPrefab(string Phase, string TargetEventId, string? S
 public sealed record InjectPrefab(string TargetTriggerName, string? BandName, string EventId, int Priority = 0);
 
 /// <summary>
+/// 判定器包装器声明（效果自注册）：装载时把本效果内某事件（<see cref="Handler"/>）的 **csx 同步**逻辑
+/// 注册为指定判定器的包装器（<see cref="Phase"/>＝before／after／replace；挂默认域），随效果卸载自动注销。
+/// <see cref="EventPrefab.CsxSource"/> 必填（同步契约 <c>ISyncScriptEvaluator</c>）；约定运行时 args 末尾追加宿主卡。
+/// </summary>
+/// <param name="JudicatorName">判定器名（须已注册）。</param>
+/// <param name="Phase">包装器相位（before／after／replace）。</param>
+/// <param name="Handler">同步逻辑预制体（csx）。</param>
+public sealed record JudicatorWrapperPrefab(string JudicatorName, string Phase, EventPrefab Handler);
+
+/// <summary>
 /// 效果预制体（S-C5；三层之外层）：效果定义声明＝主触发器 + 其它触发器预制体 + wrapper 声明。
 /// <see cref="MountedHooks"/> 为计算属性：主触发器与其它被动触发器的 hooks 并集（＝"需挂载的 HookID"）。
 /// </summary>
@@ -305,7 +315,8 @@ public sealed class EffectPrefab
         int version = 1,
         IEnumerable<InjectPrefab>? injects = null,
         TriggerPrefab? disposingTrigger = null,
-        bool oneShot = false)
+        bool oneShot = false,
+        IEnumerable<JudicatorWrapperPrefab>? judicatorWrappers = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentNullException.ThrowIfNull(mainTrigger);
@@ -385,11 +396,45 @@ public sealed class EffectPrefab
             }
         }
 
+        var judicatorWrapperList = new List<JudicatorWrapperPrefab>();
+        if (judicatorWrappers is not null)
+        {
+            foreach (var item in judicatorWrappers)
+            {
+                if (item is null)
+                {
+                    throw new ArgumentNullException(nameof(judicatorWrappers), "judicatorWrappers 不能包含 null 元素。");
+                }
+
+                ArgumentException.ThrowIfNullOrWhiteSpace(item.JudicatorName);
+                if (item.Handler is null)
+                {
+                    throw new ArgumentException("judicatorWrapper 逻辑预制体不能为 null。", nameof(judicatorWrappers));
+                }
+
+                var phase = (item.Phase ?? string.Empty).Trim().ToLowerInvariant();
+                if (phase is not ("before" or "after" or "replace"))
+                {
+                    throw new ArgumentException(
+                        $"judicatorWrapper phase '{item.Phase}' 非法（须为 before／after／replace）。", nameof(judicatorWrappers));
+                }
+
+                if (string.IsNullOrWhiteSpace(item.Handler.CsxSource))
+                {
+                    throw new ArgumentException(
+                        "judicatorWrapper 逻辑须为 csx（同步脚本契约）；assemblyKey 形态不支持。", nameof(judicatorWrappers));
+                }
+
+                judicatorWrapperList.Add(item with { Phase = phase });
+            }
+        }
+
         Id = id;
         MainTrigger = mainTrigger;
         OtherTriggers = others;
         Wrappers = wrapperList;
         Injects = injectList;
+        JudicatorWrappers = judicatorWrapperList;
         Version = version;
         OneShot = oneShot;
         DisposingTrigger = NormalizeDisposingTrigger(id, disposingTrigger);
@@ -423,6 +468,9 @@ public sealed class EffectPrefab
 
     /// <summary>注入声明（S5；声明序）。</summary>
     public IReadOnlyList<InjectPrefab> Injects { get; }
+
+    /// <summary>判定器包装器声明（效果自注册；声明序）。</summary>
+    public IReadOnlyList<JudicatorWrapperPrefab> JudicatorWrappers { get; }
 
     /// <summary>"需挂载的 HookID"（计算属性：主触发器与其它被动触发器 hooks 的并集，去重保序）。</summary>
     public IReadOnlyList<string> MountedHooks { get; }

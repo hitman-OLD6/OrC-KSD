@@ -422,6 +422,20 @@ public sealed class KeywordManager
             }
 
             component.AttachDataEffect(instantiation.Effect!); // 数据效果接入内嵌效果通道（随词条生灭）
+
+            // 词条效果同样可声明 injects / judicatorWrappers（效果自注册；随内嵌效果卸载）。
+            if (_card is CardBase cardBase)
+            {
+                try
+                {
+                    CardEffectLoader.ApplyFrameworkDeclarations(
+                        cardBase, context.Engine, snapshot, instantiation.Effect!);
+                }
+                catch (Exception ex)
+                {
+                    WriteError("词条效果声明", "injects/judicatorWrappers 落地异常（隔离、不阻断授予）", ex);
+                }
+            }
         }
     }
 

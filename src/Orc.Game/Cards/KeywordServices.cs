@@ -1,5 +1,6 @@
 using Orc.Cards;
 using Orc.Core;
+using Orc.Game.Judicators;
 
 namespace Orc.Game.Cards;
 
@@ -90,9 +91,20 @@ public static class InhibitRules
             return false; // 已死亡：拒绝（零副作用）
         }
 
-        if (target.Keywords.Has(KeywordIds.CannotBeInhibited))
+        // 施加前资格判定：经判定器（词条可自注册包装器改写；默认含内建「无法被抑制」）。
+        var judicators = target.Engine.Judicators;
+        if (judicators is not null)
         {
-            return false; // 施加前资格判定：无法被抑制 → 拒绝、无副作用
+            var result = judicators.Invoke(
+                JudicatorNames.InhibitLegEligibility, new object?[] { target });
+            if (result is { Length: > 0 } && result[0] is InhibitEligibilityFailure)
+            {
+                return false;
+            }
+        }
+        else if (target.Keywords.Has(KeywordIds.CannotBeInhibited))
+        {
+            return false; // 独立构造（无对局判定器）：兼容既有标记读取
         }
 
         // ① 清空词条（除「被抑制」外全部——含其它施加物与防护标记）

@@ -1,0 +1,26 @@
+[
+  {
+    "id": "机动",
+    "label": "机动",
+    "battle": false,
+    "bindings": [
+      { "prefabId": "keyword.mobility", "effectName": "机动·免费行动" }
+    ]
+  },
+  {
+    "id": "固守",
+    "label": "固守",
+    "battle": false,
+    "bindings": [
+      { "prefabId": "keyword.entrench", "effectName": "固守·不可移动" }
+    ]
+  },
+  {
+    "id": "抢修",
+    "label": "抢修",
+    "battle": false,
+    "bindings": [
+      { "prefabId": "keyword.repair", "effectName": "抢修·回合修复" }
+    ]
+  }
+]

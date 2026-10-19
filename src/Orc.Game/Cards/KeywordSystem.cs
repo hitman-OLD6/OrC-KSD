@@ -291,6 +291,26 @@ public static class KeywordRules
     }
 
     /// <summary>
+    /// 行动额度恢复（回合开始/部署置位共用）：移动额度＝1；攻击额度＝max(1, attack.limit, 奋战 2)。
+    /// </summary>
+    public static void ResetActionQuotas(UnitCard unit)
+    {
+        ArgumentNullException.ThrowIfNull(unit);
+        var attack = Math.Max(1, KeywordProgramRuntime.Resolve(unit, "attack.limit", 1));
+        if (HasKeyword(unit, KeywordIds.Fury))
+        {
+            attack = Math.Max(attack, 2);
+        }
+
+        if (unit.TryGetData<CommandData>(out var command))
+        {
+            command.ResetQuotas(1, attack);
+        }
+
+        ResetTurnCounters(unit);
+    }
+
+    /// <summary>
     /// 部署链收尾驱动（扣费完成后、链返回前；仅部署路径调用）：遍历已挂载词条组件、逐组件执行收尾钩子
     /// （钳击＝同伴选择；闪击已迁效果承载〔批 3——部署时置位、不再经本钩子〕；其余默认空操作）——
     /// 收尾钩子的静态入口（消费点收口、细节在组件面）。

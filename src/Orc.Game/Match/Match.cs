@@ -379,6 +379,24 @@ public sealed class Match
         await GameUpdates.EmitDeckShuffled(Engine, player, player.Deck, ct);
     }
 
+    // ---------- 装配链内部访问面（准备态合法；仅供对局内部装配/加载链使用） ----------
+
+    /// <summary>
+    /// 双玩家（装配链内部面；准备态合法）：卡加载期的内部步骤（如词条程序的目标可选性声明挂载）
+    /// 需要玩家索引，而对外 <see cref="Players"/> 受准备态门禁——内部另开通道，避免装配链自我锁死。
+    /// 对外契约不变（<see cref="Players"/> 仍仅非准备态可用）。
+    /// </summary>
+    /// <exception cref="InvalidOperationException">玩家管理器尚未创建（装配链时序错误）。</exception>
+    internal IReadOnlyList<Player> AssemblyPlayers
+        => _playerManager?.Players
+            ?? throw new InvalidOperationException("玩家管理器尚未创建（装配链内部访问时序错误）。");
+
+    /// <summary>判定器注册表（装配链内部面；准备态合法——口径同 <see cref="AssemblyPlayers"/>）。</summary>
+    /// <exception cref="InvalidOperationException">判定器注册表尚未创建（装配链时序错误）。</exception>
+    internal JudicatorRegistry AssemblyJudicators
+        => _judicators
+            ?? throw new InvalidOperationException("判定器注册表尚未创建（装配链内部访问时序错误）。");
+
     // ---------- 便捷转发读面（只读、不复制状态；仅"进行"态可访问） ----------
 
     /// <summary>双玩家（→ 玩家管理器）。</summary>
@@ -535,9 +553,13 @@ public sealed class Match
         // （『初始化内创建＋注入』范式）；装配期注册段经创建参数一次性执行（注册动作返回条目等价句柄、供注册方持有）；
         // 时点＝卡加载之前（远早于洗切与加载段——就绪由装配链位置保证：「装配期已注册条目在卡加载阶段即可被解析调用」）。
         _judicators = new JudicatorRegistry();
+        Engine.Judicators = _judicators; // 效果装载链落地 judicatorWrappers 的解析源（对局级）
         // A.20：行动输入准入判定器（无状态；每次查询/提交现读前端状态）。
         _judicators.Register(JudicatorNames.ActionInput,
             new ActionInputJudicator(player => InteractionStateReader?.Invoke(player)));
+
+        // 抑制资格判定器（默认：死亡 / 内建「无法被抑制」；词条经 judicatorWrappers 改写）。
+        _judicators.Register(JudicatorNames.InhibitLegEligibility, new InhibitEligibilityJudicator());
 
         // 资产化 S12c：内置判定器**不再硬编码于装配中枢**——改由（可选）资产目录快照经激活器装配
         // （内置插件 `orc.builtin.core` 提供；`null`＝**空目录**＝无任何判定器——P8=i）。
@@ -601,6 +623,7 @@ public sealed class Match
         matchTriggers.Register("单位移动触发器", typeof(UnitMoveTriggerView), () => _commandManager?.UnitMoveTrigger);
         matchTriggers.Register("单位攻击触发器", typeof(UnitAttackTriggerView), () => _commandManager?.UnitAttackTrigger);
         matchTriggers.Register("造成攻击伤害触发器", typeof(AttackDamageTriggerView), () => _commandManager?.AttackDamageTrigger);
+        matchTriggers.Register("行动额度触发器", typeof(ActionQuotaView), () => _commandManager?.ActionQuotaTrigger);
         foreach (var player in _playerManager.Players)
         {
             player.ConfigureMatchTriggers(matchTriggers);
@@ -718,6 +741,9 @@ public sealed class Match
         var secondPlayer = _playerManager.Players[(_firstPlayerIndex + 1) % 2];
         _playerManager.LoadOpeningHand(firstPlayer, _options.OpeningHandSizeFirstPlayer);
         _playerManager.LoadOpeningHand(secondPlayer, _options.OpeningHandSizeSecondPlayer);
+
+        // 单位回合统计（S1b）：单一订阅器维护行动/移动/攻击/花费/受伤；每己方回合开始清零。
+        new Orc.Game.Cards.UnitTurnStatsTracker(Engine, _battlefieldManager.Battlefield).Start();
 
         // 先手回合开始序列（3 条更新；第 1 回合不抽牌＝无 card.drawn；顺序 await 完结后返回）
         _turnManager = new TurnManager(Engine, _playerManager, _resourceManager, _lifecycle, _options.AllowFirstTurnDraw);

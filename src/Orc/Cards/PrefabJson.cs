@@ -160,6 +160,12 @@ public static class PrefabJson
         }).ToList(),
         DisposingTrigger = ToDto(prefab.DisposingTrigger),
         OneShot = prefab.OneShot,
+        JudicatorWrappers = prefab.JudicatorWrappers.Select(j => new JudicatorWrapperDto
+        {
+            Judicator = j.JudicatorName,
+            Phase = j.Phase,
+            Handler = ToDto(j.Handler),
+        }).ToList(),
     };
 
     private static TriggerPrefabDto ToDto(TriggerPrefab prefab) => new()
@@ -223,6 +229,24 @@ public static class PrefabJson
             throw new FormatException($"效果快照的 inject 声明非法：{ex.Message}", ex);
         }
 
+        var judicatorWrappers = (dto.JudicatorWrappers ?? new List<JudicatorWrapperDto>())
+            .Select(j =>
+            {
+                if (j.Handler is null)
+                {
+                    throw new FormatException("judicatorWrapper 缺少 handler。");
+                }
+
+                if (string.IsNullOrWhiteSpace(j.Judicator))
+                {
+                    throw new FormatException("judicatorWrapper 缺少 judicator。");
+                }
+
+                return new JudicatorWrapperPrefab(
+                    j.Judicator!, j.Phase ?? "after", FromDto(j.Handler));
+            })
+            .ToList();
+
         return new EffectPrefab(
             dto.Id ?? string.Empty,
             FromDto(dto.MainTrigger),
@@ -231,7 +255,8 @@ public static class PrefabJson
             dto.Version <= 0 ? 1 : dto.Version,
             injects,
             dto.DisposingTrigger is null ? null : FromDto(dto.DisposingTrigger),
-            dto.OneShot);
+            dto.OneShot,
+            judicatorWrappers);
     }
 
     private static TriggerPrefab FromDto(TriggerPrefabDto dto)
@@ -283,6 +308,7 @@ public static class PrefabJson
         public List<InjectPrefabDto>? Injects { get; set; }
         public TriggerPrefabDto? DisposingTrigger { get; set; }
         public bool OneShot { get; set; }
+        public List<JudicatorWrapperDto>? JudicatorWrappers { get; set; }
     }
 
     private sealed class TriggerPrefabDto
@@ -322,5 +348,12 @@ public static class PrefabJson
         public string? Band { get; set; }
         public string? Event { get; set; }
         public int Priority { get; set; }
+    }
+
+    private sealed class JudicatorWrapperDto
+    {
+        public string? Judicator { get; set; }
+        public string? Phase { get; set; }
+        public EventPrefabDto? Handler { get; set; }
     }
 }

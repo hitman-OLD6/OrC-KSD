@@ -1,4 +1,5 @@
 using Orc.Game.Cards;
+using Orc.Game.Collections;
 using Orc.Game.Effects;
 using Orc.Game.Judicators;
 using Orc.Game.Targeting;
@@ -72,6 +73,61 @@ public class DiyExample07_TargetingForbidTests
 
         Assert.DoesNotContain(candidates, reference => ReferenceEquals(reference.Value, guarded));
         Assert.Contains(candidates, reference => ReferenceEquals(reference.Value, bystander));
+    }
+
+    /// <summary>
+    /// 回归（b5e0a5c）：真实产品路径——卡组内含 <c>targeting.forbid</c> 程序词条时，
+    /// 词条装载（<c>Mount</c> → 声明挂载）发生在 <see cref="Orc.Game.Match.Initialize"/> 的准备态；
+    /// 声明挂载改走装配链内部访问面后，不得再被公共 Players/Judicators 的准备态门禁拦死。
+    /// 断言：① 初始化成功进入"进行"态；② 该单位入场的声明仍生效（候选被剔除——非"跳过挂载"式假修复）。
+    /// </summary>
+    [Fact]
+    public async Task 卡组含targeting_forbid程序词条_Initialize装配期挂载声明不被准备态门禁拦死()
+    {
+        const string keywordId = "diy.example7.deck.forbid";
+        const string unitId = "u_forbid_deck";
+
+        ProgramKeywordComponent.Register(
+            keywordId,
+            KeywordProgram.Parse(
+                "{\"schema\":1,\"rules\":[{\"rule\":\"targeting.forbid\",\"scope\":\"self\",\"value\":\"1\",\"source\":\"command\"}]}"));
+
+        var definitions = CommandTestKit.CreateDefinitions().Concat(new[]
+        {
+            new CardDefinitionEntry(
+                unitId,
+                new CardDefinition(
+                    "禁指步兵", 1, 1, 2, 4,
+                    unitTypes: new[] { UnitType.Infantry },
+                    keywords: new[] { new KeywordDeclaration(keywordId) },
+                    faction: Faction.Germany,
+                    rarity: Rarity.Standard)),
+        });
+
+        var match = new Orc.Game.Match(
+            new CardList(Enumerable.Repeat(unitId, 10)),
+            new CardList(Enumerable.Repeat(CommandTestKit.InfantryId, 10)),
+            definitions,
+            seed: 42,
+            options: new MatchOptions { SkipMulligan = true },
+            packageActivator: TestHost.Activator);
+
+        // 卡加载＝准备态：声明挂载即发生在此（回归点）。
+        await match.Initialize();
+
+        Assert.Equal(MatchState.InProgress, match.State);
+
+        var playerA = match.Players[0];
+        var playerB = match.Players[1];
+        var guarded = playerA.Hand.OfType<UnitCard>()
+            .First(card => match.CardService.TryResolveDefinitionId(card, out var id) && id == unitId);
+        var slot = match.Battlefield.GetSupportLine(playerA).First(candidate => candidate.IsEmpty);
+        var joined = await match.PlayManager.JoinUnitAsync(guarded, slot);
+        Assert.Equal(PlayResultStatus.Success, joined.Status);
+
+        var viewer = await PrepareCommandViewerAsync(match, playerB);
+        var candidates = Candidates(match, viewer);
+        Assert.DoesNotContain(candidates, reference => ReferenceEquals(reference.Value, guarded));
     }
 
     /// <summary>以「敌方指令」为视角取候选名单（玩家域＝viewer 的归属域）。</summary>

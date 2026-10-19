@@ -73,6 +73,16 @@ public sealed class LogicEngine
     public IScriptEvaluator? ScriptEvaluator { get; set; }
 
     /// <summary>
+    /// 同步脚本求值器（判定器/资产服务包装器专用；可空）：未装配＝<c>judicatorWrappers</c> 的 csx 不可用（隔离记录）。
+    /// </summary>
+    public ISyncScriptEvaluator? SyncScriptEvaluator { get; set; }
+
+    /// <summary>
+    /// 对局级判定器注册表（可空）：对局装配期注入——供效果装载链落地 <c>judicatorWrappers</c>（判定器包装器自注册）。
+    /// </summary>
+    public JudicatorRegistry? Judicators { get; set; }
+
+    /// <summary>
     /// 预制体管理器（S-C7；引擎级、懒创建）：处理器与效果快照的注册、解析与本地明文目录加载。
     /// </summary>
     public Orc.Cards.PrefabManager Prefabs => _prefabs ??= new Orc.Cards.PrefabManager(this);

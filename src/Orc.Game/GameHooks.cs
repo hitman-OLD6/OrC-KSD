@@ -329,6 +329,9 @@ public static class GameHooks
     /// <summary>判定器名：推进前置判定（<c>move.frontline-enemy</c>；K3——前线存活敌方）。</summary>
     public const string JudicatorMoveFrontlineEnemy = JudicatorNames.MoveFrontlineEnemy;
 
+    /// <summary>判定器名：抑制资格判定（<c>inhibit.leg.eligibility</c>；词条经 judicatorWrappers 自注册改写）。</summary>
+    public const string JudicatorInhibitLegEligibility = JudicatorNames.InhibitLegEligibility;
+
     /// <summary>判定器名：效果无头选靶判定（<c>effect.target.resolve</c>；E1——csx handler 选择面）。</summary>
     public const string JudicatorEffectTargetResolve = JudicatorNames.EffectTargetResolve;
 
@@ -356,6 +359,7 @@ public static class GameHooks
         JudicatorCombatTargetLegal, JudicatorCombatRange, JudicatorCombatGuardEligibility, JudicatorCombatInterception,
         JudicatorCombatCounterEligibility, JudicatorCombatAmbushCondition,
         JudicatorMoveLegEligibility, JudicatorAttackLegEligibility, JudicatorMoveFrontlineEnemy,
+        JudicatorInhibitLegEligibility,
         JudicatorEffectTargetResolve,
         JudicatorPointSlotIncrement, JudicatorPointSlotGain, JudicatorPointSlotLose,
         JudicatorPointGain, JudicatorPointLose,
@@ -370,6 +374,7 @@ public static class GameHooks
         JudicatorCombatTargetLegal, JudicatorCombatRange, JudicatorCombatGuardEligibility, JudicatorCombatInterception,
         JudicatorCombatCounterEligibility, JudicatorCombatAmbushCondition,
         JudicatorMoveLegEligibility, JudicatorAttackLegEligibility, JudicatorMoveFrontlineEnemy,
+        JudicatorInhibitLegEligibility,
         JudicatorEffectTargetResolve,
         JudicatorPointSlotIncrement, JudicatorPointSlotGain, JudicatorPointSlotLose,
         JudicatorPointGain, JudicatorPointLose,
