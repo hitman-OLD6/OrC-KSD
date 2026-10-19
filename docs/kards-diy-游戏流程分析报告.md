@@ -294,7 +294,7 @@ phase: 'mulligan' | 'play', mulligan: { done:[false,false] }
 | **重调度 mulligan** | **缺**（无入口） | 需新增（见报告 3 缺口） |
 | 回合开始/结束 | `TurnManager.StartFirstTurn`（internal）/ `EndTurn`；信号 `turn.start.*` / `turn.end.*` | 已有；相位细分需对齐 |
 | 点槽成长/回满 | `ResourceManager.Settle` / `AddPoints` | 已有；曲线参数需对齐（X3） |
-| 出牌 | `PlayManager.BeginUnitPrePlayAsync/PlayUnitAsync/PlayCommandAsync/UseCounterAsync` | 已有 |
+| 出牌 | `PlayManager.BeginUnitPrePlayAsync/PlayUnitAsync/PlayOrderAsync/UseCounterAsync` | 已有 |
 | 移动/攻击 | `CommandManager.BeginCommandAsync`（唯一公开入口） | 已有；无独立 API |
 | 战斗结算 | `Orc/Cards/BaseFlows.cs`（`AttackFlow.ExecuteAsync` / `DamageFlow.ResolveAsync`） | 已有；交战词条多数待接线 |
 | 死亡/亡计 | `RetriggerSystem.RequestDeathrattleAsync` + `card.died` | 已有 |

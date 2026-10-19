@@ -377,8 +377,8 @@ UI 的所有对局操作走 `IMcpActions`（与 agent 的 MCP 工具**共用同�
 | `PlayUnitPreAsync(cardRef, ct)` | `PlayManager.BeginUnitPrePlayAsync` | **会发起部署选位** |
 | `PlayUnitAsync(cardRef, ownerIndex, slotIndex, ct)` | `PlayManager.PlayUnitAsync(unit, Slot)` | |
 | `JoinUnitAsync(cardRef, ownerIndex, slotIndex, ct)` | `PlayManager.JoinUnitAsync` | 不扣费、不走部署词条 |
-| `PlayCommandPreAsync(cardRef, ct)` | `PlayManager.BeginCommandPrePlayAsync` | |
-| `PlayCommandAsync(cardRef, ct)` | `PlayManager.PlayCommandAsync` | |
+| `PlayCommandPreAsync(cardRef, ct)` | `PlayManager.BeginOrderPrePlayAsync` | 协议名冻结（`command_pre` → 引擎 `BeginOrderPrePlayAsync`） |
+| `PlayCommandAsync(cardRef, ct)` | `PlayManager.PlayOrderAsync` | 协议名冻结（`command` → 引擎 `PlayOrderAsync`）；仅内部委托改名 |
 | `UseCounterAsync(cardRef, ct)` | `PlayManager.UseCounterAsync` | |
 | `BeginCommandAsync(unitRef, ct)` | `CommandManager.BeginCommandAsync` | 移动/攻击统一入口 |
 | `BeginMoveAsync(unitRef, ct)` | `CommandManager.BeginMoveAsync` | |

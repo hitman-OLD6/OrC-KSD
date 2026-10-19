@@ -40,7 +40,7 @@
 | `BeginUnitPrePlayAsync(card,ct)` | 73 | 单位预打出（验证＋交互选空槽；确认自动衔接打出链） | 动作作用域 `BeginAction`85；预打出 `PrePlayTrigger`88（验证判定器 `validation.cost.check`）；targeter 交互 117-118（桥接完成/取消驱动） |
 | `PlayUnitAsync(card,target,ct)` | 149 | 单位部署打出链（部署路径） | 发 `card.played` + `unit.deployed`；部署词条/效果 |
 | `JoinUnitAsync(card,target,ct)` | 200 | 加入路径（不扣费、不走部署词条） | 发 `unit.joined` |
-| `PlayCommandAsync(card,ct)` | 253 | 指令打出（预打出＋打出一次链） | 发 `card.played`；`OrderFlow` |
+| `PlayOrderAsync(card,ct)` | 253 | 指令打出（预打出＋打出一次链） | 发 `card.played`；`OrderFlow` |
 | `UseCounterAsync(card,ct)` | 323 | 反制单入口状态翻转（激活↔取消，仅己方回合） | 反制 `UseCounterTrigger`；验证 `validation.counter.use` |
 | 结果对象 | `PlayResult` | — | 不抛；失败类别化；取消=`Cancelled`；拒绝/失败/取消零副作用 |
 
@@ -109,7 +109,7 @@
 | 卡类 | 触发器 | 行号 |
 |---|---|---|
 | `Cards/UnitCard.cs` | `PrePlayTrigger`63 / `PlayTrigger`66 / `DeployTrigger`69 / `JoinTrigger`72 / `UnitizeTrigger`75 | |
-| `Cards/CommandCard.cs` | `PrePlayTrigger`51 / `PlayTrigger`54 | |
+| `Cards/OrderCard.cs` | `PrePlayTrigger`51 / `PlayTrigger`54 | |
 | `Cards/CounterCard.cs` | `UseCounterTrigger`59 | |
 
 ---
@@ -231,7 +231,7 @@
 
 | kards-diy 输入点 / 流程 | OrC 落点 | 状态 |
 |---|---|---|
-| 出牌（`KG.playCard` / `mpPlay`） | `PlayManager.BeginUnitPrePlayAsync` / `PlayUnitAsync` / `PlayCommandAsync` | 已有 |
+| 出牌（`KG.playCard` / `mpPlay`） | `PlayManager.BeginUnitPrePlayAsync` / `PlayUnitAsync` / `PlayOrderAsync` | 已有 |
 | 反制（`inst.suspended` / `mpUnsuspend`） | `PlayManager.UseCounterAsync`（激活↔取消） | 已有 |
 | 移动（`KG.move` / `mpMove`） | `CommandManager.BeginCommandAsync` → `UnitMoveTrigger` | 已有（无独立 API） |
 | 攻击（`KG.attack` / `mpAttack`） | `CommandManager.BeginCommandAsync` → `UnitAttackTrigger`；`AttackFlow`/`DamageFlow` | 已有 |

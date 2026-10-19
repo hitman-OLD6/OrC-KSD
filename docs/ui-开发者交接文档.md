@@ -280,10 +280,10 @@ _immediateSub = _engine.OnImmediateUpdate((updateType, payload) =>
 | 入口 | 签名 | 语义 |
 |---|---|---|
 | 单位预打出 | `Task<PlayResult> BeginUnitPrePlayAsync(UnitCard card, CancellationToken ct = default)` | 验证＋交互选空槽；确认自动衔接打出链 |
-| 指令预打出 | `Task<PlayResult> BeginCommandPrePlayAsync(CommandCard card, CancellationToken ct = default)` | 确认自动衔接打出段 |
+| 指令预打出 | `Task<PlayResult> BeginOrderPrePlayAsync(OrderCard card, CancellationToken ct = default)` | 确认自动衔接打出段 |
 | 单位部署 | `Task<PlayResult> PlayUnitAsync(UnitCard card, Slot target, CancellationToken ct = default)` | 部署路径（扣费、走部署词条） |
 | 单位加入 | `Task<PlayResult> JoinUnitAsync(UnitCard card, Slot target, CancellationToken ct = default)` | 加入路径（不扣费、不走部署词条） |
-| 指令打出 | `Task<PlayResult> PlayCommandAsync(CommandCard card, CancellationToken ct = default)` | 与预打出同一实现（兼容入口） |
+| 指令打出 | `Task<PlayResult> PlayOrderAsync(OrderCard card, CancellationToken ct = default)` | 与预打出同一实现（等价入口） |
 | 反制 | `Task<PlayResult> UseCounterAsync(CounterCard card, CancellationToken ct = default)` | 激活↔取消（仅己方回合） |
 
 **③ 指挥（`Orc.Game.Commanding.CommandManager`）**
