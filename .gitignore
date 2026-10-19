@@ -42,3 +42,6 @@ TestResults/
 # 外发交付包（.ams-docs 下的 发布包/）：交付给前端（Godot）侧同步用，不入库
 # 注：必须放在上面的 !/.ams-docs/**/*.md 之后——目录被排除后其中的 md 也无法再放行
 /.ams-docs/**/发布包/
+
+# 第三方 agent 工具的工作区（会话记忆等），非本项目产出
+/.workbuddy/
