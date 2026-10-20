@@ -1,0 +1,38 @@
+[
+  {
+    "id": "强磁护盾",
+    "label": "强磁护盾",
+    "battle": false,
+    "bindings": [
+      { "prefabId": "keyword.magnetic-shield", "effectName": "强磁护盾·伤害减免" }
+    ]
+  },
+  {
+    "id": "磁反应装甲",
+    "label": "磁反应装甲",
+    "battle": false,
+    "bindings": [
+      { "prefabId": "keyword.magnetic-reaction", "effectName": "磁反应装甲·免疫" }
+    ]
+  },
+  {
+    "id": "海绵装甲",
+    "label": "海绵装甲",
+    "battle": false,
+    "bindings": [
+      { "prefabId": "keyword.sponge-armor", "effectName": "海绵装甲·伤害封顶" }
+    ]
+  },
+  {
+    "id": "游击",
+    "label": "游击",
+    "battle": false,
+    "bindings": [],
+    "program": {
+      "schema": 1,
+      "rules": [
+        { "scope": "self", "rule": "move.retreat", "value": "1" }
+      ]
+    }
+  }
+]

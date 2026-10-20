@@ -215,6 +215,8 @@ public sealed class CardLoadDiagTests : IDisposable
             SeatA = new MatchSeatConfig(0, SampleDeck()),
             SeatB = new MatchSeatConfig(1, SampleDeck()),
             SkipMulligan = true,
+            // 示例卡包只有 5 张卡，无法组成 39 张合法构筑；本测试只验诊断面。
+            EnforceDeckRules = false,
         };
 
     /// <summary>示例卡包目录（仓库内 `samples/card-pack-ai`）。</summary>

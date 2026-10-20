@@ -151,10 +151,16 @@ public class EventStreamJsonTests
         Assert.Equal(42, data.GetProperty("n").GetInt32());
         Assert.True(data.GetProperty("flag").GetBoolean());
         Assert.Equal("你好", data.GetProperty("note").GetString());
-        Assert.Equal("测试卡", data.GetProperty("card").GetProperty("$entity").GetString());
-        Assert.True(data.GetProperty("card").GetProperty("$alive").GetBoolean());
-        Assert.Equal("引用目标", data.GetProperty("reference").GetProperty("$ref").GetString());
-        Assert.True(data.GetProperty("reference").GetProperty("$alive").GetBoolean());
+        // 实体/引用：{"$ref": GUID(N), "name": 名, "alive": 存活}——引用键取代旧 $entity 名（多人支持 S5）
+        var cardNode = data.GetProperty("card");
+        Assert.Equal("测试卡", cardNode.GetProperty("name").GetString());
+        Assert.True(cardNode.GetProperty("$alive").GetBoolean());
+        Assert.True(Guid.TryParseExact(cardNode.GetProperty("$ref").GetString(), "N", out _));
+
+        var referenceNode = data.GetProperty("reference");
+        Assert.Equal("引用目标", referenceNode.GetProperty("name").GetString());
+        Assert.True(referenceNode.GetProperty("$alive").GetBoolean());
+        Assert.True(Guid.TryParseExact(referenceNode.GetProperty("$ref").GetString(), "N", out _));
 
         // 嵌套字典/数组递归；null 原样；枚举→字符串；DateTimeOffset→ISO 8601
         Assert.Equal(1, data.GetProperty("nested").GetProperty("x").GetInt32());

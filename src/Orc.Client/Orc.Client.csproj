@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Orc.Client</AssemblyName>
+    <RootNamespace>Orc.Client</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    客户端库（多人支持 S1）：连接/握手/请求-响应/推送订阅/重连 ＋ DTO 反序列化。
+    **不含任何业务规则**（不判断合法性、不解析卡面），只做「报文 ↔ 强类型」与连接管理。
+    依赖方向：Orc.Protocol ← Orc.Client。
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Orc.Protocol\Orc.Protocol.csproj" />
+  </ItemGroup>
+
+</Project>

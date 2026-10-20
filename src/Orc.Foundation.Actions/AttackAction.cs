@@ -90,7 +90,8 @@ public sealed class AttackAction : IAttackAction
         ArgumentNullException.ThrowIfNull(attacker);
         ArgumentNullException.ThrowIfNull(target);
         return await InvokeAsync(
-            attacker, target, triggerCard, new ActionTargetResult(target, target.Value as CardBase, 1), ct)
+            attacker, target, triggerCard, new ActionTargetResult(target, target.Value as CardBase, 1),
+            isCommandAttack: true, ct)
             .ConfigureAwait(false);
     }
 
@@ -112,16 +113,19 @@ public sealed class AttackAction : IAttackAction
             return new ActionResult(ActionId.Attack, result);
         }
 
-        return await InvokeAsync(attacker, target, triggerCard, result, ct).ConfigureAwait(false);
+        return await InvokeAsync(attacker, target, triggerCard, result, isCommandAttack: false, ct)
+            .ConfigureAwait(false);
     }
 
     private async Task<ActionResult> InvokeAsync(
-        UnitCard attacker, Ref<Entity> target, Card? triggerCard, ActionTargetResult result, CancellationToken ct)
+        UnitCard attacker, Ref<Entity> target, Card? triggerCard, ActionTargetResult result,
+        bool isCommandAttack, CancellationToken ct)
     {
         var data = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             [CommandDataKeys.Attacker] = attacker.Ref,
             [CommandDataKeys.Target] = target,
+            [nameof(UnitAttackTriggerView.IsCommandAttack)] = isCommandAttack,
             [nameof(UnitAttackTriggerView.Result)] = result,
         };
 

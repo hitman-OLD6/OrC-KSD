@@ -59,38 +59,20 @@ public abstract class CardBase : Orc.Cards.Card
     /// <summary>是否为测试资产（域的诊断/展示读面；同样**不得**用于玩法判定）。</summary>
     public bool IsTestAsset => AssetDomain == Orc.Core.AssetDomain.Test;
 
-    private readonly Dictionary<string, (object Trigger, Type ViewType)> _namedTriggers = new(StringComparer.Ordinal);
+    private readonly NamedTriggerTable _namedTriggers = new();
 
     /// <summary>登记具名触发器（S5；子类构造期调用）：供效果预制体 <c>injects</c> 声明按名解析注入目标。</summary>
     /// <exception cref="ArgumentException">name 为 null/空白。</exception>
     /// <exception cref="ArgumentNullException">trigger 或 viewType 为 null。</exception>
     protected void RegisterNamedTrigger(string name, object trigger, Type viewType)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentNullException.ThrowIfNull(trigger);
-        ArgumentNullException.ThrowIfNull(viewType);
-
-        _namedTriggers[name] = (trigger, viewType);
-    }
+        => _namedTriggers.Register(name, trigger, viewType);
 
     /// <summary>按名查找具名触发器（S5 注入目标解析；未登记＝false）。</summary>
     public bool TryFindNamedTrigger(
         string name,
         [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out object? trigger,
         [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Type? viewType)
-    {
-        trigger = null;
-        viewType = null;
-
-        if (string.IsNullOrWhiteSpace(name) || !_namedTriggers.TryGetValue(name, out var entry))
-        {
-            return false;
-        }
-
-        trigger = entry.Trigger;
-        viewType = entry.ViewType;
-        return true;
-    }
+        => _namedTriggers.TryFind(name, out trigger, out viewType);
 
     /// <summary>
     /// 卡侧修饰器组件（W2a G3 修饰机制）：每实例构造期常驻的专用轻量容器

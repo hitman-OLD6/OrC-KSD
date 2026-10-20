@@ -208,6 +208,27 @@ public sealed class MatchExecutor
         }
     }
 
+    /// <summary>
+    /// 只读执行面（多人支持 S4）：**不取门禁、不判 <c>Busy</c>**，仅供串行消费者上下文内的投影/动作可用性计算使用。
+    /// <para>
+    /// 为什么不能复用 <see cref="RunAsync"/>：选靶挂起期间 <c>IsBusy</c> 为真，<see cref="RunAsync"/> 会直接返回
+    /// <c>Busy</c>——而选靶期恰是最需要高亮的时刻。
+    /// </para>
+    /// </summary>
+    /// <exception cref="InvalidOperationException">不在消费者上下文内，或无活跃对局。</exception>
+    public ActionOutcome ReadOnly(Func<Orc.Game.Match, ActionOutcome> read)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+
+        if (!Orc.Mcp.Execution.ConsumerContext.IsActive)
+        {
+            throw new InvalidOperationException("只读执行面只能在串行消费者上下文内调用（当前不在消费者上下文）。");
+        }
+
+        var match = _match ?? throw new InvalidOperationException("无活跃对局（只读执行面不可用）。");
+        return read(match);
+    }
+
     /// <summary>等待动作"完成或进入待决"（不忙转：每轮等待一个新的状态变更信号）。</summary>
     private async Task<ActionOutcome> WaitAsync(Task<ActionOutcome> task)
     {

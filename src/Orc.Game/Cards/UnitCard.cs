@@ -1,4 +1,5 @@
-﻿using Orc.Core;
+﻿using Orc.Cards;
+using Orc.Core;
 using Orc.Game.Actions;
 using Orc.Game.Board;
 using Orc.Game.Managers;
@@ -67,8 +68,11 @@ public class UnitCard : CardBase
         // S2：揭示触发器（揭示动作的内容承载面——「揭示：X」内容经效果预制体按名注入；触发它＝执行揭示内容，
         // 由 CovertRules.RevealAsync 统一发动；无注入＝空转、无副作用）。
         RevealTrigger = new Trigger<CardTriggerView>(CovertRules.TriggerName);
+        // 通用接入点：指向触发器（默认 handler 声明具名动作缝；词条经 injects 按名订阅）。
+        TargetingTrigger = new Trigger<TargetingView>(TargetingRules.TriggerName);
 
         // S5：具名触发器登记（供效果预制体 injects 声明按名解析注入目标）。
+        RegisterNamedTrigger(TargetingRules.TriggerName, TargetingTrigger, typeof(TargetingView));
         RegisterNamedTrigger("打出触发器", PlayTrigger, typeof(CardTriggerView));
         RegisterNamedTrigger("部署触发器", DeployTrigger, typeof(CardTriggerView));
         RegisterNamedTrigger("部署词条触发器", DeployKeywordTrigger, typeof(CardTriggerView));
@@ -87,7 +91,30 @@ public class UnitCard : CardBase
         JoinTrigger.Register("加入链", HandleJoinChainAsync, registrant: this);
         UnitizeTrigger.Register("单位化", HandleUnitizeAsync, registrant: this);
         VeteranTrigger.Register("升级链", HandleVeteranChainAsync, registrant: this);
+        // 指向默认链＝声明具名动作缝（C# wrapper 插入点；词条订阅经 injects 另注册 handler）。
+        TargetingTrigger.Register("指向", HandleTargetingAsync, seams: [TargetingRules.SeamName], registrant: this);
     }
+
+    /// <summary>指向默认 handler：只暴露具名动作缝（无业务逻辑）。</summary>
+    private static Task HandleTargetingAsync(TargetingView view, Context ctx, CancellationToken ct)
+        => ctx.SeamAsync(TargetingRules.SeamName, ct);
+
+    /// <summary>
+    /// 发动指向通知（通用接入点的内部导航面——由 <see cref="TargetingRules.NotifyAsync"/> 调用）：
+    /// 载荷＝{ Source, Target, Kind, TriggerCard, Host }。
+    /// </summary>
+    internal Task InvokeTargetingTriggerAsync(Card? source, string kind, Card? triggerCard, CancellationToken ct)
+        => TargetingTrigger.InvokeAsync(
+            _chainEngine,
+            new Dictionary<string, object?>
+            {
+                [nameof(TargetingView.Source)] = source,
+                [nameof(TargetingView.Target)] = this,
+                [nameof(TargetingView.Kind)] = kind,
+                [nameof(TargetingView.TriggerCard)] = triggerCard,
+                [nameof(TargetingView.Host)] = this,
+            },
+            ct);
 
     /// <summary>预打出触发器（费用校验：指挥点验证；开始/交互编排由打出管理器驱动；装配方扩展点保留）。</summary>
     public Trigger<CardTriggerView> PrePlayTrigger { get; }
@@ -122,6 +149,14 @@ public class UnitCard : CardBase
     /// 供效果预制体 <c>injects</c> 按名解析）。
     /// </summary>
     public Trigger<CardTriggerView> RevealTrigger { get; }
+
+    /// <summary>
+    /// 指向触发器（通用接入点；「某方指向本卡」的最终确定面）：效果选靶最终名单 / 交互落定、
+    /// 指挥攻击发起后各触发一次（每个目标一次）。默认 handler 声明具名动作缝
+    /// <see cref="TargetingRules.SeamName"/>（C# 侧 wrapper 插入点）；词条行为经效果预制体
+    /// <c>injects</c> 按名订阅。标识名＝<see cref="TargetingRules.TriggerName"/>（已具名登记）。
+    /// </summary>
+    public Trigger<TargetingView> TargetingTrigger { get; }
 
     /// <summary>
     /// 部署词条触发器（S6／R12；默认 band）：部署时执行的"部署词条效果"的触发面——

@@ -9,7 +9,12 @@ namespace Orc.Mcp.Tests;
 /// </summary>
 internal sealed class SandboxFixture : IDisposable
 {
-    public SandboxFixture(McpServiceMode mode = McpServiceMode.Authoring, bool promote = false, bool csx = false)
+    public SandboxFixture(
+        McpServiceMode mode = McpServiceMode.Authoring,
+        bool promote = false,
+        bool csx = false,
+        Orc.Mcp.Room.IRoomControl? room = null,
+        int? agentSeat = null)
     {
         Root = Path.Combine(Path.GetTempPath(), "orc-mcp-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Root);
@@ -22,9 +27,10 @@ internal sealed class SandboxFixture : IDisposable
             CsxEnabled = csx,
             Seed = 1234,
             SegmentCacheCapacity = 32,
+            AgentSeat = agentSeat,
         };
 
-        Service = new McpService(Options);
+        Service = new McpService(Options, room);
     }
 
     public string Root { get; }

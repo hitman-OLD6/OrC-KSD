@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "space-war.magnetic-armor-tank",
+  "name": "磁反应坦克",
+  "components": [
+    { "component": "typeCategory", "type": ["tank"] },
+    { "component": "factionCost", "faction": "germany", "kredits": 3 },
+    { "component": "battleStats", "operationCost": 2, "attack": 3, "defense": 4 },
+    { "component": "tagData", "rarity": "standard" },
+    { "component": "keywords", "keywords": ["Keyword:磁反应装甲:2"] }
+  ]
+}

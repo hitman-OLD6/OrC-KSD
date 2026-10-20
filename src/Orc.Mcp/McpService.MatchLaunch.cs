@@ -82,6 +82,28 @@ public sealed partial class McpService
             return ActionOutcome.Failed(McpCodes.InvalidArguments, $"卡组解析失败：{ex.Message}");
         }
 
+        // S7：卡组规则（唯一实现）——尺寸、卡池存在性、同名上限（按稀有度）、主国/盟国配对。
+        if (options.EnforceDeckRules)
+        {
+            var pool = assembly.Definitions.ToDictionary(entry => entry.Id, entry => entry.Definition, StringComparer.Ordinal);
+            var violations = new List<Orc.Game.Decks.DeckViolation>();
+            foreach (var (seat, deck) in new[] { (options.SeatA, deckA), (options.SeatB, deckB) })
+            {
+                violations.AddRange(Orc.Game.Decks.DeckRules.Validate(deck, pool, options.RequiredDeckSize));
+                if (Orc.Game.Decks.DeckRules.ValidateFaction(seat.DeckConfiguration) is { } factionViolation)
+                {
+                    violations.Add(factionViolation);
+                }
+            }
+
+            if (violations.Count > 0)
+            {
+                return ActionOutcome.Failed(
+                    McpCodes.DeckInvalid,
+                    "卡组不合法：" + string.Join("；", violations.Select(v => v.Message)));
+            }
+        }
+
         var effectRegistry = new CardEffectRegistry();
         foreach (var (cardId, prefabIds) in assembly.Declarations)
         {
@@ -113,7 +135,9 @@ public sealed partial class McpService
                 targeterBridge: Bridge,
                 effectRegistry: effectRegistry,
                 packageActivator: packageActivator,
-                cardLoader: assembly);
+                cardLoader: assembly,
+                deckConfigForPlayerA: options.SeatA.DeckConfiguration,
+                deckConfigForPlayerB: options.SeatB.DeckConfiguration);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {

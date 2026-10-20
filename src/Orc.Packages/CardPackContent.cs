@@ -11,11 +11,16 @@ namespace Orc.Packages;
 /// <param name="Label">显示名。</param>
 /// <param name="IsBattleKeyword">是否对战词条（打标）。</param>
 /// <param name="Bindings">词条 → 效果预制体的绑定声明。</param>
+/// <param name="Program">
+/// 可选的词条程序（<see cref="KeywordProgram"/> JSON 原文；空＝纯标识词条）。
+/// 有程序时该词条注册为 <see cref="ProgramKeywordComponent"/>（规则/技能承载），允许零效果绑定。
+/// </param>
 public sealed record CardPackKeyword(
     string Id,
     string Label,
     bool IsBattleKeyword,
-    IReadOnlyList<KeywordEffectBinding> Bindings);
+    IReadOnlyList<KeywordEffectBinding> Bindings,
+    string? Program = null);
 
 /// <summary>
 /// 已装载卡包的**内容**（纯数据产出——注册由调用方按装配序完成）。

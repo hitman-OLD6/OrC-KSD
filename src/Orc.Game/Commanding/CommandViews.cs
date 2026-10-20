@@ -154,6 +154,15 @@ public class UnitAttackTriggerView
     [Read]
     public virtual Card? TriggerCard { get; set; }
 
+    /// <summary>
+    /// 是否「玩家指挥攻击」（E 加性；只读）：<c>true</c>＝玩家指挥入口发起（<c>AttackAction.CommandAsync</c>）；
+    /// <c>false</c>/缺省＝效果发起的攻击（<c>AttackAction.EffectAsync</c>）。供数据侧区分两种攻击来源
+    /// （<see cref="TriggerCard"/> 在指挥链上可能被帧继承填充，不能作为来源判据）。
+    /// </summary>
+    [Optional]
+    [Read]
+    public virtual bool IsCommandAttack { get; set; }
+
     /// <summary>本次执行的结果载体（S11 加性；框架内部——入口只读结局，作者不读写）。</summary>
     [Optional]
     [Read]

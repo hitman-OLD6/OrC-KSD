@@ -45,7 +45,42 @@ public sealed class Hq : Card
         // A2 加性：HQ 词条面（同族承载——「友方总部具有免疫」类文本的授予/查询基座；
         // 宿主＝引擎薄容器 Card，与卡牌侧同一管理组件与同一挂载/卸载机制；空管理面零行为负担）。
         Keywords = new KeywordManager(this, engine);
+
+        // 通用接入点：指向触发器（与单位卡同一承载；HQ 不继承 CardBase，故自带具名触发面）。
+        TargetingTrigger = new Trigger<TargetingView>(TargetingRules.TriggerName);
+        TargetingTrigger.Register("指向", HandleTargetingAsync, seams: [TargetingRules.SeamName], registrant: this);
+        _namedTriggers.Register(TargetingRules.TriggerName, TargetingTrigger, typeof(TargetingView));
     }
+
+    private readonly NamedTriggerTable _namedTriggers = new();
+
+    /// <summary>指向触发器（「某方指向本总部」的最终确定面；默认 handler 声明具名动作缝 <see cref="TargetingRules.SeamName"/>）。</summary>
+    public Trigger<TargetingView> TargetingTrigger { get; }
+
+    /// <summary>按名查找具名触发器（与 <see cref="CardBase"/> 同一读面；HQ 词条效果注入通道本版不接）。</summary>
+    public bool TryFindNamedTrigger(
+        string name,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out object? trigger,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Type? viewType)
+        => _namedTriggers.TryFind(name, out trigger, out viewType);
+
+    /// <summary>指向默认 handler：只暴露具名动作缝（无业务逻辑）。</summary>
+    private static Task HandleTargetingAsync(TargetingView view, Context ctx, CancellationToken ct)
+        => ctx.SeamAsync(TargetingRules.SeamName, ct);
+
+    /// <summary>发动指向通知（由 <see cref="TargetingRules.NotifyAsync"/> 调用）。</summary>
+    internal Task InvokeTargetingTriggerAsync(Card? source, string kind, Card? triggerCard, CancellationToken ct)
+        => TargetingTrigger.InvokeAsync(
+            _damageEngine,
+            new Dictionary<string, object?>
+            {
+                [nameof(TargetingView.Source)] = source,
+                [nameof(TargetingView.Target)] = this,
+                [nameof(TargetingView.Kind)] = kind,
+                [nameof(TargetingView.TriggerCard)] = triggerCard,
+                [nameof(TargetingView.Host)] = this,
+            },
+            ct);
 
     /// <summary>归属玩家（HQ 随 Player 创建——恒非空）。</summary>
     public Player Owner { get; }

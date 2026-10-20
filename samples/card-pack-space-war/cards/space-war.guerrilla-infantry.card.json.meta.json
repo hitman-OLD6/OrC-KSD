@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "orc.space-war",
+  "source": "cards/space-war.guerrilla-infantry.card.json",
+  "assets": [
+    {
+      "guid": "21a2f6ca-409e-cdf3-0d5c-1cebcf9baaaa",
+      "kind": "card",
+      "id": "space-war.guerrilla-infantry",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

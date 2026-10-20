@@ -1,12 +1,17 @@
 namespace Orc.Mcp.Match;
 
 /// <summary>
-/// 座位装配输入：一个座位对应一份**显式卡组**（由前端生成玩家/AI 角色时给出；不做自动构筑）。
+/// 座位装配输入：一个座位对应一份**显式卡组**（由控制器给出；不做自动构筑）。
 /// </summary>
 /// <param name="Seat">座位号（0＝玩家A、1＝玩家B）。</param>
 /// <param name="Deck">卡组名单（卡 id 序列；可含包内原 id 或已前缀化 id）。</param>
 /// <param name="Name">展示名（缺省＝按座位号生成）。</param>
-public sealed record MatchSeatConfig(int Seat, IReadOnlyList<string> Deck, string? Name = null);
+/// <param name="DeckConfiguration">构筑配置（主国/盟国；提供即由 <c>Match</c> 创建期校验并注入）。</param>
+public sealed record MatchSeatConfig(
+    int Seat,
+    IReadOnlyList<string> Deck,
+    string? Name = null,
+    Orc.Game.PlayerDeckConfiguration? DeckConfiguration = null);
 
 /// <summary>
 /// 真实对局创建输入（进程内；非沙盒）：卡包目录 ＋ 两个座位装配输入。
@@ -39,7 +44,13 @@ public sealed class MatchLaunchOptions
 
     /// <summary>
     /// 卡组张数要求（默认 39——KARDS 默认构筑口径：39 张卡组，总部随玩家自动生成）。
-    /// 不满足＝创建失败；同名张数不限。
+    /// 不满足＝创建失败。
     /// </summary>
     public int RequiredDeckSize { get; init; } = 39;
+
+    /// <summary>
+    /// 是否执行完整卡组规则（张数/卡池/同名上限/配国）。
+    /// **协议面（房间开局）必须为 true**；仅诊断/测试场景可关闭（示例卡包卡种不足时无法组成 39 张合法卡组）。
+    /// </summary>
+    public bool EnforceDeckRules { get; init; } = true;
 }

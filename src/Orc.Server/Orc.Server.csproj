@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Orc.Server</AssemblyName>
+    <RootNamespace>Orc.Server</RootNamespace>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <!--
+    服务端宿主（多人支持 S1）：房间/座位/控制器状态机 ＋ NDJSON/TCP 传输 ＋ 会话 ＋
+    串行执行管道 ＋ 进程入口。依赖方向单向：Orc.Server → { Orc.Mcp, Orc.Protocol }。
+    房间状态机不得持有引擎活对象（`Match`/`Player`/`Card`/`Ref<T>`）。
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Orc.Mcp\Orc.Mcp.csproj" />
+    <ProjectReference Include="..\Orc.Protocol\Orc.Protocol.csproj" />
+    <!-- 服务端托管 AI 客户端（R3）：AI 由服务端进程内驱动，不经过协议。 -->
+    <ProjectReference Include="..\Orc.Ai\Orc.Ai.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -213,6 +213,7 @@ public static class PackageScanner
 
                 var label = Text(item, "label") ?? id;
                 var battle = item.TryGetProperty("battle", out var b) && b.ValueKind == JsonValueKind.True;
+                var program = ReadProgram(item, id);
                 var bindings = new List<KeywordEffectBinding>();
                 if (item.TryGetProperty("bindings", out var list) && list.ValueKind == JsonValueKind.Array)
                 {
@@ -226,12 +227,13 @@ public static class PackageScanner
                     }
                 }
 
-                if (bindings.Count == 0)
+                // 行为承载：效果绑定（csx）或词条程序（规则/技能）至少一项。
+                if (bindings.Count == 0 && program is null)
                 {
-                    throw new InvalidDataException($"词条 '{id}' 没有任何效果绑定（无行为词条不允许发布）。");
+                    throw new InvalidDataException($"词条 '{id}' 没有任何效果绑定或程序（无行为词条不允许发布）。");
                 }
 
-                result.Add(new CardPackKeyword(id, label, battle, bindings));
+                result.Add(new CardPackKeyword(id, label, battle, bindings, program));
             }
 
             return result;
@@ -240,6 +242,36 @@ public static class PackageScanner
         {
             throw new InvalidDataException($"keywords.json 无法解析：{e.Message}");
         }
+    }
+
+    /// <summary>
+    /// 读取词条的 <c>program</c> 字段（对象或 JSON 字符串；缺省/空＝null）。
+    /// 结构校验交给 <see cref="KeywordProgram.Parse"/>（非法＝明确失败、不静默丢弃）。
+    /// </summary>
+    private static string? ReadProgram(JsonElement item, string keywordId)
+    {
+        if (!item.TryGetProperty("program", out var program)
+            || program.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        var json = program.ValueKind == JsonValueKind.String ? program.GetString() : program.GetRawText();
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            KeywordProgram.Parse(json);
+        }
+        catch (InvalidDataException e)
+        {
+            throw new InvalidDataException($"词条 '{keywordId}' 的 program 非法：{e.Message}");
+        }
+
+        return json;
     }
 
     private static ScannedSourceFile Describe(string root, string sourcePath, bool isHistorical = false)

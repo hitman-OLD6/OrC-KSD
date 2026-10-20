@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 3,
+  "root": {
+    "id": "keyword.magnetic-reaction",
+    "version": 1,
+    "mainTrigger": {
+      "id": "t.main",
+      "stableKey": "磁反应装甲·免疫",
+      "kind": "passive",
+      "viewType": "Orc.Cards.CardEventView",
+      "hooks": ["card.destroyed"],
+      "events": []
+    },
+    "otherTriggers": [
+      {
+        "id": "t.immune",
+        "stableKey": "磁反应装甲·伤害归零",
+        "kind": "passive",
+        "viewType": "Orc.Game.Damage.DamageApplyView, Orc.Game",
+        "hooks": ["card.destroyed"],
+        "events": [
+          {
+            "id": "onApply",
+            "entry": "Handle",
+            "csx": "Func<Orc.Game.Damage.DamageApplyView, Context, CancellationToken, Task> Handle = async (view, ctx, ct) =>\n{\n    var host = view.Host;\n    if (host is null || !object.ReferenceEquals(view.Target, host)) { return; }\n\n    // 磁反应装甲：具有免疫（伤害归零；不拦索敌、不防抑制）。\n    view.IsZeroed = true;\n    view.Amount = 0;\n};\n",
+            "version": 1
+          }
+        ]
+      },
+      {
+        "id": "t.targeted",
+        "stableKey": "磁反应装甲·被指向扣层",
+        "kind": "passive",
+        "viewType": "Orc.Game.Cards.TargetingView, Orc.Game",
+        "hooks": ["card.destroyed"],
+        "events": [
+          {
+            "id": "onTargeted",
+            "entry": "Handle",
+            "csx": "Func<Orc.Game.Cards.TargetingView, Context, CancellationToken, Task> Handle = async (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Game.Cards.UnitCard host) { return; }\n\n    var sourceOwner = view.Source switch\n    {\n        Orc.Game.Cards.UnitCard unit => unit.Owner,\n        Orc.Game.Players.Hq hq => hq.Owner,\n        _ => null,\n    };\n    if (sourceOwner is null || object.ReferenceEquals(sourceOwner, host.Owner)) { return; } // 仅敌方指向\n\n    var x = host.Keywords.GetValue(\"磁反应装甲\");\n    if (x is null) { return; }\n\n    var next = x.Value - 1;\n    if (next <= 0) { await host.Keywords.RevokeAsync(\"磁反应装甲\"); }\n    else { host.Keywords.SetValue(\"磁反应装甲\", next); }\n};\n",
+            "version": 1
+          }
+        ]
+      }
+    ],
+    "wrappers": [],
+    "injects": [
+      { "target": "伤害处理触发器", "band": "Rewrite", "event": "onApply", "priority": 20 },
+      { "target": "指向触发器", "event": "onTargeted", "priority": 0 }
+    ],
+    "judicatorWrappers": []
+  }
+}

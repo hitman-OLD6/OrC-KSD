@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "orc.space-war",
+  "source": "cards/space-war.shield-infantry.card.json",
+  "assets": [
+    {
+      "guid": "57a5f103-7ccf-059c-07f0-bd865409902e",
+      "kind": "card",
+      "id": "space-war.shield-infantry",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

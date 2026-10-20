@@ -163,7 +163,11 @@ public sealed class PlayManager
         {
             var step = await flow.Step(
                 SelectorTemplates.Slot,
-                new ReferenceSetParameter(candidates.Select(gap => gap.Ref), 1, 1));
+                new ReferenceSetParameter(candidates.Select(gap => gap.Ref), 1, 1)
+                {
+                    // S6：部署选位归属＝卡牌拥有者。
+                    Owner = card.Owner,
+                });
 
             // 非法选择＝同一选择器重入（Q8a）。
             while (step.IsFailed && step.Failure == SelectorFailureReason.InvalidSelection)

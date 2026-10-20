@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Orc.Protocol</AssemblyName>
+    <RootNamespace>Orc.Protocol</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    协议契约层（多人支持 S1）：JSON-RPC 信封、房间/座位/控制器快照、推送载荷、
+    纯 DTO ＋ 序列化上下文——服务端与客户端共用，**不引用任何引擎工程**。
+    依赖方向：Orc.UI.Contracts ← Orc.Protocol ← { Orc.Client, Orc.Server }。
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Orc.UI.Contracts\Orc.UI.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

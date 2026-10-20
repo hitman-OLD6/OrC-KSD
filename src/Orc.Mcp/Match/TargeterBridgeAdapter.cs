@@ -28,6 +28,10 @@ public sealed record PendingCandidate(
 /// <param name="Max">最多选取数。</param>
 /// <param name="Candidates">引用类候选（会话内序号 + 引用键）。</param>
 /// <param name="Identifiers">标识类候选（非引用类：选项/卡牌名单）。</param>
+/// <param name="Seat">
+/// 选靶归属座位（多人支持 S6；<c>null</c>＝引擎未提供归属）。
+/// 应答者由该座位的控制器决定，不再依靠先到先服务的认领。
+/// </param>
 public sealed record PendingSelection(
     string SessionId,
     string SelectorName,
@@ -35,7 +39,8 @@ public sealed record PendingSelection(
     int Min,
     int Max,
     IReadOnlyList<PendingCandidate> Candidates,
-    IReadOnlyList<string> Identifiers);
+    IReadOnlyList<string> Identifiers,
+    int? Seat = null);
 
 /// <summary>
 /// 目标选择桥接适配器（<see cref="ITargeterBridge"/> 实现）。
@@ -78,6 +83,12 @@ public sealed class TargeterBridgeAdapter : ITargeterBridge
     /// 待决请求已发布（供宿主/UI 订阅渲染候选）。**在锁外同步触发**，订阅者不得阻塞。
     /// </summary>
     public event Action<PendingSelection>? PendingPublished;
+
+    /// <summary>
+    /// 待决请求已超时（宿主据此推 <c>notify/target.expired</c>；锁外触发，订阅者不得阻塞）。
+    /// 超时后动作按取消推进。
+    /// </summary>
+    public event Action<PendingSelection>? PendingExpired;
 
     /// <summary>会话标识常量：服务层（agent / MCP 工具）应答者。</summary>
     public const string ClaimantService = "service";
@@ -356,6 +367,16 @@ public sealed class TargeterBridgeAdapter : ITargeterBridge
                         _pending = null;
                     }
 
+                    // S8c：超时通知（宿主据此推 notify/target.expired，避免客户端停在死面板上）。
+                    try
+                    {
+                        PendingExpired?.Invoke(pending);
+                    }
+                    catch (Exception)
+                    {
+                        // 订阅者异常不得影响动作推进。
+                    }
+
                     evt = new CancelEvent(); // 超时＝取消（R2c）
                 }
                 else
@@ -406,6 +427,10 @@ public sealed class TargeterBridgeAdapter : ITargeterBridge
                 alive));
         }
 
+        // S6：归属座位优先取选择器参数注入的 Owner；未注入时回落呈现参数里的玩家（零改动兼容既有路径）。
+        var seat = presentation.OwnerSeat
+            ?? (presentation.Parameter as Orc.Game.Players.Player)?.Index;
+
         return new PendingSelection(
             sessionId,
             presentation.SelectorName,
@@ -413,7 +438,8 @@ public sealed class TargeterBridgeAdapter : ITargeterBridge
             presentation.Min,
             presentation.Max,
             candidates,
-            presentation.Identifiers ?? Array.Empty<string>());
+            presentation.Identifiers ?? Array.Empty<string>(),
+            seat);
     }
 
     /// <summary>候选类别归类（呈现用；不影响引擎判定）。</summary>

@@ -38,6 +38,12 @@ public sealed class SelectorPresentation
         HasParameter = hasParameter;
     }
 
+    /// <summary>
+    /// 选靶归属座位（多人支持 S6；由 <see cref="SelectorParameter.Owner"/> 注入）。
+    /// <c>null</c>＝未指定归属（宿主回落当前动作发起者）。
+    /// </summary>
+    public int? OwnerSeat { get; internal set; }
+
     /// <summary>选择器类型名（专门选择器的稳定标识；前端据以选择视觉实现）。</summary>
     public string SelectorName { get; }
 

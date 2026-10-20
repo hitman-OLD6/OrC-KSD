@@ -1187,6 +1187,13 @@ public sealed class CommandManager
             return;
         }
 
+        // 指向：指挥攻击成功发起后，对目标各触发一次（复验拒绝/取消不触发；效果发起的攻击不走本路径）。
+        if (targetRef.Value is Card targeted)
+        {
+            await TargetingRules.NotifyAsync(
+                _engine, targeted, unit, TargetingRules.KindCommand, triggerCard, ct);
+        }
+
         // 外层收尾（执行成功后；攻击者死亡不豁免）：扣费 → 两 bool 更新 → unit.acted（恰一次、只在外层；经 S5 统一收尾单元）
         var isTank = HasUnitType(unit, UnitType.Tank);
         var profile = new OperateProfile(

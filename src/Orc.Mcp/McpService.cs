@@ -28,9 +28,20 @@ public sealed partial class McpService
     private readonly List<string> _processStateNotes = new();
 
     public McpService(McpServiceOptions options)
+        : this(options, roomControl: null)
+    {
+    }
+
+    /// <summary>
+    /// 创建服务层。
+    /// </summary>
+    /// <param name="options">运行选项。</param>
+    /// <param name="roomControl">房间控制面（宿主注入；<c>null</c>＝无房间能力，<c>room.*</c> 工具不登记）。</param>
+    public McpService(McpServiceOptions options, Orc.Mcp.Room.IRoomControl? roomControl)
     {
         ArgumentNullException.ThrowIfNull(options);
         Options = options;
+        RoomControl = roomControl;
         Sandbox = new SandboxEnvironment(options);
         Bridge = new TargeterBridgeAdapter(options.TargetSelectionTimeout, KeyOf);
         Executor = new MatchExecutor(Bridge);
@@ -42,6 +53,9 @@ public sealed partial class McpService
 
     /// <summary>运行选项。</summary>
     public McpServiceOptions Options { get; }
+
+    /// <summary>房间控制面（未注入＝<c>null</c>，房间工具不登记）。</summary>
+    public Orc.Mcp.Room.IRoomControl? RoomControl { get; }
 
     /// <summary>沙盒环境（目录/脚手架/路径守卫）。</summary>
     public SandboxEnvironment Sandbox { get; }
@@ -215,6 +229,7 @@ public sealed partial class McpService
             ["mode"] = pending.Mode,
             ["min"] = pending.Min,
             ["max"] = pending.Max,
+            ["seat"] = pending.Seat,
             ["candidates"] = candidates,
             ["identifiers"] = identifiers,
         };

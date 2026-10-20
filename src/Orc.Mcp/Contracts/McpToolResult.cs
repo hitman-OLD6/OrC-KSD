@@ -99,4 +99,24 @@ public static class McpCodes
 
     /// <summary>工具自身故障（协议适配层据此设置 MCP <c>isError</c>）。</summary>
     public const string Internal = "internal";
+
+    // ---- 房间/座位/会话（多人支持；与 Orc.Protocol.ResultCodes 同名同值） ----
+
+    /// <summary>串行队列已满，稍后重试。</summary>
+    public const string Busy = "busy";
+
+    /// <summary>座位已被占用。</summary>
+    public const string SeatTaken = "seat-taken";
+
+    /// <summary>座位令牌无效或已过期。</summary>
+    public const string Unauthorized = "unauthorized";
+
+    /// <summary>房间未就绪（座位未填满/仍有空座）。</summary>
+    public const string RoomNotReady = "room-not-ready";
+
+    /// <summary>房间已开局，房间态操作被拒绝。</summary>
+    public const string RoomStarted = "room-started";
+
+    /// <summary>卡组不合法（张数/卡池/同名上限/配国）。</summary>
+    public const string DeckInvalid = "deck-invalid";
 }

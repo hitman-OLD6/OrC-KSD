@@ -46,9 +46,22 @@ public sealed class CardPackKeywordLoader : IPackageLifecycleObserver
         }
 
         var id = keyword.Id;
-        KeywordRegistry.RegisterOrReplace(
-            id, (_, _) => new PlainKeywordComponent(id), keyword.IsBattleKeyword);
+
+        // 有程序＝程序词条（规则/技能承载）；否则纯标识词条。两种形态都可再挂效果绑定。
+        if (keyword.Program is { Length: > 0 } program)
+        {
+            ProgramKeywordComponent.Register(id, KeywordProgram.Parse(program), keyword.IsBattleKeyword);
+        }
+        else
+        {
+            KeywordRegistry.RegisterOrReplace(
+                id, (_, _) => new PlainKeywordComponent(id), keyword.IsBattleKeyword);
+        }
+
         KeywordOwner[id] = packId;
-        KeywordRegistry.DeclareEffectBindings(id, keyword.Bindings);
+        if (keyword.Bindings.Count > 0)
+        {
+            KeywordRegistry.DeclareEffectBindings(id, keyword.Bindings);
+        }
     }
 }

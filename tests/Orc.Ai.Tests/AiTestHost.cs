@@ -60,6 +60,8 @@ internal sealed class AiTestHost : IDisposable
             SeatA = new MatchSeatConfig(OpponentSeat, SampleDeck(), "脚本对手"),
             SeatB = new MatchSeatConfig(Seat, SampleDeck(), "启发式 AI"),
             Seed = seed,
+            // 示例卡包只有 5 张卡，无法组成 39 张合法构筑；AI 测试只验决策行为。
+            EnforceDeckRules = false,
         };
 
         var created = await service.CreateMatchAsync(launch);

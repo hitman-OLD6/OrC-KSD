@@ -49,7 +49,18 @@ public sealed partial class McpService : IAiMatchGateway
 
     async Task<AiActionOutcome> IAiMatchGateway.SubmitAsync(
         string sessionId, IReadOnlyList<int> picks, bool cancel, CancellationToken ct, string claimant)
-        => ToAi(await Executor.SubmitAsync(sessionId, picks, cancel, ct, claimant).ConfigureAwait(false));
+    {
+        // S6：归属座位校验——待决请求声明了归属时，只有该座位的控制器可以应答。
+        if (Executor.Match is { } match
+            && Bridge.CurrentPending is { Seat: { } ownerSeat }
+            && Options.AgentSeat is { } agentSeat
+            && ownerSeat != agentSeat)
+        {
+            return AiActionOutcome.Fail($"该选靶属于座位 {ownerSeat}，当前控制器为座位 {agentSeat}。");
+        }
+
+        return ToAi(await Executor.SubmitAsync(sessionId, picks, cancel, ct, claimant).ConfigureAwait(false));
+    }
 
     private static bool IsTrue(JsonNode? node)
         => node is JsonValue value && value.TryGetValue<bool>(out var flag) && flag;

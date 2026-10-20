@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "orc.space-war",
+  "source": "effects/keyword.sponge-armor.prefab.json",
+  "assets": [
+    {
+      "guid": "046e23d8-a6ea-c686-b8f7-5abd20e31500",
+      "kind": "effect",
+      "id": "keyword.sponge-armor",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

@@ -745,22 +745,40 @@ public sealed partial class EffectRuntime
 
     /// <summary>无头选靶（经游戏层判定器 <see cref="JudicatorNames.EffectTargetResolve"/> 求值；不可用＝空集）。</summary>
     /// <exception cref="ArgumentNullException">viewer 或 selector 为 null。</exception>
-    public Task<IReadOnlyList<Card>> SelectAsync(Card viewer, EffectSelector selector, CancellationToken ct = default)
+    public async Task<IReadOnlyList<Card>> SelectAsync(Card viewer, EffectSelector selector, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(viewer);
         ArgumentNullException.ThrowIfNull(selector);
 
         if (_judicators() is not { } judicators)
         {
-            return Task.FromResult<IReadOnlyList<Card>>(Array.Empty<Card>());
+            return Array.Empty<Card>();
         }
 
         var result = judicators.Invoke(
             JudicatorNames.EffectTargetResolve, new object[] { viewer, selector }, OwnerOf(viewer)?.Index);
-        return Task.FromResult(
-            result is { Length: > 0 } && result[0] is IReadOnlyList<Card> cards
-                ? cards
-                : (IReadOnlyList<Card>)Array.Empty<Card>());
+        var cards = result is { Length: > 0 } && result[0] is IReadOnlyList<Card> resolved
+            ? resolved
+            : (IReadOnlyList<Card>)Array.Empty<Card>();
+
+        // 指向：最终名单确定后对每个目标各触发一次（候选枚举不算、后续失败不回滚）。
+        await NotifyTargetedAsync(viewer, cards, ct).ConfigureAwait(false);
+        return cards;
+    }
+
+    /// <summary>「指向」通知（效果选靶路径；对最终选定的每个目标各一次）。</summary>
+    private async Task NotifyTargetedAsync(Card viewer, IReadOnlyList<Card> targets, CancellationToken ct)
+    {
+        if (_engine?.Invoke() is not { } engine || targets.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var target in targets)
+        {
+            await TargetingRules.NotifyAsync(
+                engine, target, viewer, TargetingRules.KindEffect, triggerCard: viewer, ct).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -803,7 +821,11 @@ public sealed partial class EffectRuntime
         {
             var step = await flow.Step(
                 SelectorTemplates.FieldUnit,
-                new ReferenceSetParameter(candidates, 1, 1, domainValidator: validator, tag: viewer));
+                new ReferenceSetParameter(candidates, 1, 1, domainValidator: validator, tag: viewer)
+                {
+                    // S6：选靶归属＝观察者的归属玩家（与 TargeterManager 的取用同源）。
+                    Owner = OwnerOf(viewer),
+                });
 
             while (step.IsFailed && step.Failure == SelectorFailureReason.InvalidSelection)
             {
@@ -824,9 +846,19 @@ public sealed partial class EffectRuntime
             return TargeterResult.Ok();
         }).ConfigureAwait(false);
 
-        return result.IsOk && selected is { IsAlive: true } reference && reference.Value is Card card
-            ? new[] { card }
-            : Array.Empty<Card>();
+        if (result.IsOk && selected is { IsAlive: true } reference && reference.Value is Card card)
+        {
+            // 指向：交互落定即最终确定（每个目标一次；取消/失败路径不触发）。
+            if (_engine?.Invoke() is { } engine)
+            {
+                await TargetingRules.NotifyAsync(
+                    engine, card, viewer, TargetingRules.KindEffect, triggerCard: viewer, ct).ConfigureAwait(false);
+            }
+
+            return new[] { card };
+        }
+
+        return Array.Empty<Card>();
     }
 
     private static Player? OwnerOf(Card card) => card switch

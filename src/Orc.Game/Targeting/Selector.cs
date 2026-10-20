@@ -9,6 +9,11 @@ namespace Orc.Game.Targeting;
 /// <summary>选择器参数基类。</summary>
 public abstract class SelectorParameter
 {
+    /// <summary>
+    /// 选靶归属玩家（多人支持 S6）：用于把待决请求路由到对应座位的控制器。
+    /// <para><c>null</c>＝未指定（宿主侧回落"当前动作发起者"并记录诊断，不静默路由错）。</para>
+    /// </summary>
+    public Orc.Game.Players.Player? Owner { get; init; }
 }
 
 /// <summary>

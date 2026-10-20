@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 2,
+  "id": "orc.space-war",
+  "guid": "60a516dc-63cf-b6af-ccd2-63d0701fd04d",
+  "kind": "cardpack",
+  "name": "太空战争",
+  "version": "59f86543c9aa94ad492edc2813dc8de8",
+  "metadata": [
+    "cards/space-war.guerrilla-infantry.card.json.meta.json",
+    "cards/space-war.magnetic-armor-tank.card.json.meta.json",
+    "cards/space-war.shield-infantry.card.json.meta.json",
+    "cards/space-war.sponge-infantry.card.json.meta.json",
+    "effects/keyword.magnetic-reaction.prefab.json.meta.json",
+    "effects/keyword.magnetic-shield.prefab.json.meta.json",
+    "effects/keyword.sponge-armor.prefab.json.meta.json"
+  ]
+}

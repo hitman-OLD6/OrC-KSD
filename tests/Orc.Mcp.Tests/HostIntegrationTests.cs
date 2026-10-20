@@ -83,6 +83,8 @@ public class HostIntegrationTests
         var pending = received[0];
         Assert.False(string.IsNullOrWhiteSpace(pending.SessionId));
         Assert.NotEmpty(pending.Candidates);
+        // S6：选靶归属座位随请求过线（0 号座位打出的卡）。
+        Assert.Equal(0, pending.Seat);
 
         // 宿主（UI）认领该请求 → agent 侧提交应被拒绝（先到先服务）
         Assert.True(fixture.Service.TryClaimTargeting(pending.SessionId, TargeterBridgeAdapter.ClaimantHost, out _));

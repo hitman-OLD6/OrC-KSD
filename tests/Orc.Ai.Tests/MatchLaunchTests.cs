@@ -25,6 +25,8 @@ public sealed class MatchLaunchTests
             PackDirectories = new[] { pack ?? AiTestHost.PackDirectory() },
             SeatA = new MatchSeatConfig(0, deckA ?? AiTestHost.SampleDeck()),
             SeatB = new MatchSeatConfig(1, deckB ?? AiTestHost.SampleDeck()),
+            // 示例卡包只有 5 张卡，无法组成 39 张合法构筑；本测试验装配而非构筑规则。
+            EnforceDeckRules = false,
         };
 
     [Fact]

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "orc.space-war",
+  "source": "cards/space-war.sponge-infantry.card.json",
+  "assets": [
+    {
+      "guid": "71879126-1c39-0343-bd56-e67087c685d9",
+      "kind": "card",
+      "id": "space-war.sponge-infantry",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

@@ -121,12 +121,13 @@ public class SnapshotJsonTests
         var link = doc.RootElement.GetProperty("components").GetProperty("LinkData");
         Assert.Equal(3, link.GetProperty("Mana").GetInt32());
 
-        // 引用型属性值：降级为 {"$entity","$alive"}（不递归导出目标成员——防环）
+        // 引用型属性值：降级为 {"$ref": GUID(N), "name", "alive"}（不递归导出目标成员——防环）
         var linked = link.GetProperty("Linked");
-        Assert.Equal("另一张卡", linked.GetProperty("$entity").GetString());
+        Assert.Equal("另一张卡", linked.GetProperty("name").GetString());
         Assert.True(linked.GetProperty("$alive").GetBoolean());
+        Assert.True(Guid.TryParseExact(linked.GetProperty("$ref").GetString(), "N", out _));
         Assert.False(linked.TryGetProperty("components", out _));
-        Assert.Equal(2, linked.EnumerateObject().Count());
+        Assert.Equal(3, linked.EnumerateObject().Count());
     }
 
     [Fact]

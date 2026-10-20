@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "orc.space-war",
+  "source": "cards/space-war.magnetic-armor-tank.card.json",
+  "assets": [
+    {
+      "guid": "e969dec4-e362-7fdd-4b5b-e8725664d9a3",
+      "kind": "card",
+      "id": "space-war.magnetic-armor-tank",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

@@ -16,6 +16,13 @@ public class ToolWhitelistTests
     [
         "service.info",
         "service.tools",
+        "room.info",
+        "room.claim",
+        "room.release",
+        "room.add_ai",
+        "room.start",
+        "room.kick",
+        "room.resume",
         "match.end_turn",
         "match.concede",
         "mulligan.begin",
@@ -86,7 +93,7 @@ public class ToolWhitelistTests
     [Fact]
     public void PlayerMode_ExposesExactlyThePlayerWhitelist()
     {
-        using var fixture = new SandboxFixture(McpServiceMode.Player);
+        using var fixture = new SandboxFixture(McpServiceMode.Player, room: new FakeRoomControl());
 
         var actual = fixture.Service.Tools.Select(tool => tool.Name).OrderBy(name => name, StringComparer.Ordinal).ToArray();
         var expected = PlayerTools.OrderBy(name => name, StringComparer.Ordinal).ToArray();
@@ -97,7 +104,7 @@ public class ToolWhitelistTests
     [Fact]
     public void PlayerMode_ContainsNoDebugTools()
     {
-        using var fixture = new SandboxFixture(McpServiceMode.Player);
+        using var fixture = new SandboxFixture(McpServiceMode.Player, room: new FakeRoomControl());
         var actual = fixture.Service.Tools.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
 
         foreach (var debug in DebugTools)
@@ -109,8 +116,8 @@ public class ToolWhitelistTests
     [Fact]
     public void AuthoringMode_EqualsPlayerToolsPlusDebugTools()
     {
-        using var player = new SandboxFixture(McpServiceMode.Player);
-        using var authoring = new SandboxFixture(McpServiceMode.Authoring);
+        using var player = new SandboxFixture(McpServiceMode.Player, room: new FakeRoomControl());
+        using var authoring = new SandboxFixture(McpServiceMode.Authoring, room: new FakeRoomControl());
 
         var playerSet = player.Service.Tools.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
         var authoringSet = authoring.Service.Tools.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
@@ -127,7 +134,7 @@ public class ToolWhitelistTests
     [Fact]
     public async Task PlayerMode_SandboxOnlyToolCall_IsUnknown()
     {
-        using var fixture = new SandboxFixture(McpServiceMode.Player);
+        using var fixture = new SandboxFixture(McpServiceMode.Player, room: new FakeRoomControl());
 
         var result = await fixture.InvokeAsync("sandbox.create");
 
@@ -138,7 +145,7 @@ public class ToolWhitelistTests
     [Fact]
     public async Task PlayerMode_ObservationWithoutSeat_IsModeDenied()
     {
-        using var fixture = new SandboxFixture(McpServiceMode.Player);
+        using var fixture = new SandboxFixture(McpServiceMode.Player, room: new FakeRoomControl());
 
         // 未指定座位（且无活跃对局）时，观察面给出可判别拒绝而非静默失败。
         var result = await fixture.InvokeAsync("observe.view");
