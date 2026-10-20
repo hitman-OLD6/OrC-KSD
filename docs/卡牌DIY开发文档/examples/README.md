@@ -1,6 +1,6 @@
 # 示例索引（`examples/`）
 
-> 八个可复制示例：每例一文件、六段结构（卡面 / 选型 / 完整数据或代码 / 时序 / 坑 / 证据）。
+> 九个可复制示例：每例一文件、六段结构（卡面 / 选型 / 完整数据或代码 / 时序 / 坑 / 证据）。
 > 机制原理不在这里重复——每例第 2 段给判据，细节链到 `00`–`08` 章。
 > 新增示例照 [`_template/示例模板.md`](../_template/示例模板.md) 复制，并在本表与 [总 README](../README.md) §5.4 登记。
 
@@ -16,6 +16,7 @@
 | 想让指令可被反制 | [06 反制第二张指令](./06-反制第二张指令.md)（`OrderFlow`；G-01 已解决 P4） |
 | 想禁止某单位被指令指向 | [07 指令免疫](./07-指令免疫.md)（判定器两条路径） |
 | 想做「战斗 + 分支位移」的复合流程 | [08 突袭推进](./08-突袭推进.md)（`BattleAsync`，R10） |
+| 想做「相邻单位持续降费 + 减伤」 | [09 相邻掩护](./09-相邻掩护.md)（光环谓词 + 三个通用判定器 + 伤害处理端注入） |
 
 ## 2. 证据等级
 
@@ -24,7 +25,7 @@
 | **L1** | 数据可加载、预检双零 | `CardDistributionValidator.Validate` → `ErrorCount=0 / WarningCount=0` |
 | **L2** | 行为可复跑 | `dotnet test` 对应用例通过（加载 → 触发 → 世界状态变化有断言） |
 
-本目录八例均达 **L2**；数据侧四例（01/02/03/05）另达 **L1**（进 `samples/card-pack-diy/`）。
+本目录九例均达 **L2**；数据侧五例（01/02/03/05/09）另达 **L1**（进 `samples/card-pack-diy/`）。
 
 ## 3. 总表
 
@@ -38,23 +39,24 @@
 | 06 | [反制第二张指令](./06-反制第二张指令.md) | R6f | **仅代码侧可用** | L2 | `DiyExample06_CounterSecondOrderTests.第二张指令_被反制_首张正常结算` | `tests/Orc.Game.Tests/DiyExample06_CounterSecondOrderTests.cs` |
 | 07 | [指令免疫](./07-指令免疫.md) | R6g | **仅代码侧可用 / 混合** | L2 | `DiyExample07_TargetingForbidTests.代码侧声明_被保护单位从敌方指令候选中剔除`<br>`DiyExample07_TargetingForbidTests.词条程序路径_被保护单位从敌方指令候选中剔除` | `tests/Orc.Game.Tests/DiyExample07_TargetingForbidTests.cs` |
 | 08 | [突袭推进](./08-突袭推进.md) | R6h | **仅代码侧可用** | L2 | `DiyExample08_AssaultAdvanceRetreatTests.突袭_BattleAsync_存活且前线无敌人_推进并打总部3`<br>`DiyExample08_AssaultAdvanceRetreatTests.突袭_BattleAsync_存活但前线有敌人_撤退到己方支援线`<br>`DiyExample08_AssaultAdvanceRetreatTests.突袭_BattleAsync_阵亡_不推进不撤退不打总部` | `tests/Orc.Game.Tests/DiyExample08_AssaultAdvanceRetreatTests.cs` |
+| 09 | [相邻掩护](./09-相邻掩护.md) | 补篇（相邻光环 + 减伤） | **数据侧可用** | L2 + L1 | `DiyExample09_AdjacentCoverTests.交叉掩护_相邻友方步兵_行动费减一且受伤减一`<br>`DiyExample09_AdjacentCoverTests.交叉掩护_相邻但非步兵_不生效`<br>`DiyExample09_AdjacentCoverTests.交叉掩护_两个来源夹住_叠加为行动费减二与受伤减二` | `samples/card-pack-diy/cards/diy.adjacent-cover.card.json`<br>`samples/card-pack-diy/effects/diy.adjacent-cover.aura.prefab.json`<br>`samples/card-pack-diy/effects/diy.adjacent-cover.mitigation.prefab.json` |
 
-> 数据侧四例的完整卡包（含预检命令与实测输出）见 [`samples/card-pack-diy/README.md`](../../../samples/card-pack-diy/README.md)。
+> 数据侧五例的完整卡包（含预检命令与实测输出）见 [`samples/card-pack-diy/README.md`](../../../samples/card-pack-diy/README.md)。
 
 ## 4. 一键复跑
 
 ```bash
-# 八个示例 + 卡包预检（共 15 条）
+# 九个示例 + 卡包预检（共 19 条）
 dotnet test tests/Orc.Game.Tests/Orc.Game.Tests.csproj --filter "FullyQualifiedName~Diy"
 
 # 单例
 dotnet test tests/Orc.Game.Tests/Orc.Game.Tests.csproj --filter "FullyQualifiedName~DiyExample01"
 ```
 
-实测输出（2026-10-19）：
+实测输出（2026-10-20）：
 
 ```text
-Passed!  - Failed: 0, Passed: 15, Skipped: 0, Total: 15
+Passed!  - Failed: 0, Passed: 19, Skipped: 0, Total: 19
 ```
 
 ## 5. 能力边界（不达标的四例，别当成数据侧能力）
@@ -65,6 +67,7 @@ Passed!  - Failed: 0, Passed: 15, Skipped: 0, Total: 15
 | 06 | 反制效果仍**只能代码侧**实现（G-01 已解决，P4） | 数据侧没有「注册 Counter 段 handler」的声明面；原生指令卡本身已可被反制 | 反制卡走 `CounterCard.AddEffectHandler`；命中默认 `ctx.Stop()`（指令照常扣费离手），需要「牌留手、不扣费」时用 `ctx.Interrupt()` | G-01（已解决） |
 | 07 | 必须有一个代码侧注册动作 | 数据侧不能声明判定器，也不能改候选域 | A：`TargetingDeclaration`；B：词条程序 `targeting.forbid` + 一行注册 | G-05 |
 | 08 | 撤退仍无动作面 | 战斗已由 `BattleAsync` 收口（R10）；撤退只有 `CommandManager.MoveUnitAsync(unit, slot)`（S6 起免费） | 战斗直接 `BattleAsync`；撤退先找己方支援线空槽再移 | G-02（战斗半条已关闭） |
+| 09 | 减伤写的是**伤害量**，不改防御上限 | 修饰链只有 `OperateCost/Attack/Defense/DeployCost/HqHealth`，没有“受伤”维度 | 在 `damage.apply` 的 `Rewrite` 段改 `Amount`（每次结算各减） | 无（本批已补齐管线注入面） |
 
 其余边界（`Source` 只 6 条信号非空、事件 `band` 只接受 `default`/`disposing`、`Subscribe` 拿不到 `TriggerCard`）见 [08 章](../08-能力边界.md) 与 [缺口表](../reference/缺口表.md)。
 
@@ -77,3 +80,4 @@ Passed!  - Failed: 0, Passed: 15, Skipped: 0, Total: 15
 | 06 | `OrderFlow` + 反制 band | [03 判定器与 wrapper](../03-判定器与wrapper.md) |
 | 07 | 判定器包装 / 词条程序 | [03 判定器与 wrapper](../03-判定器与wrapper.md)、[07 词条](../07-词条与预制效果.md) |
 | 08 | 流程编排 + 位移动作 | [05 动作面](../05-动作面与运行时API.md)、[08 能力边界](../08-能力边界.md) |
+| 09 | 光环谓词 + 判定器组合 + 伤害处理端注入 | [01 效果原理](../01-效果原理.md) §光环、[03 判定器与 wrapper](../03-判定器与wrapper.md)、[05 动作面](../05-动作面与运行时API.md) |

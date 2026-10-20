@@ -358,3 +358,43 @@
 | B7 | `CardLoadReport.items` 不承载「appId 未解析」的卡位 | 冻结 schema 的 `items[].assetGuid` 非空 | 该卡位仍占 `slots` 一条（`assetGuid:null`、`tier:invalid`、`fieldPaths:["appId"]`） |
 | B8 | 样例卡普遍落在 `warning` 档 | 样例数据无卡图／描述，D40 判为警报 | 符合 D40；不是质量问题 |
 | B9 | 全量重建（`--no-incremental`）可见 4 条既有 CS86xx 可空性警告 | 均为既有文件（`EffectSystem`／`KeywordServices`／`UnitTurnStatsTracker`／`BulwarkKeywordTests`），本次未触碰 | 常规增量构建为 0 警告；不在本次范围修 |
+
+## 验收修复
+
+### S11: R16 元数据冲突判定（验收缺口 P0）
+- Status: Done
+- Target：`src/Orc.Packages/LoadListPlanner.cs`、`tests/Orc.Packages.Tests/LoadListPlannerTests.cs`
+- Approach：
+  - `AssetLoadIssueCode` 增 `DeclaredConflict = 10`，并纳入 `IsFatal`（结构性失败：本次计算不产出列表）。
+  - `Build` 在 lock 冲突之后、依赖检测之前扫描 `Metadata.ConflictsWith`：以本域 lock 合并后实际参与加载的资产为判定集合；引用经 `NormalizeReference` 归一；命中条件＝同 `kind` ＋ 同应用层 ID ＋ 目标版本满足声明约束；排除自身。
+  - 语义按 D52：**单向声明即成立**（声明表达"不能共存"）；**域内判定**（测试声明不污染正式）。
+- Acceptance:
+  - [x] 冲突双方同处集合 ⇒ `plan.IsValid=false`、`DeclaredConflict.IsFatal=true`、报告含双方资产名
+  - [x] 仅一方在集合 ⇒ 有效
+  - [x] 版本约束不满足 ⇒ 不触发
+  - [x] 测试域声明冲突不影响正式域
+  - [x] 全量回归：**2045 通过 / 0 失败**（原 2041 ＋ 新增 4）
+- Rationale：`ConflictsWith` 此前只有 DTO 读写、无判定路径；R16 是 Confirmed 需求，属验收缺口而非新需求。
+- Terminology: [资产元数据](../../CONTEXT.md)
+
+### S12: P1 插件服务资产化（D62–D65）
+- Status: Done
+- Target：`src/Orc/Core/AssetIdentity.cs`、`src/Orc.Packages/PluginAssets.cs`（新）、`AssetMetadataJson.cs`、`AssetRegistry.cs`、`EngineHost.cs`、`src/Orc.Plugins.BuiltIn/BuiltInCoreAssetSource.cs`（新）、`BuiltInPluginPackage.cs`、`tools/Orc.Tools.Migrate/Program.cs`
+- Approach：
+  - `AssetKind` **追加** `Service = 4` ＋ `AssetKindTokens` token/解析；`AssetMetadata` 增可选 `ServiceKind`（sidecar 读写 `serviceKind`）。
+  - `PluginAssets.cs`：`PluginAssetDescriptor`／`IPluginAssetSource`／`PluginAssetRegistrar`（GUID 派生＝包 GUID＋Service＋`{serviceKind}.{name}`＋版本；只进注册面，不进卡组链）／`PluginAssetLockVerifier`（`missing-lock`／`stale-lock`／`unlisted`）／`PluginAssetManifestWriter`（`assets.meta.json` ＋ 两 lock）。
+  - `BuiltInCoreAssetSource`：24 判定器（`JudicatorNames`）＋ 19 词条（`KeywordIds.All`）＋ 6 卡组件（各 `DefinitionName`）＝**49 条**；5 组真实判定器依赖（构造期句柄注入）。
+  - `EngineHost`：`LoadedPackage` 增可选 `AssetSource`；冷加载后 `RegisterPluginAssets` 注册＋校验 lock，问题只入 `LoadFailures`（失败隔离）。
+  - `Orc.Tools.Migrate --plugin-assets`：读代码声明 → 写清单与两 lock（产物已提交在 core 包目录）。
+- Acceptance:
+  - [x] `service`/`serviceKind` 往返（sidecar／lock／资产名）
+  - [x] core 声明 49 条并在冷加载期注册；`host.Assets` 可拒绝重复注册（证明已登记）
+  - [x] `assets.meta.json` ＋ `lock.formal.json` ＋ `lock.test.json` 生成且校验通过
+  - [x] 升级未重锁（1.0.0 → 1.0.1）⇒ 3 条 `stale-lock` ＋ 3 条 `unlisted`，消息含"重锁"
+  - [x] 插件资产不进卡组装载列表（`AssetKind.Card` 门禁不变）
+  - [x] 新增测试 7 例；全量 **2052 通过 / 0 失败**
+- 已知边界：
+  - 编辑器（`editor.*` 的 kind enum／`DefaultSourceFor`）**暂不支持 service**——本批范围是注册/清单/lock，服务资产的编辑留批次。
+  - `orc.foundation.actions`／`orc.builtin.ui` 尚未提供声明面（Q34 试点只 core）；csx 插件仍走一对一 sidecar（仓库暂无实例）。
+- Rationale：用户裁定"插件全面纳入（c）"，理由为后续重写全部游戏逻辑且官方持续更新插件；试点先验证机制，避免一次改三个包导致失败定位困难。
+- Terminology: [插件](../../CONTEXT.md)、[资产版本](../../CONTEXT.md)、[正式 lock](../../CONTEXT.md)

@@ -40,15 +40,28 @@
 | `IReadOnlyList<Card> SelectAsync(Card viewer, EffectSelector selector, ct = default)` | 游戏层 | 参数 null＝异常；判定器不可用＝空集 | 是 |
 | `IReadOnlyList<Card> BeginTargetSelectionAsync(Card viewer, EffectSelector selector, ct = default)` | 游戏层 | 参数 null＝异常；无 targeter／无候选／取消＝空集 | 是 |
 | `bool DeclareAuraAsync(...)`（字段/数值/过滤/ct） | 游戏层 | 宿主/服务不可达＝`false`；无 source 尾参 | 是 |
+| `AuraRegistry? AurasOf(Card host)` | 游戏层 | host null＝异常；未装载/脱局＝`null` | 是 |
+| `Task<bool> RerunAurasAsync(Card host, ct = default)` | 游戏层 | host null＝异常；脱局＝`false` | 是 |
+| `bool Judge(string name, params object[] args)`（同步；判定器布尔求值） | 游戏层 | name 空白＝异常；判定器未注册/结果非 bool＝`false` | 是 |
+| `DamagePipeline? DamagePipeline`（逃生舱：四端触发器自注册） | 游戏层 | 未装配/脱局＝`null` | 是 |
 
 ### 1.1 伤害三层的注册口（R11）
 
 | 触发器 | 访问路径 | band 枚举 | 典型改写 |
 | --- | --- | --- | --- |
-| 对战伤害端 | `match.CommandManager.DamagePipeline.CombatDamage` | `DamageEventBands.Resolve` | 重甲（只减对战） |
-| 效果伤害端 | `match.CommandManager.DamagePipeline.EffectDamage` | `DamageEventBands.Resolve` | 「受到效果伤害 +1」 |
-| 战斗伤害端 | `match.CommandManager.DamagePipeline.BattleDamage` | `DamageEventBands.Resolve` | 「战斗伤害翻倍」 |
-| 处理端 | `match.CommandManager.DamagePipeline.Apply` | `DamageApplyBands.Rewrite` / `Apply` | 免疫（`IsZeroed = true`） |
+| 对战伤害端 | `match.CommandManager.DamagePipeline.CombatDamage` | `ActionTriggerBands.Initiate` | 重甲（只减对战） |
+| 效果伤害端 | `match.CommandManager.DamagePipeline.EffectDamage` | `ActionTriggerBands.Initiate` | 「受到效果伤害 +1」 |
+| 战斗伤害端 | `match.CommandManager.DamagePipeline.BattleDamage` | `ActionTriggerBands.Initiate` | 「战斗伤害翻倍」 |
+| 处理端 | `match.CommandManager.DamagePipeline.Apply` | `ActionHandleBands.Rewrite` / `Apply` | 免疫（`IsZeroed = true`）、通用减伤（`Amount - N`） |
+
+**数据侧注入**（预制体 `injects`，撤销随效果托管）——对局级具名触发器名：
+
+| 名字 | 目标触发器 | 视图 |
+| --- | --- | --- |
+| `对战伤害触发器` | `DamagePipeline.CombatDamage` | `DamageEventView` |
+| `效果伤害触发器` | `DamagePipeline.EffectDamage` | `DamageEventView` |
+| `战斗伤害触发器` | `DamagePipeline.BattleDamage` | `DamageEventView` |
+| `伤害处理触发器` | `DamagePipeline.Apply` | `DamageApplyView` |
 
 - 视图：`DamageEventView { Source, Target, Amount, Kind, Settlement }`、`DamageApplyView { …, IsZeroed }`。
 - 白名单：`ApplyDefenseDamageAsync` / `ApplyDamageAsync` 为 `internal`，**只有 `DamagePipeline` 调**（外部程序集编译期被挡）。
@@ -62,7 +75,7 @@
 | `EffectThreshold` | 目标阈值 | `Field`（attack/defense/opCost/deployCost）、`Op`（gte/lte/gt/lt/eq）、`Value` |
 | `EffectAuraFilter` | 光环受益谓词 | `Side`/`Faction`/`UnitType`/`Keyword`/`ExcludeSelf`/`Zone` |
 
-## 2. 判定器名（23 名 ＝ 22 内置 ＋ 1 示范）
+## 2. 判定器名（27 名 ＝ 26 内置 ＋ 1 示范）
 
 > 注册：`JudicatorRegistry.Register(name, factory)`；改写：`RegisterBeforeWrapper` / `RegisterAfterWrapper` / `RegisterReplaceWrapper`。
 > 判定器是**代码侧**能力；数据侧只能「消费」既有判定结果（不能新增/改写）。
@@ -92,6 +105,9 @@
 | `resource.slot.lose` | 失去槽数包裹 | 游戏层 | 否 |
 | `resource.point.gain` | 额外获得点数包裹 | 游戏层 | 否 |
 | `resource.point.lose` | 失去点数包裹 | 游戏层 | 否 |
+| `unit.adjacent` | 相邻关系（同线、索引差 1） | 游戏层 | 是（经 `EffectRuntime.Judge`） |
+| `unit.type` | 兵种判定（参数化兵种标识） | 游戏层 | 是（经 `EffectRuntime.Judge`） |
+| `unit.side` | 归属判定（是否同一玩家） | 游戏层 | 是（经 `EffectRuntime.Judge`） |
 
 ## 3. 选择器（targeter）
 

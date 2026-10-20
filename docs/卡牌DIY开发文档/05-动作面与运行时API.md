@@ -179,7 +179,7 @@ if (ctx.Engine!.Variables.TryGet<int>("diy.destroyed.units", out var total) && t
 | 选目标（要玩家点） | `BeginTargetSelectionAsync` 或 `TargeterManager.RunAsync`（见 04） |
 | 跨卡计数 | `LogicEngine.Variables`（`EngineVariables`） |
 | 战斗/撤退 | `BattleAsync(first, second, source, ct)` / `CommandManager.MoveUnitAsync(unit, slot)`（S6：效果移动免费） |
-| 改写伤害（免疫/减伤/倍伤） | 挂伤害三层：`damage.apply`（全局）或 `combat.damage`/`effect.damage`/`battle.damage`（按来源）——见下方「伤害三层」 |
+| 改写伤害（免疫/减伤/倍伤） | 挂伤害四端：`damage.apply`（全局）或 `combat.damage`/`effect.damage`/`battle.damage`（按来源）——数据侧经 `injects`，见下方「伤害三层」 |
 
 ## 7.1 伤害三层（R11）
 
@@ -196,9 +196,21 @@ if (ctx.Engine!.Variables.TryGet<int>("diy.destroyed.units", out var total) && t
 | `combat.damage` | 重甲（只减对战） | `DamageEventView.Amount` |
 | `effect.damage` | 「受到效果伤害 +1」类 | 同上 |
 | `battle.damage` | 「战斗伤害翻倍」类 | 同上 |
-| `damage.apply` | 免疫（全伤害归零） | `Amount` / `IsZeroed`（结果位） |
+| `damage.apply` | 免疫（全伤害归零）、通用减伤 | `Amount` / `IsZeroed`（结果位） |
 
-代码侧注册（band 必须显式——管道触发器声明了专门 band 方案）：
+**数据侧注册**（推荐；撤销随效果托管）——预制体 `injects` 指向对局级具名触发器：
+
+```json
+"injects": [
+  { "target": "伤害处理触发器", "band": "Rewrite", "event": "onDamageApply", "priority": 0 }
+]
+```
+
+四个名字：`对战伤害触发器` / `效果伤害触发器` / `战斗伤害触发器`（视图＝`DamageEventView`）、
+`伤害处理触发器`（视图＝`DamageApplyView`，`[Mutate] Amount` / `IsZeroed`）。完整样例见
+[示例 09](./examples/09-相邻掩护.md)。
+
+**代码侧注册**（band 必须显式——管道触发器声明了专门 band 方案）：
 
 ```csharp
 var pipeline = match.CommandManager.DamagePipeline;
@@ -213,7 +225,7 @@ pipeline.CombatDamage.Register("重甲·示例", (view, ctx, ct) =>
 
     view.Amount = Math.Max(0, view.Amount - 2);   // 触发端只改 Amount
     return Task.CompletedTask;
-}, Orc.Game.Damage.DamageEventBands.Resolve);
+}, Orc.Game.Actions.ActionTriggerBands.Initiate);
 
 pipeline.Apply.Register("免疫·示例", (view, ctx, ct) =>
 {
@@ -225,7 +237,7 @@ pipeline.Apply.Register("免疫·示例", (view, ctx, ct) =>
     view.IsZeroed = true;                          // 处理端改写结果位
     view.Amount = 0;
     return Task.CompletedTask;
-}, Orc.Game.Damage.DamageApplyBands.Rewrite);
+}, Orc.Game.Actions.ActionHandleBands.Rewrite);
 ```
 
 > **不要**在 handler 里调 `ApplyDefenseDamageAsync` / `ApplyDamageAsync`：两门户自 R11 起是 `internal`，

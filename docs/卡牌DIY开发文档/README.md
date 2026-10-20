@@ -61,12 +61,12 @@
 
 ### 路径 C · 直接抄示例（要一份能跑的成品）
 
-1. 示例目录：[`examples/`](./examples/README.md)（8 例，均带可复跑证据）
-2. 卡包成品：[`samples/card-pack-diy/`](../../samples/card-pack-diy/README.md)（4 卡 + 4 预制体，预检 `0 error / 0 warning`）
-3. 代码侧证据用例：`tests/Orc.Game.Tests/DiyExample0*.cs`（14 条 + 卡包预检 1 条）
+1. 示例目录：[`examples/`](./examples/README.md)（9 例，均带可复跑证据）
+2. 卡包成品：[`samples/card-pack-diy/`](../../samples/card-pack-diy/README.md)（5 卡 + 6 预制体，预检 `0 error / 0 warning`）
+3. 代码侧证据用例：`tests/Orc.Game.Tests/DiyExample0*.cs`（14 条 + 卡包预检 1 条 + 示例 9 的 3 条）
 4. 想先看懂再抄：[00-总览与心智模型](./00-总览与心智模型.md) 的最小骨架 + [05-动作面与运行时API](./05-动作面与运行时API.md) 的动作表
 
-> 一键复跑：`dotnet test tests/Orc.Game.Tests/Orc.Game.Tests.csproj --filter "FullyQualifiedName~Diy"` → `Passed: 15`。
+> 一键复跑：`dotnet test tests/Orc.Game.Tests/Orc.Game.Tests.csproj --filter "FullyQualifiedName~Diy"` → `Passed: 19`。
 
 ### 按需求找写法（速查）
 
@@ -79,6 +79,8 @@
 | 使单位无法被指令指向 | [03-判定器与wrapper](./03-判定器与wrapper.md)（判定器包装） | [api速查 · 判定器名](./reference/api速查.md) |
 | 选择一个目标再结算 | [04-目标选择targeter](./04-目标选择targeter.md) | [api速查 · 选择器](./reference/api速查.md) |
 | 改写既有结算（如伤害减半） | [03-判定器与wrapper](./03-判定器与wrapper.md)（before/after/replace） | [缺口表](./reference/缺口表.md)（先确认边界） |
+| 做「相邻单位」的持续加成 | [examples/09-相邻掩护](./examples/09-相邻掩护.md)（光环谓词 + `unit.adjacent`/`unit.type`/`unit.side`） | [api速查 · 判定器名](./reference/api速查.md) |
+| 做「受到的伤害 -N」 | [examples/09-相邻掩护](./examples/09-相邻掩护.md)（`injects` → `伤害处理触发器`） | [api速查 · 伤害三端](./reference/api速查.md) §1.1 |
 | 复用「重甲 3」这类行为 | [07-词条与预制效果](./07-词条与预制效果.md) | [api速查 · 词条操作](./reference/api速查.md) |
 | 从卡组定向抽某张牌 | [05-动作面与运行时API](./05-动作面与运行时API.md) | `FetchFromDeckAsync`（结果三态） |
 
@@ -122,7 +124,7 @@
 
 | 目录 / 文件 | 内容 | 状态 |
 | --- | --- | --- |
-| [examples/README.md](./examples/README.md) | 8 例索引：路径可用性 / 证据等级 / 用例名 / 实体 | 完成 |
+| [examples/README.md](./examples/README.md) | 9 例索引：路径可用性 / 证据等级 / 用例名 / 实体 | 完成 |
 | [examples/01-火力支援.md](./examples/01-火力支援.md) | R6a 伤害 + 总部加防（数据侧） | 证据已跑 |
 | [examples/02-齐射.md](./examples/02-齐射.md) | R6b 随机拆分伤害（数据侧） | 证据已跑 |
 | [examples/03-纪奠.md](./examples/03-纪奠.md) | R6c 按阵亡数回复（数据侧，有近似） | 证据已跑 |
@@ -131,7 +133,8 @@
 | [examples/06-反制第二张指令.md](./examples/06-反制第二张指令.md) | R6f `OrderFlow` 反制（代码侧；G-01 已解决 P4） | 证据已跑 |
 | [examples/07-指令免疫.md](./examples/07-指令免疫.md) | R6g 选靶过滤（代码侧/混合） | 证据已跑 |
 | [examples/08-突袭推进.md](./examples/08-突袭推进.md) | R6h 加入 + 战斗 + 分支位移（代码侧，R10 `BattleAsync`） | 证据已跑 |
-| [samples/card-pack-diy/README.md](../../samples/card-pack-diy/README.md) | 数据侧卡包：4 卡 + 4 预制体 + 预检输出 | 证据已跑 |
+| [examples/09-相邻掩护.md](./examples/09-相邻掩护.md) | 相邻友方步兵：行动花费 -1 + 受伤 -1（数据侧；光环谓词 + 三个通用判定器 + 伤害处理端注入） | 证据已跑 |
+| [samples/card-pack-diy/README.md](../../samples/card-pack-diy/README.md) | 数据侧卡包：5 卡 + 6 预制体 + 预检输出 | 证据已跑 |
 | `tests/Orc.Game.Tests/DiyExample0*.cs` | 代码侧证据用例（一例一类） | 证据已跑 |
 
 ### 5.5 过程资产
@@ -166,7 +169,7 @@
 | 06 | 完成 | S14（映射表 14 类 / 反例 4 / 自检 14） |
 | 07 | 完成 | S15（19 词条 / 四表 11·17·32·14） |
 | 08 | 完成 | S16（11 条缺口，四条分级） |
-| examples/01–08 | 证据已跑 | S18 + S19（`Passed: 15`，2026-10-19） |
+| examples/01–09 | 证据已跑 | S18 + S19 + 示例 9（`Passed: 19`，2026-10-20） |
 | samples/card-pack-diy | 证据已跑 | S17（`errors=0 warnings=0`） |
 | reference/信号表 · api速查 · 缺口表 | 完成 | S10 + S16 校号（缺口编号与 08 章一致 G-01…G-11） |
 | _template/章节 · 示例 · 登记步骤 | 完成 | S9 |

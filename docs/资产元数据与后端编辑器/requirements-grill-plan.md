@@ -92,6 +92,10 @@
 - **D59（Q27 同意）**：编辑器边界——前端只写临时包（正式包只读）；同机直写后 `commit(path)`、跨机走 `commit(path, content)`；新建资产版本 `1.0.0`；新建包资产从 `1.0.0` 起、包版本 `hash-tmp`、首个正式 lock 在转正时生成；支持删除资产（转正移出 lock、旧版仍在 `versions/`）；资产 ID 手写、后端校验；卡图＝相对包根路径字符串。
 - **D60（Q28=a）**：**一次性迁移工具**（扫描包→生成 sidecar→补 manifest→生成两 lock）；初始版本统一 `1.0.0`；`samples/card-pack-demo` 与 `card-pack-diy` 一并补齐 manifest 作为迁移样例。
 - **D61（Q29 同意）**：术语清单全部认可并写入 `CONTEXT.md`（含"资产名"改写与包版本旧语义退役）。
+- **D62（Q33=a）**：`AssetKind` **追加 `Service = 4`**（追加而非插入，保持既有排序与字节序不变）＋ `serviceKind` 子类字符串（judicator/assetService/keyword/cardComponent/action/projection/observer）。新增服务种类只加常量，不改内核枚举。
+- **D63（Q31=a）**：asm 插件的资产清单＝**包级 `assets.meta.json`**（`source` 记程序集名）；**代码声明（`IPluginAssetSource`）是权威**，清单是其落盘镜像；csx 插件仍用一对一 sidecar。插件资产只走注册面，**不进卡组装载链**。
+- **D64（Q32=a）**：asm 插件**不保留历史版本**（程序集只有一份）。官方更新 ⇒ 资产版本递增、GUID 变更 ⇒ 旧 lock 校验失败（`stale-lock`）并**提示重锁**，不静默降级。
+- **D65（Q34=a）**：本次范围＝框架 ＋ `orc.builtin.core` 试点（**49 条**：24 判定器 ＋ 19 词条 ＋ 6 卡组件）；`assets.meta.json` 与双 lock 由 `Orc.Tools.Migrate --plugin-assets` 生成。
 
 ## 代码 ↔ 陈述矛盾（需仲裁，不算实现问题）
 
@@ -460,6 +464,55 @@ D7 要求保留旧版本条目（旧 lock 仍可解析）；D30 说编辑器生�
 ### Q14: 术语落表 【Completed — D61】
 
 #### Q29: 术语清单确认 【Completed — D61：已写入 CONTEXT.md】
+
+### Q30: 插件是否纳入元数据/lock 体系 【Completed — 选 c（全面资产化）】
+- 用户裁定：**c 全面纳入**。理由：后续要重写游戏全部逻辑，官方自身也会持续更新插件。
+- 事实基线：插件资产支持 csx（`EngineHost` 求值 `Register`）与 asm（内置插件合成代码入口）两种载体；现有三个内置插件全为 **asm**，无 sidecar/lock。
+- 影响：需扩 `AssetKind`、为 asm 插件定义资产清单载体、给插件生双 lock、依赖改资产级（R3/R7 的「包」不再限于 cardpack）。
+
+### Q31: asm 插件的资产清单载体 【Completed — D63】
+- 程序集插件没有"源文件"可挂 `<源名>.meta.json`（现有路径指向 manifest 自身）。
+  - a) **包级 `assets.meta.json`**：独立清单文件，`source` 记为程序集名；csx 插件仍用一对一 sidecar。（推荐）
+  - b) `manifest.json.meta.json`：复用 sidecar 规则，但容器同时当源，语义混淆。
+  - c) manifest 内联 `assets[]`：回到 v1 形态，与 D50 冲突。
+- 子问题：清单由谁产生——插件代码声明面（`DeclareAssets()`）导出，还是工具反射枚举？
+
+### Q32: asm 插件资产的历史版本 【Completed — D64】
+- 程序集只有一份 dll，无法像版本目录那样并存旧内容。
+  - a) **asm 插件不保留历史版本**：官方更新＝新资产版本、新 GUID；旧 lock 引用旧版本 ⇒ 校验失败并提示重锁。（推荐）
+  - b) 旧 dll 归档到 `versions/<v>/` 并支持加载旧程序集（AssemblyLoadContext，成本高）。
+  - c) asm 插件版本固定 `1.0.0`，lock 不随内容变（失去复现性）。
+
+### Q33: 扩展后的 `AssetKind` 模型 【Completed — D62】
+- 插件服务种类：判定器／资产服务／词条／卡组件／行动契约／投影提供者／生命周期观察者。
+  - a) **新增单一 `service` kind ＋ `serviceKind` 字符串**（judicator/assetservice/keyword/component/action/projection…），后续新增种类不改内核枚举。（推荐）
+  - b) 逐类扩枚举（judicator/assetService/keyword/cardComponent/action/projection）。
+  - c) 不扩 kind，插件资产借用 `handler` 承载（语义失真）。
+
+### Q34: 本次迁移范围 【Completed — D65：框架 ＋ core 试点】
+- 全面资产化的工程量集中在"内置插件声明其全部服务资产 + 生成清单/lock"。
+  - a) **框架 ＋ `orc.builtin.core` 试点**：跑通"声明→清单→双 lock→启动校验→依赖"，其余两个插件留批次。（推荐）
+  - b) 框架 ＋ 三个内置插件全量迁移（判定器 20+／词条 19／组件 6／行动契约／投影）。
+  - c) 只做框架与工具，内置插件保持 asm 兼容现状。
+
+#### 事实基线（验收取证）
+- 三个插件包（`orc.builtin.core` / `orc.foundation.actions` / `orc.builtin.ui`）目录下**只有 v1 `manifest.json`**：无 sidecar、无 lock；`version` 仍是 `1.0.0`（非内容指纹）、`dependsOn` 仍在使用（已退役字段）、`assets: []`。
+- 插件资产由**程序集代码注册**（`LoadedPluginScript(pre/post/process)`）：判定器、资产服务、词条、卡组件、效果 handler——经 `PluginRegistrationContext` / `ProcessRegistrationContext` 落地。
+- 装载序改为**代码内** `BuiltInPluginPackage.LoadOrder`（`PluginLoadOrder`；三项启动断言），**不进 manifest**。
+- `AssetKind` 只有 card/effect/trigger/handler —— **无法表达判定器/资产服务/词条/卡组件**。
+- sidecar 命名规则是「`<源文件名>.meta.json`」——程序集没有可挂的"源文件"。
+- 实现侧理由（`implementation.md` S4 Rationale）："插件装载序由资产拓扑决定"是**推导而非意图**，插件无 lock/sidecar，资产拓扑在其形态上无定义。
+
+#### 选项
+- **a) 插件豁免（实现现状）**：把 R3/R7 的「包」限定为 `cardpack`；插件只保留 manifest ＋ 代码内 `LoadOrder`，不参与 sidecar/lock/资产拓扑。改需求与 CONTEXT，代码不动。
+- b) **插件只生成两个 lock**（不生成 sidecar）：需先为程序集资产分配 GUID（程序集名＋资产类型名派生）、定义"插件资产清单"的载体；lock 只作复现记录。
+- c) **插件全面纳入**：扩展 `AssetKind`（judicator/assetservice/keyword/component…）、为程序集生成 meta、双 lock、依赖资产级。成本最高。
+- d) 插件资产改 csx 重写以走 sidecar —— 不可行（内置判定器需访问游戏层内部类型）。
+
+#### 子问题
+- Q30a：若 a，`LoadOrder` 是否写进 manifest（当前在代码内）？
+- Q30b：若 b/c，插件"正式版 lock"的语义是什么（插件**冷加载、不可卸载、无多版本并存**，lock 没有版本选择空间）？
+- Q30c：原第 4 条"插件和卡包要有两个 lock"是否为笔误/泛指"包"？
 - 新增：**资产（asset）**、**资产版本（asset version）**、**应用层 ID**、**资产层 ID**、**中间层**、**资产元数据**、**内含资产**、**资产加载器**、**卡牌加载器**、**注册**（元数据加载）、**加载**（lock 合并＋分层装载）、**正式 lock**／**测试 lock**、**临时卡包**／**测试资产**、**后端编辑器**／**前端编辑器**、**合法性检测套件**、**加载列表**。
 - 改写：**资产名**（改为按资产种类分型，`{种类}：{局部ID}@{包GUID8}#{版本}`）。
 - 退役：包版本作为依赖锚点的旧语义（改为内容指纹）。

@@ -80,11 +80,11 @@
 ### R6: 元数据落盘与资产名
 - Status: Confirmed
 - Scenario/Trigger: 生成或读取资产元数据时。
-- Behavior: 每个资产源文件（`*.card.json` / `*.prefab.json` / `*.csx` / 其他 json）配一份同目录 sidecar，命名 `<源文件名>.meta.json`，一对一可逆映射，内含该文件声明的全部资产条目。资产名按**资产种类**分型：`{种类}：{局部ID}@{包GUID8}#{版本}`。元数据沿用读宽写窄。
+- Behavior: 每个资产源文件（`*.card.json` / `*.prefab.json` / `*.csx` / 其他 json）配一份同目录 sidecar，命名 `<源文件名>.meta.json`，一对一可逆映射，内含该文件声明的全部资产条目。资产名按**资产种类**分型：`{种类}：{局部ID}@{包GUID8}#{版本}`（种类∈card/effect/trigger/handler/service）。元数据沿用读宽写窄。
 - Acceptance:
   - [ ] 每个资产源文件有且仅有一份 sidecar
   - [ ] sidecar 文件名可由源文件名唯一推出，反之亦然
-  - [ ] 资产名种类 token 为 card/effect/trigger/handler
+  - [ ] 资产名种类 token 为 card/effect/trigger/handler/service
   - [ ] 元数据读宽（注释/尾逗号/大小写）写窄（固定键序/2 空格/LF）
 - Terminology: [资产名](../../CONTEXT.md)
 
@@ -100,6 +100,7 @@
   - [ ] 环依赖 ⇒ 报错并输出环路径
   - [ ] 增量重载从首个变更层起，已实例化卡不受影响
   - [ ] 重载门禁＝判定器 `reloadGate`（结构化返回，不抛错）
+  - [ ] 插件包同样产出两 lock（asm 插件见 R18；csx 插件同卡包）
 - Terminology: [正式 lock](../../CONTEXT.md)、[测试 lock](../../CONTEXT.md)、[加载列表](../../CONTEXT.md)
 
 ### R8: 编辑器 DIY 前置
@@ -214,3 +215,20 @@
   - [ ] 包版本不含时间戳，且不影响任何身份/解析
   - [ ] 临时包版本带 `tmp`，转正去掉
 - Terminology: [资产版本](../../CONTEXT.md)、[资产名](../../CONTEXT.md)
+
+### R18: 插件服务资产
+- Status: Confirmed
+- Scenario/Trigger: 装载插件包（冷加载）时。
+- Behavior:
+  - 插件提供的引擎服务（判定器／资产服务／词条／卡组件／行动契约／投影提供者／观察者）作为 **`service` kind** 资产纳入元数据体系，子类由 `serviceKind` 字符串表达；**新增服务种类只加常量，不改 `AssetKind` 枚举**。
+  - **代码声明是权威**（`IPluginAssetSource.Describe()`）；asm 插件（无源文件）用**包级 `assets.meta.json`**（`source`＝程序集名）作为落盘镜像；csx 插件用一对一 sidecar。
+  - 插件资产**不进卡组装载链**（不实例化、不参与卡组拓扑）；按 lock 校验后才算"正式版"。
+  - **asm 插件不保留历史版本**：官方更新 ⇒ 资产版本递增、GUID 变更 ⇒ 旧 lock 校验失败（`stale-lock`/`unlisted`）并**提示重锁**，不静默降级。
+  - 范围：本次＝框架 ＋ `orc.builtin.core` 试点（49 条：24 判定器 ＋ 19 词条 ＋ 6 卡组件）。
+- Acceptance:
+  - [ ] `service` kind 与 `serviceKind` 可往返（sidecar／lock／资产名）
+  - [ ] core 插件声明 49 条并在冷加载期注册进注册面
+  - [ ] `assets.meta.json` 与两 lock 可由工具生成，且校验通过
+  - [ ] 插件升级未重锁 ⇒ 校验失败并提示重锁
+  - [ ] 插件资产不进入卡组装载列表
+- Terminology: [插件](../../CONTEXT.md)、[资产](../../CONTEXT.md)、[正式 lock](../../CONTEXT.md)
