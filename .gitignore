@@ -35,6 +35,14 @@ TestResults/
 **/_tmp/
 **/_probe/
 
+# 例外：仓库自带的迁移工具（S10a 制品，tools/Orc.Tools.Migrate）必须入库
+!/tools/
+!/tools/**
+
+# 但放行 tools/ 之后必须重新排除构建产物（负向规则会覆盖上面的 **/bin/、**/obj/）
+/tools/**/bin/
+/tools/**/obj/
+
 # MCP 服务层的沙盒根（默认值；agent 在沙盒里生成/改写的卡牌与效果产物不入库）
 /.orc-sandbox/
 **/.orc-sandbox/

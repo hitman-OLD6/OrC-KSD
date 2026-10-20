@@ -1,4 +1,4 @@
-
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -48,6 +48,10 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Orc.Ai.Tests", "tests\Orc.Ai.Tests\Orc.Ai.Tests.csproj", "{C37094FB-82CA-453E-BE34-E2F178436969}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Orc.Mcp.HostSample", "samples\Orc.Mcp.HostSample\Orc.Mcp.HostSample.csproj", "{288AE42B-A3D8-4240-881A-C22C2D9C6086}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{07C2787E-EAC7-C090-1BA3-A61EC2A24D84}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Orc.Tools.Migrate", "tools\Orc.Tools.Migrate\Orc.Tools.Migrate.csproj", "{15A04879-729F-4D77-AB26-5785639EC56D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -299,6 +303,18 @@ Global
 		{288AE42B-A3D8-4240-881A-C22C2D9C6086}.Release|x64.Build.0 = Release|Any CPU
 		{288AE42B-A3D8-4240-881A-C22C2D9C6086}.Release|x86.ActiveCfg = Release|Any CPU
 		{288AE42B-A3D8-4240-881A-C22C2D9C6086}.Release|x86.Build.0 = Release|Any CPU
+		{15A04879-729F-4D77-AB26-5785639EC56D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{15A04879-729F-4D77-AB26-5785639EC56D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{15A04879-729F-4D77-AB26-5785639EC56D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{15A04879-729F-4D77-AB26-5785639EC56D}.Debug|x64.Build.0 = Debug|Any CPU
+		{15A04879-729F-4D77-AB26-5785639EC56D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{15A04879-729F-4D77-AB26-5785639EC56D}.Debug|x86.Build.0 = Debug|Any CPU
+		{15A04879-729F-4D77-AB26-5785639EC56D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{15A04879-729F-4D77-AB26-5785639EC56D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{15A04879-729F-4D77-AB26-5785639EC56D}.Release|x64.ActiveCfg = Release|Any CPU
+		{15A04879-729F-4D77-AB26-5785639EC56D}.Release|x64.Build.0 = Release|Any CPU
+		{15A04879-729F-4D77-AB26-5785639EC56D}.Release|x86.ActiveCfg = Release|Any CPU
+		{15A04879-729F-4D77-AB26-5785639EC56D}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -324,5 +340,6 @@ Global
 		{6080A0F0-DF57-41CE-8CFD-2DFD239E2FAC} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
 		{C37094FB-82CA-453E-BE34-E2F178436969} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{288AE42B-A3D8-4240-881A-C22C2D9C6086} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
+		{15A04879-729F-4D77-AB26-5785639EC56D} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 	EndGlobalSection
 EndGlobal
