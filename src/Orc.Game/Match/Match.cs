@@ -4,6 +4,7 @@ using Orc.Game.Cards;
 using Orc.Game.Cards.Loading;
 using Orc.Game.Collections;
 using Orc.Game.Commanding;
+using Orc.Game.Damage;
 using Orc.Game.Effects;
 using Orc.Game.Judicators;
 using Orc.Game.Managers;
@@ -655,6 +656,12 @@ public sealed class Match
         matchTriggers.Register("单位攻击触发器", typeof(UnitAttackTriggerView), () => _commandManager?.UnitAttackTrigger);
         matchTriggers.Register("造成攻击伤害触发器", typeof(AttackDamageTriggerView), () => _commandManager?.AttackDamageTrigger);
         matchTriggers.Register("行动额度触发器", typeof(ActionQuotaView), () => _commandManager?.ActionQuotaTrigger);
+        // 伤害管线四端按名登记（R11 面；预制体 `injects` 可把 csx handler 注入伤害改写点）：
+        // 处理端＝唯一扣数值处（「受到的伤害 -N」类效果的落点）；三个触发端＝按来源分的量改写点。
+        matchTriggers.Register("伤害处理触发器", typeof(DamageApplyView), () => _commandManager?.DamagePipeline.Apply);
+        matchTriggers.Register("对战伤害触发器", typeof(DamageEventView), () => _commandManager?.DamagePipeline.CombatDamage);
+        matchTriggers.Register("效果伤害触发器", typeof(DamageEventView), () => _commandManager?.DamagePipeline.EffectDamage);
+        matchTriggers.Register("战斗伤害触发器", typeof(DamageEventView), () => _commandManager?.DamagePipeline.BattleDamage);
         foreach (var player in _playerManager.Players)
         {
             player.ConfigureMatchTriggers(matchTriggers);

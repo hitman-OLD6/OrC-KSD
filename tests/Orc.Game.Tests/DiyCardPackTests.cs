@@ -28,9 +28,9 @@ public class DiyCardPackTests
         Assert.Equal(0, report.WarningCount);
         Assert.Equal(0, report.UnresolvedReferenceCount);
 
-        // 四张卡（火力支援/齐射/纪奠/战地救护）＋ 四条库效果；无内联。
-        Assert.Equal(4, report.SuccessfulCardCount);
-        Assert.Equal(4, report.SuccessfulLibrarySnapshotCount);
+        // 五张卡（火力支援/齐射/纪奠/战地救护/交叉掩护）＋ 六条库效果；无内联。
+        Assert.Equal(5, report.SuccessfulCardCount);
+        Assert.Equal(6, report.SuccessfulLibrarySnapshotCount);
         Assert.Equal(0, report.SuccessfulInlineSnapshotCount);
         Assert.Equal(1, report.CardDirectoryCount);
         Assert.Equal(1, report.PrefabLibraryDirectoryCount);

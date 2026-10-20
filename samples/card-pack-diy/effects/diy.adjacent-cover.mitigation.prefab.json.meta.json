@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "diy",
+  "source": "effects/diy.adjacent-cover.mitigation.prefab.json",
+  "assets": [
+    {
+      "guid": "1c27c37f-6150-8957-fa4f-d09edefefbb7",
+      "kind": "effect",
+      "id": "diy.adjacent-cover.mitigation",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

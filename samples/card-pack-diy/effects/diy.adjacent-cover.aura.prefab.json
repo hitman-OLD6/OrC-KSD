@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 3,
+  "root": {
+    "id": "diy.adjacent-cover.aura",
+    "version": 1,
+    "oneShot": false,
+    "mainTrigger": {
+      "id": "t.aura",
+      "stableKey": "diy·交叉掩护·光环",
+      "kind": "passive",
+      "viewType": "Orc.Cards.CardEventView",
+      "hooks": [
+        "card.load"
+      ],
+      "events": [
+        {
+          "id": "onLoad",
+          "entry": "HandleAsync",
+          "csx": "Func<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Cards.Card self || view.Card is not Orc.Cards.Card loaded)\n    {\n        return;\n    }\n\n    if (!object.ReferenceEquals(loaded, self))\n    {\n        return;\n    }\n\n    var runtime = Orc.Game.Effects.EffectRuntime.ResolveFor(self);\n    var auras = runtime is null ? null : runtime.AurasOf(self);\n    if (runtime is null || auras is null)\n    {\n        return;\n    }\n\n    auras.Register(new Orc.Game.Cards.AuraDeclaration(\n        self,\n        Orc.Game.Cards.CardStatFields.OperateCost,\n        (_, current) => current - 1,\n        self,\n        (env, beneficiary) =>\n            runtime.Judge(Orc.Game.Judicators.JudicatorNames.UnitAdjacent, self, beneficiary)\n            && runtime.Judge(Orc.Game.Judicators.JudicatorNames.UnitTypeMatch, beneficiary, \"infantry\")\n            && runtime.Judge(Orc.Game.Judicators.JudicatorNames.UnitSide, self, beneficiary)));\n\n    await runtime.RerunAurasAsync(self, ct);\n};\n",
+          "version": 1
+        }
+      ],
+      "version": 1
+    },
+    "otherTriggers": [],
+    "wrappers": [],
+    "injects": []
+  }
+}

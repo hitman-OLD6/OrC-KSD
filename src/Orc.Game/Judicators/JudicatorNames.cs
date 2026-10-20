@@ -113,4 +113,18 @@ public static class JudicatorNames
     /// <summary>失去点数的**数字包裹**（签名＝（玩家，请求值）→ int）：默认返回入参**原值**（恒等）；
     /// moding 改写＝改写「失去 n 个指挥点」的实际数字（全局生效、注销回退原值）。</summary>
     public const string PointLose = "resource.point.lose";
+
+    // ---------- 通用关系判定族（卡面效果可组合的原子判定；内置注册段固定注册——无条件可用） ----------
+
+    /// <summary>相邻关系判定（签名＝（卡A, 卡B）→ bool）：两者均在场、同一条线、槽位索引差 1；任一方无位置＝false。
+    /// 纯几何关系（不含归属/兵种过滤）；口径与 <c>GameEnvironment.AreAdjacent</c> 同源（同一实现）。</summary>
+    public const string UnitAdjacent = "unit.adjacent";
+
+    /// <summary>兵种判定（签名＝（卡, 兵种标识）→ bool）：卡持有单位数据且兵种集含该标识（序数不敏感）；
+    /// 非单位／标识空白／无兵种＝false。</summary>
+    public const string UnitTypeMatch = "unit.type";
+
+    /// <summary>归属判定（签名＝（视角卡, 目标卡）→ bool）：两者归属同一玩家（「友方」）；
+    /// 任一归属不可达（未装载/独立构造/非卡实体）＝false。</summary>
+    public const string UnitSide = "unit.side";
 }

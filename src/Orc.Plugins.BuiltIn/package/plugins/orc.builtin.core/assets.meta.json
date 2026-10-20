@@ -1,0 +1,498 @@
+{
+  "schemaVersion": 1,
+  "packageId": "orc.builtin.core",
+  "source": "Orc.Plugins.BuiltIn",
+  "assets": [
+    {
+      "guid": "9be28f85-9837-11f3-f468-1a0d871f3f6d",
+      "kind": "service",
+      "id": "cardComponent.battleStats",
+      "version": "1.0.0",
+      "serviceKind": "cardComponent",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "d55be6b7-85bf-b4fb-84e4-a007972718ad",
+      "kind": "service",
+      "id": "cardComponent.effects",
+      "version": "1.0.0",
+      "serviceKind": "cardComponent",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "88a0807e-33f6-7233-ec54-1ef39050ab0e",
+      "kind": "service",
+      "id": "cardComponent.factionCost",
+      "version": "1.0.0",
+      "serviceKind": "cardComponent",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "c71e5a44-99a3-eb76-0ec9-1d6240f2cf3a",
+      "kind": "service",
+      "id": "cardComponent.keywords",
+      "version": "1.0.0",
+      "serviceKind": "cardComponent",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "c526d1db-a3a6-9713-08be-c31a7430f527",
+      "kind": "service",
+      "id": "cardComponent.tagData",
+      "version": "1.0.0",
+      "serviceKind": "cardComponent",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "a44f6ba9-32f5-f877-f952-02129e5bd828",
+      "kind": "service",
+      "id": "cardComponent.typeCategory",
+      "version": "1.0.0",
+      "serviceKind": "cardComponent",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "f4f70ca1-ecca-5893-5c8b-8535911bd967",
+      "kind": "service",
+      "id": "judicator.action.turn.owner",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "e897959f-000a-50ea-3c4d-df02228f0a79",
+      "kind": "service",
+      "id": "judicator.attack.leg.eligibility",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "6739e403-05a4-18d2-464c-743159513865",
+      "kind": "service",
+      "id": "judicator.combat.ambush.condition",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "9981e5f2-6a01-7e5b-2c60-91c018848c92",
+      "kind": "service",
+      "id": "judicator.combat.counter.eligibility",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "0ec2fad5-288a-c986-43f4-f1b5df51309c",
+      "kind": "service",
+      "id": "judicator.combat.guard.eligibility",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "e540b3d1-fadc-8069-19b1-510779009069",
+      "kind": "service",
+      "id": "judicator.combat.interception",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "dd3fc5c2-2610-9a86-f2f7-9687954d4331",
+      "kind": "service",
+      "id": "judicator.combat.range",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "1c531f9a-a0d0-196c-1f5e-5654d6f0e01a",
+      "kind": "service",
+      "id": "judicator.combat.target.legal",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [
+        {
+          "kind": "service",
+          "id": "pack/orc.builtin.core/judicator.combat.range",
+          "version": "1.*.*"
+        },
+        {
+          "kind": "service",
+          "id": "pack/orc.builtin.core/judicator.combat.guard.eligibility",
+          "version": "1.*.*"
+        },
+        {
+          "kind": "service",
+          "id": "pack/orc.builtin.core/judicator.combat.interception",
+          "version": "1.*.*"
+        }
+      ],
+      "conflictsWith": []
+    },
+    {
+      "guid": "58922dc2-ab9b-0c18-84c6-fdcfcc431713",
+      "kind": "service",
+      "id": "judicator.effect.target.resolve",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [
+        {
+          "kind": "service",
+          "id": "pack/orc.builtin.core/judicator.targeting.candidate.eligibility",
+          "version": "1.*.*"
+        }
+      ],
+      "conflictsWith": []
+    },
+    {
+      "guid": "11cfe800-2dfa-7b2a-f44c-ea053eb635f8",
+      "kind": "service",
+      "id": "judicator.move.frontline-enemy",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "39399040-9075-9ac1-7474-ece0c4040aa4",
+      "kind": "service",
+      "id": "judicator.move.leg.eligibility",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "caade00e-6c89-ef5c-806f-f05c898740d4",
+      "kind": "service",
+      "id": "judicator.resource.point.gain",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "52434b1d-4303-63a0-c732-935fc6dfd8c5",
+      "kind": "service",
+      "id": "judicator.resource.point.lose",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "c62734e7-1a53-8c8f-8901-a0417bbd58bc",
+      "kind": "service",
+      "id": "judicator.resource.slot.gain",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "ac9b4316-522e-9cff-317c-d304194d8c5d",
+      "kind": "service",
+      "id": "judicator.resource.slot.increment",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "b4e7e315-4776-faac-0d4e-431302be0b23",
+      "kind": "service",
+      "id": "judicator.resource.slot.lose",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "b31a0d55-ccc9-44cf-812b-ca89f54894ab",
+      "kind": "service",
+      "id": "judicator.targeting.candidate.eligibility",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "fbd143fa-d663-8ee2-509b-f91b2d5c76dd",
+      "kind": "service",
+      "id": "judicator.unit.adjacent",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "054372d9-6f1f-02c8-657b-0a9a8d1dedc3",
+      "kind": "service",
+      "id": "judicator.unit.side",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "e2ea36d4-2595-9bc9-d441-049b8ca2d982",
+      "kind": "service",
+      "id": "judicator.unit.type",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "3bb8ab33-6528-758f-d5b6-19fc5bafb134",
+      "kind": "service",
+      "id": "judicator.validation.attack.recheck",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [
+        {
+          "kind": "service",
+          "id": "pack/orc.builtin.core/judicator.attack.leg.eligibility",
+          "version": "1.*.*"
+        },
+        {
+          "kind": "service",
+          "id": "pack/orc.builtin.core/judicator.move.frontline-enemy",
+          "version": "1.*.*"
+        }
+      ],
+      "conflictsWith": []
+    },
+    {
+      "guid": "53871b67-2cae-3ea2-ed04-4658b037fb66",
+      "kind": "service",
+      "id": "judicator.validation.cost.check",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "dca982a6-6ac4-810a-d257-4a6f3cf753c9",
+      "kind": "service",
+      "id": "judicator.validation.counter.use",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [
+        {
+          "kind": "service",
+          "id": "pack/orc.builtin.core/judicator.action.turn.owner",
+          "version": "1.*.*"
+        }
+      ],
+      "conflictsWith": []
+    },
+    {
+      "guid": "44d30888-4bd5-09a1-c59f-6d1e71d3f817",
+      "kind": "service",
+      "id": "judicator.validation.move.recheck",
+      "version": "1.0.0",
+      "serviceKind": "judicator",
+      "dependsOn": [
+        {
+          "kind": "service",
+          "id": "pack/orc.builtin.core/judicator.move.leg.eligibility",
+          "version": "1.*.*"
+        },
+        {
+          "kind": "service",
+          "id": "pack/orc.builtin.core/judicator.move.frontline-enemy",
+          "version": "1.*.*"
+        }
+      ],
+      "conflictsWith": []
+    },
+    {
+      "guid": "d178b0c6-617f-e7f4-179f-2d08b612936a",
+      "kind": "service",
+      "id": "keyword.亡计",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "5dd3272e-17b7-fb5b-8a63-8ba08c37898d",
+      "kind": "service",
+      "id": "keyword.伏击",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "e4b31b6b-7c1d-abb9-975c-685517bbb86e",
+      "kind": "service",
+      "id": "keyword.免疫",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "a5ee6946-a9d8-a30e-1d1f-cd842770ba95",
+      "kind": "service",
+      "id": "keyword.冲击",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "ea47ad65-9fed-66be-5c57-106f235e9265",
+      "kind": "service",
+      "id": "keyword.动员",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "a78a6f9d-943b-1273-6eb3-6c50e0727114",
+      "kind": "service",
+      "id": "keyword.奋战",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "bd410f9e-9e80-8255-7252-9b785a69025a",
+      "kind": "service",
+      "id": "keyword.守护",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "425a21d4-e3dd-04d6-f668-f75cd22a9491",
+      "kind": "service",
+      "id": "keyword.情报",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "03b8d9ab-01d3-a51d-7591-d61eee591f83",
+      "kind": "service",
+      "id": "keyword.无法被压制",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "8159f792-99ba-242e-8e85-43eade259a9c",
+      "kind": "service",
+      "id": "keyword.无法被抑制",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "84a7f696-7ab2-6241-85c8-29226f1d3263",
+      "kind": "service",
+      "id": "keyword.烟幕",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "d6d06236-267b-5b8a-2dde-e2a7f34f103a",
+      "kind": "service",
+      "id": "keyword.老兵",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "c55810e9-0179-8fdb-7b92-67915d814604",
+      "kind": "service",
+      "id": "keyword.被压制",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "b0725be6-a794-89dc-9caa-c4b995e1367e",
+      "kind": "service",
+      "id": "keyword.被抑制",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "8d75841d-0064-7261-786a-1403bbb3d0b3",
+      "kind": "service",
+      "id": "keyword.重甲",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "c6c75545-6883-57f5-159e-5515ee39b9d1",
+      "kind": "service",
+      "id": "keyword.钳击",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "70bf96ef-ee93-5bd6-defc-bd334dc2e26a",
+      "kind": "service",
+      "id": "keyword.闪击",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "77411f61-5499-5e18-0ac6-0edf77959800",
+      "kind": "service",
+      "id": "keyword.隐蔽",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    },
+    {
+      "guid": "3f5aee23-6a64-b157-4c3f-00b368d41a74",
+      "kind": "service",
+      "id": "keyword.预报",
+      "version": "1.0.0",
+      "serviceKind": "keyword",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

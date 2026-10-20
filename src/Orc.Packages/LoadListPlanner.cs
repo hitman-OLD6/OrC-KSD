@@ -39,6 +39,9 @@ public enum AssetLoadIssueCode
 
     /// <summary>环依赖（结构性：<see cref="AssetLoadIssue.Path"/> 为环路径）。</summary>
     Cycle = 9,
+
+    /// <summary>元数据声明的冲突双方同处本次加载集合（R16/D52：双向硬冲突 ⇒ 结构性失败）。</summary>
+    DeclaredConflict = 10,
 }
 
 /// <summary>加载计算期的一条问题（结构化；<see cref="Path"/> 仅环依赖使用）。</summary>
@@ -55,7 +58,9 @@ public sealed record AssetLoadIssue(
     IReadOnlyList<string> Path)
 {
     /// <summary>是否为结构性失败（整次计算不产出可加载列表）。</summary>
-    public bool IsFatal => Code is AssetLoadIssueCode.LockConflict or AssetLoadIssueCode.Cycle;
+    public bool IsFatal => Code is AssetLoadIssueCode.LockConflict
+        or AssetLoadIssueCode.Cycle
+        or AssetLoadIssueCode.DeclaredConflict;
 
     /// <inheritdoc />
     public override string ToString() => $"[{AssetDomainTokens.Token(Domain)}] {Code}：{Message}";
@@ -134,6 +139,32 @@ public static class LoadListPlanner
             .ThenBy(asset => asset.Kind)
             .ThenBy(asset => asset.AppId, StringComparer.Ordinal)
             .ToArray();
+
+        // ── 声明冲突（R16/D52）：**域内双向硬冲突** ⇒ 结构性失败（本次计算不产出列表） ──
+        // 声明语义＝「我不能与它共存」，单向声明即成立（不要求对方也声明）；
+        // 判定集合＝本域 lock 合并后实际参与加载的资产（内含资产不参与、测试不污染正式）。
+        var conflictIndex = IndexByKey(nodes);
+        foreach (var node in ordered)
+        {
+            foreach (var declared in node.Metadata.ConflictsWith)
+            {
+                var conflictAppId = NormalizeReference(node.PackageId, declared.AppId);
+                if (!conflictIndex.TryGetValue(new AssetKey(declared.Kind, conflictAppId), out var target)
+                    || target.AssetGuid == node.AssetGuid
+                    || !declared.IsSatisfiedBy(target.Version))
+                {
+                    continue;
+                }
+
+                issues.Add(new AssetLoadIssue(
+                    AssetLoadIssueCode.DeclaredConflict,
+                    domain,
+                    node.AppId,
+                    $"资产 {node.AssetName} 声明与 {target.AssetName} 冲突"
+                    + "（双向硬冲突：两者同处本次加载集合）——本次计算不产出列表。",
+                    []));
+            }
+        }
 
         // ── 依赖检测（一次计算内完成）：资产级非法 ⇒ 剔除并报告，不整段失败（R15/D23） ──
         var excluded = new HashSet<Guid>();

@@ -122,6 +122,13 @@ public static class BuiltInPlugin
         context.RegisterJudicator(JudicatorNames.PointSlotLose, new PointSlotLoseAmountJudicator());
         context.RegisterJudicator(JudicatorNames.PointGain, new PointGainAmountJudicator());
         context.RegisterJudicator(JudicatorNames.PointLose, new PointLoseAmountJudicator());
+
+        // ---------- 通用关系判定族（卡面效果可组合的原子判定：相邻 / 兵种 / 归属） ----------
+        // 供 csx 效果经 EffectRuntime.Judge 组合出「相邻友方步兵」这类复合条件——
+        // 卡面条件留在判定器内（可被插件整体替换），效果侧只做组合。
+        context.RegisterJudicator(JudicatorNames.UnitAdjacent, new UnitAdjacentJudicator(match.Battlefield));
+        context.RegisterJudicator(JudicatorNames.UnitTypeMatch, new UnitTypeJudicator());
+        context.RegisterJudicator(JudicatorNames.UnitSide, new UnitSideJudicator());
     }
 
     /// <summary>

@@ -3,6 +3,7 @@ using Orc.Core;
 using Orc.Game.Board;
 using Orc.Game.Cards;
 using Orc.Game.Commanding;
+using Orc.Game.Damage;
 using Orc.Game.Judicators;
 using Orc.Game.Managers;
 using Orc.Game.Players;
@@ -149,6 +150,77 @@ public sealed partial class EffectRuntime
         }
 
         return units;
+    }
+
+    /// <summary>
+    /// 伤害管线（**逃生舱**；csx 可自注册改写 handler）：四个触发端（对战/效果/战斗伤害触发端 ＋ 处理端 Apply）。
+    /// <para>
+    /// 常规路径＝预制体 <c>injects</c> 按名注入（「伤害处理触发器」等，撤销随效果托管）；
+    /// 本属性供需要自注册/动态改绑的场景（自行 <c>Register</c> 并自管 <c>Unregister</c>——
+    /// 建议在 handler 内以「宿主是否在场」兜底，避免卸载后残留注册项产生行为）。
+    /// </para>
+    /// <para>不可用（未装配/脱局）＝null（功能不可用、不抛错）。</para>
+    /// </summary>
+    public DamagePipeline? DamagePipeline => _commands()?.DamagePipeline;
+
+    /// <summary>
+    /// 宿主所在对局的**场级光环收集面**（csx 声明持续态光环的入口）：
+    /// csx 侧自行构造 <see cref="AuraDeclaration"/>（受益谓词可组合 <see cref="Judge"/>）后
+    /// 经本面登记——避免脚本直接触达对局环境（脚本沙箱屏蔽 <c>Environment</c> 片段）。
+    /// <para>语义：宿主未加载/脱局＝null（功能不可用、不抛错）；登记后须经
+    /// <see cref="RerunAurasAsync"/> 衔接一轮使收益现算生效。</para>
+    /// </summary>
+    /// <exception cref="ArgumentNullException">host 为 null。</exception>
+    public AuraRegistry? AurasOf(Card host)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        return GameEnvironment.ResolveFor(host)?.Auras;
+    }
+
+    /// <summary>
+    /// 衔接一轮全卡链重跑（光环声明/撤销后使收益现算生效；csx 声明光环的配套调用）。
+    /// <para>宿主未加载/脱局＝false（功能不可用、不抛错）。</para>
+    /// </summary>
+    /// <exception cref="ArgumentNullException">host 为 null。</exception>
+    public async Task<bool> RerunAurasAsync(Card host, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        if (GameEnvironment.ResolveFor(host) is not { } environment)
+        {
+            return false;
+        }
+
+        await environment.RerunAllCardsAsync(ct).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>
+    /// 求值判定器（**同步**；csx 侧组合卡面条件的统一入口）：按名调用判定器、取其布尔结果。
+    /// <para>语义：结果序列首元素为 bool 且为 true＝true；判定器不可达／结果非布尔／结果为空＝false（降级不抛错，
+    /// 对齐「功能不可用＝不失败」既有口径）。参数载荷由调用方按判定器签名给出（见 <see cref="JudicatorNames"/>）。</para>
+    /// </summary>
+    /// <param name="name">判定器名（受控常量；<see cref="JudicatorNames"/>）。</param>
+    /// <param name="args">载荷（按该判定器声明的强类型签名顺序）。</param>
+    /// <exception cref="ArgumentException">name 为 null/空白。</exception>
+    public bool Judge(string name, params object[] args)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        if (_judicators() is not { } judicators)
+        {
+            return false;
+        }
+
+        object[]? result;
+        try
+        {
+            result = judicators.Invoke(name, args, null);
+        }
+        catch (KeyNotFoundException)
+        {
+            return false; // 判定器未注册：降级（功能不可用、不失败）
+        }
+
+        return result is { Length: > 0 } && result[0] is bool flag && flag;
     }
 
     /// <summary>卡 → 运行时解析（「卡 → 玩家 → 服务」收敛点；脱局/未注入＝null）。</summary>

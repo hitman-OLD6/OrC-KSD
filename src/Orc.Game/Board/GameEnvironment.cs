@@ -69,7 +69,14 @@ public sealed class GameEnvironment
     /// 持有单位数据组件（已单位化）＝单位状态位置；HQ 实体＝占位槽（布局语义）；其余＝null。
     /// </summary>
     /// <exception cref="ArgumentNullException">card 为 null。</exception>
-    public Slot? GetPositionOf(Card card)
+    public Slot? GetPositionOf(Card card) => PositionOf(card);
+
+    /// <summary>
+    /// 读取卡的位置槽位（静态只读形态——供无环境实例的调用方〔如判定器〕复用同一口径）：
+    /// 持有单位数据组件＝单位状态位置；HQ 实体＝占位槽；其余＝null。
+    /// </summary>
+    /// <exception cref="ArgumentNullException">card 为 null。</exception>
+    public static Slot? PositionOf(Card card)
     {
         ArgumentNullException.ThrowIfNull(card);
 
@@ -115,19 +122,27 @@ public sealed class GameEnvironment
     /// 任一无位置＝不满足（false）；HQ 参与相邻关系（「相邻」关系对 HQ 成立——关系与计数分离，见 <see cref="GetAdjacentUnits"/>）。
     /// </summary>
     /// <exception cref="ArgumentNullException">a 或 b 为 null。</exception>
-    public bool AreAdjacent(Card a, Card b)
+    public bool AreAdjacent(Card a, Card b) => AreAdjacent(Battlefield, a, b);
+
+    /// <summary>
+    /// 相邻判定的静态形态（同一口径；供判定器等无环境实例的调用方复用）：
+    /// 同线、索引差 1 的直接邻位——隔空槽不相邻、跨线不算；任一无位置＝false；HQ 参与相邻关系。
+    /// </summary>
+    /// <exception cref="ArgumentNullException">battlefield / a / b 为 null。</exception>
+    public static bool AreAdjacent(Battlefield battlefield, Card a, Card b)
     {
+        ArgumentNullException.ThrowIfNull(battlefield);
         ArgumentNullException.ThrowIfNull(a);
         ArgumentNullException.ThrowIfNull(b);
 
-        var positionA = GetPositionOf(a);
-        var positionB = GetPositionOf(b);
+        var positionA = PositionOf(a);
+        var positionB = PositionOf(b);
         if (positionA is null || positionB is null)
         {
             return false;
         }
 
-        if (!TryLocate(positionA, out var line, out var indexA))
+        if (!TryLocate(battlefield, positionA, out var line, out var indexA))
         {
             return false;
         }
@@ -342,22 +357,26 @@ public sealed class GameEnvironment
 
     /// <summary>战线定位（三线逐线查找；命中＝true＋出线与索引）。</summary>
     private bool TryLocate(Slot slot, out BattleLine line, out int index)
+        => TryLocate(Battlefield, slot, out line, out index);
+
+    /// <summary>战线定位的静态形态（同一口径；供静态相邻判定复用）。</summary>
+    private static bool TryLocate(Battlefield battlefield, Slot slot, out BattleLine line, out int index)
     {
-        if (TryLocateInLine(Battlefield.PlayerASupportLine, slot, out index))
+        if (TryLocateInLine(battlefield.PlayerASupportLine, slot, out index))
         {
-            line = Battlefield.PlayerASupportLine;
+            line = battlefield.PlayerASupportLine;
             return true;
         }
 
-        if (TryLocateInLine(Battlefield.FrontLine, slot, out index))
+        if (TryLocateInLine(battlefield.FrontLine, slot, out index))
         {
-            line = Battlefield.FrontLine;
+            line = battlefield.FrontLine;
             return true;
         }
 
-        if (TryLocateInLine(Battlefield.PlayerBSupportLine, slot, out index))
+        if (TryLocateInLine(battlefield.PlayerBSupportLine, slot, out index))
         {
-            line = Battlefield.PlayerBSupportLine;
+            line = battlefield.PlayerBSupportLine;
             return true;
         }
 

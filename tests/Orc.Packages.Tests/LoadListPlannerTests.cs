@@ -291,4 +291,105 @@ public class LoadListPlannerTests
         Assert.Contains(plan.Issues, issue => issue.Code == AssetLoadIssueCode.DomainMismatch);
         Assert.Equal(["a"], plan.Formal.Items.Select(item => item.LocalId));
     }
+
+    [Fact]
+    public void 声明冲突双方同处加载集合判非法()
+    {
+        var registry = new AssetRegistry();
+        var a = RegisterWithConflict(registry, "p", "a", Conflict(AssetKind.Card, "pack/p/b"));
+        var b = Register(registry, "p", "b");
+
+        var plan = LoadListPlanner.Plan(registry, [FormalLock("p", a, b)]);
+
+        Assert.False(plan.IsValid);
+        var issue = Assert.Single(plan.Issues, item => item.Code == AssetLoadIssueCode.DeclaredConflict);
+        Assert.True(issue.IsFatal);
+        Assert.Contains("：a@", issue.Message, StringComparison.Ordinal);
+        Assert.Contains("：b@", issue.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void 声明冲突仅一方在集合不触发()
+    {
+        var registry = new AssetRegistry();
+        var a = RegisterWithConflict(registry, "p", "a", Conflict(AssetKind.Card, "pack/p/b"));
+        Register(registry, "p", "b");
+
+        var plan = LoadListPlanner.Plan(registry, [FormalLock("p", a)]);
+
+        Assert.True(plan.IsValid);
+        Assert.Empty(plan.Issues);
+    }
+
+    [Fact]
+    public void 声明冲突版本约束不满足不触发()
+    {
+        var registry = new AssetRegistry();
+        var a = RegisterWithConflict(
+            registry, "p", "a", Conflict(AssetKind.Card, "pack/p/b", "2.*.*"));
+        var b = Register(registry, "p", "b", version: "1.0.0");
+
+        var plan = LoadListPlanner.Plan(registry, [FormalLock("p", a, b)]);
+
+        Assert.True(plan.IsValid);
+        Assert.Empty(plan.Issues);
+    }
+
+    [Fact]
+    public void 声明冲突按域判定_测试不污染正式()
+    {
+        var registry = new AssetRegistry();
+        var formal = Register(registry, "p", "a");
+        var testAsset = RegisterWithConflict(
+            AssetDomain.Test, registry, "p", "b", Conflict(AssetKind.Card, "pack/p/a"));
+
+        var plan = LoadListPlanner.Plan(registry, [FormalLock("p", formal), TestLock("p", testAsset)]);
+
+        Assert.True(plan.IsValid);
+        Assert.DoesNotContain(plan.Issues, item => item.Code == AssetLoadIssueCode.DeclaredConflict);
+    }
+
+    private static AssetReference Conflict(AssetKind kind, string appId, string constraint = "1.*.*")
+        => new(kind, appId, constraint);
+
+    private static AssetRegistration RegisterWithConflict(
+        AssetRegistry registry,
+        string packageId,
+        string localId,
+        params AssetReference[] conflictsWith)
+        => RegisterWithConflict(AssetDomain.Formal, registry, packageId, localId, conflictsWith);
+
+    private static AssetRegistration RegisterWithConflict(
+        AssetDomain domain,
+        AssetRegistry registry,
+        string packageId,
+        string localId,
+        params AssetReference[] conflictsWith)
+    {
+        var version = AssetVersion.Parse("1.0.0");
+        var packageGuid = PackageGuidOf(packageId);
+        var registration = new AssetRegistration(
+            new AssetMetadata(
+                AssetIdentity.DeriveAssetGuid(packageGuid, AssetKind.Card, localId, version),
+                AssetKind.Card,
+                localId,
+                version,
+                Anchor: null,
+                Loader: null,
+                DependsOn: [],
+                ConflictsWith: conflictsWith),
+            domain,
+            packageId,
+            AssetAppId.Compose(packageId, localId),
+            AssetMetadataSource.Sidecar,
+            Card: null,
+            Prefab: null,
+            SourcePath: null)
+        {
+            PackageGuid = packageGuid,
+        };
+
+        registry.Register(registration);
+        return registration;
+    }
 }

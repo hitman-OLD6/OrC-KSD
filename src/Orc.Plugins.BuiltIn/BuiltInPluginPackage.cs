@@ -104,7 +104,8 @@ public static class BuiltInPluginPackage
                 new LoadedPluginScript(preAsset, RegisterEntry),
                 new LoadedPluginScript(postAsset, RegisterPostCommandEntry),
                 new LoadedPluginScript(processAsset, _ => BuiltInPlugin.RegisterProcessDefaults()),
-            });
+            },
+            AssetSource: new BuiltInCoreAssetSource());
     }
 
     /// <summary>构造仅含内置插件的资产目录快照。</summary>

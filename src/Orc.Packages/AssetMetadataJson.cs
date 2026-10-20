@@ -34,6 +34,10 @@ public sealed record AssetReference(AssetKind Kind, string AppId, string Version
 /// <param name="Loader">加载器名（须为已注册加载器；内含资产留空＝null）。</param>
 /// <param name="DependsOn">依赖声明。</param>
 /// <param name="ConflictsWith">冲突声明（双向硬冲突；对内含资产留空）。</param>
+/// <param name="ServiceKind">
+/// 服务子类（D62；仅 <see cref="AssetKind.Service"/> 使用：judicator／assetService／keyword／cardComponent／action／projection／observer…）。
+/// 其余种类为 null。
+/// </param>
 public sealed record AssetMetadata(
     Guid Guid,
     AssetKind Kind,
@@ -42,7 +46,8 @@ public sealed record AssetMetadata(
     string? Anchor,
     string? Loader,
     IReadOnlyList<AssetReference> DependsOn,
-    IReadOnlyList<AssetReference> ConflictsWith)
+    IReadOnlyList<AssetReference> ConflictsWith,
+    string? ServiceKind = null)
 {
     /// <summary>
     /// 非法版本号原文（**资产级**判定：D27／诊断分级表「版本号非法 ⇒ 该资产非法，不生成」）。
@@ -217,6 +222,11 @@ public static class AssetSidecarJson
             writer.WriteString("loader", loader);
         }
 
+        if (asset.ServiceKind is { } serviceKind)
+        {
+            writer.WriteString("serviceKind", serviceKind);
+        }
+
         WriteReferences(writer, "dependsOn", asset.DependsOn);
         WriteReferences(writer, "conflictsWith", asset.ConflictsWith);
         writer.WriteEndObject();
@@ -293,7 +303,7 @@ public static class AssetSidecarJson
         var kindText = RequireString(item, "kind");
         if (!AssetKindTokens.TryParse(kindText, out var kind))
         {
-            throw new FormatException($"资产种类 '{kindText}' 非法（期望 card/effect/trigger/handler）。");
+            throw new FormatException($"资产种类 '{kindText}' 非法（期望 card/effect/trigger/handler/service）。");
         }
 
         var id = RequireString(item, "id");
@@ -311,7 +321,8 @@ public static class AssetSidecarJson
                 OptionalString(item, "anchor"),
                 OptionalString(item, "loader"),
                 ReadReferences(item, "dependsOn"),
-                ReadReferences(item, "conflictsWith"))
+                ReadReferences(item, "conflictsWith"),
+                OptionalString(item, "serviceKind"))
             {
                 InvalidVersion = versionText,
             };
@@ -325,7 +336,8 @@ public static class AssetSidecarJson
             OptionalString(item, "anchor"),
             OptionalString(item, "loader"),
             ReadReferences(item, "dependsOn"),
-            ReadReferences(item, "conflictsWith"));
+            ReadReferences(item, "conflictsWith"),
+            OptionalString(item, "serviceKind"));
     }
 
     private static IReadOnlyList<AssetReference> ReadReferences(JsonElement item, string name)

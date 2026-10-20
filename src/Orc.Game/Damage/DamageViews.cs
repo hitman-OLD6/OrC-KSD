@@ -36,6 +36,14 @@ public class DamageEventView
     [Optional]
     [Read]
     public virtual ActionTargetResult? Result { get; set; }
+
+    /// <summary>
+    /// 效果宿主（注入型 handler 的「哪张卡注册了我」；由 <c>injects</c> 框架侧注入，非信号载荷）。
+    /// 供数据侧 handler 在共享触发器内定位自身宿主；非注入场景＝null。
+    /// </summary>
+    [Optional]
+    [Read]
+    public virtual Card? Host { get; set; }
 }
 
 /// <summary>
@@ -70,4 +78,12 @@ public class DamageApplyView
     [Optional]
     [Read]
     public virtual ActionTargetResult? Result { get; set; }
+
+    /// <summary>
+    /// 效果宿主（注入型 handler 的「哪张卡注册了我」；由 <c>injects</c> 框架侧注入，非信号载荷）。
+    /// 供数据侧 handler 在共享触发器内定位自身宿主；非注入场景＝null。
+    /// </summary>
+    [Optional]
+    [Read]
+    public virtual Card? Host { get; set; }
 }

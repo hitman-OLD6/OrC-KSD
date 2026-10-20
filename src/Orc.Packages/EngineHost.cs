@@ -30,7 +30,8 @@ public sealed record LoadedPackage(
     PackageManifest Manifest,
     string RootDirectory,
     IReadOnlyList<LoadedAsset> Assets,
-    IReadOnlyList<LoadedPluginScript> Scripts);
+    IReadOnlyList<LoadedPluginScript> Scripts,
+    IPluginAssetSource? AssetSource = null);
 
 /// <summary>宿主装载报告：已装载包 ＋ 失败明细（单包失败＝隔离整包、不阻断其余）。</summary>
 /// <param name="Packages">已装载包（加载序）。</param>
@@ -249,10 +250,43 @@ public sealed class EngineHost
             failures.AddRange(lifecycle.Notify(PackageLifecycleChange.Loaded, package));
         }
 
-        return new EngineHost(new AssetCatalog(loaded), failures, discovery.WarningList, evaluator, lifecycle)
+        var host = new EngineHost(new AssetCatalog(loaded), failures, discovery.WarningList, evaluator, lifecycle)
         {
             GlobalActivation = global,
         };
+
+        host.RegisterPluginAssets(loaded);
+        return host;
+    }
+
+    /// <summary>
+    /// 插件服务资产注册与 lock 校验（D63/D64）：只处理带 <see cref="LoadedPackage.AssetSource"/> 的插件包
+    /// （Q34 试点＝内置 core）。失败隔离：问题只入 <see cref="LoadFailures"/>，不阻断宿主启动。
+    /// </summary>
+    private void RegisterPluginAssets(IReadOnlyList<LoadedPackage> loaded)
+    {
+        foreach (var package in loaded)
+        {
+            if (package.Manifest.Kind != PackageKind.Plugin || package.AssetSource is null)
+            {
+                continue;
+            }
+
+            try
+            {
+                var result = PluginAssetRegistrar.Register(package.Manifest, package.AssetSource, Assets);
+                var verification = PluginAssetLockVerifier.Verify(
+                    package.Manifest, result.Registrations, package.RootDirectory);
+                foreach (var issue in verification.Issues)
+                {
+                    _failures.Add($"{package.Manifest.Id}：插件资产 lock [{issue.Code}] {issue.Message}");
+                }
+            }
+            catch (Exception ex) when (ex is FormatException or InvalidOperationException or IOException)
+            {
+                _failures.Add($"{package.Manifest.Id}：插件资产注册失败——{ex.Message}");
+            }
+        }
     }
 
     /// <summary>

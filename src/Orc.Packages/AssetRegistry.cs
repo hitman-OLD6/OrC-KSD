@@ -14,6 +14,9 @@ public enum AssetMetadataSource
 
     /// <summary>源文件在而 sidecar 缺 ⇒ 合成默认元数据（按「无元数据」走三档判定；不阻断包）。</summary>
     Synthesized = 1,
+
+    /// <summary>插件代码声明（D63：asm 插件无源文件，由 <c>IPluginAssetSource</c> 提供；清单文件是其落盘镜像）。</summary>
+    PluginDeclared = 2,
 }
 
 /// <summary>

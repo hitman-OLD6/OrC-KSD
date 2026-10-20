@@ -4,6 +4,12 @@
   "domain": "formal",
   "assets": [
     {
+      "guid": "4b5582c1-4727-0e0d-b7f2-fed27ff0b56a",
+      "kind": "card",
+      "id": "pack/diy/diy.adjacent-cover",
+      "version": "1.0.0"
+    },
+    {
       "guid": "096cb203-7716-b0a1-8045-af63aac3c4dc",
       "kind": "card",
       "id": "pack/diy/diy.field-rescue",
@@ -25,6 +31,18 @@
       "guid": "c5c68add-ca48-02f8-c497-e59d380e626d",
       "kind": "card",
       "id": "pack/diy/diy.volley",
+      "version": "1.0.0"
+    },
+    {
+      "guid": "74535dc1-1a96-3972-45c0-0a08217032c7",
+      "kind": "effect",
+      "id": "pack/diy/diy.adjacent-cover.aura",
+      "version": "1.0.0"
+    },
+    {
+      "guid": "1c27c37f-6150-8957-fa4f-d09edefefbb7",
+      "kind": "effect",
+      "id": "pack/diy/diy.adjacent-cover.mitigation",
       "version": "1.0.0"
     },
     {

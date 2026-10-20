@@ -1,8 +1,8 @@
 # DIY 示例卡包（数据侧）
 
-> 纯数据分发：`cards/*.card.json` ＋ `effects/*.prefab.json`。四个效果全部是**效果库引用**（卡上 `effects.prefabs`），
+> 纯数据分发：`cards/*.card.json` ＋ `effects/*.prefab.json`。六个效果全部是**效果库引用**（卡上 `effects.prefabs`），
 > 不含内联快照；行为由 csx 承载，装载在 `Orc.Script` 求值器中编译执行。
-> 用途：示例 1/2/3/5 的**数据侧证据**。代码侧示例 4/6/7/8 见 [`examples/README.md`](../../docs/卡牌DIY开发文档/examples/README.md)。
+> 用途：示例 1/2/3/5/9 的**数据侧证据**。代码侧示例 4/6/7/8 见 [`examples/README.md`](../../docs/卡牌DIY开发文档/examples/README.md)。
 
 ## 0. 对应示例
 
@@ -12,6 +12,7 @@
 | 齐射 | [示例 02 · 齐射](../../docs/卡牌DIY开发文档/examples/02-齐射.md) | 数据侧可用 | L1 + L2 |
 | 纪奠 | [示例 03 · 纪奠](../../docs/卡牌DIY开发文档/examples/03-纪奠.md) | 数据侧可用（有近似） | L1 + L2 |
 | 战地救护 | [示例 05 · 战地救护](../../docs/卡牌DIY开发文档/examples/05-战地救护.md) | 数据侧可用（依赖 `source`） | L1 + L2 |
+| 交叉掩护 | [示例 09 · 相邻掩护](../../docs/卡牌DIY开发文档/examples/09-相邻掩护.md) | 数据侧可用 | L1 + L2 |
 
 ## 1. 目录
 
@@ -24,12 +25,15 @@ samples/card-pack-diy/
 │   ├── diy.fire-support.card.json     火力支援（指令，1 费）——示例 1
 │   ├── diy.volley.card.json           齐射（指令，2 费）——示例 2
 │   ├── diy.memorial.card.json         纪奠（指令，1 费）——示例 3
-│   └── diy.field-rescue.card.json     战地救护（单位 1/2，1 费）——示例 5
+│   ├── diy.field-rescue.card.json     战地救护（单位 1/2，1 费）——示例 5
+│   └── diy.adjacent-cover.card.json   交叉掩护（单位 1/3，2 费）——示例 9
 └── effects/
     ├── diy.fire-support.effect.prefab.json
     ├── diy.volley.effect.prefab.json
     ├── diy.memorial.effect.prefab.json
-    └── diy.field-rescue.effect.prefab.json
+    ├── diy.field-rescue.effect.prefab.json
+    ├── diy.adjacent-cover.aura.prefab.json        交叉掩护·光环（行动花费 -1）
+    └── diy.adjacent-cover.mitigation.prefab.json  交叉掩护·减伤（伤害处理端注入）
 ```
 
 > 每个资产源文件同目录另有 `<源文件名>.meta.json` 资产元数据 sidecar（S10a 迁移生成，初始版本 `1.0.0`）。
@@ -43,6 +47,7 @@ samples/card-pack-diy/
 | `diy.volley` | 齐射 | 指令 | 2 | 将 3 点伤害随机分配给场上单位（可重复命中） | `card.played`（本卡） | `SelectAsync("random")` ×3 + `DamageAsync` | 02 |
 | `diy.memorial` | 纪奠 | 指令 | 1 | 本方总部回复等同于本局已被摧毁单位数的生命 | `card.played` ＋ `card.died`（计数） | `BuffAsync`（HQ 生命） | 03 |
 | `diy.field-rescue` | 战地救护 | 单位 | 1 | 友方因敌方弃牌时，从卡组抽取此牌 | `card.discarded`（读 `Source`） | `FetchFromDeckAsync(self)` | 05 |
+| `diy.adjacent-cover` | 交叉掩护 | 单位 1/3 | 2 | 相邻友方步兵的行动花费减一，受到的伤害减一 | 无（`card.load` 登记光环）＋ `damage.apply` | `Auras.Register` + `Judge`；改 `DamageApplyView.Amount` | 09 |
 
 > 「纪奠」的计数为**对局级共享键**（`EngineVariables["diy.example3.destroyed"]`），自该卡效果装载起算；
 > 多张同名卡共享计数（数据侧近似）。代码侧版本可用效果实例字段（见 07 章「词条程序 vs csx」的对照思路）。
@@ -61,11 +66,11 @@ var report = CardDistributionValidator.Validate(
     new[] { "samples/card-pack-diy/effects" });
 ```
 
-最近一次实测（2026-10-19）：
+最近一次实测（2026-10-20）：
 
 ```
-SuccessfulCardCount=4
-SuccessfulLibrarySnapshotCount=4
+SuccessfulCardCount=5
+SuccessfulLibrarySnapshotCount=6
 SuccessfulInlineSnapshotCount=0
 UnresolvedReferenceCount=0
 ErrorCount=0

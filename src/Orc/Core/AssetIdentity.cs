@@ -4,8 +4,12 @@ using System.Text;
 namespace Orc.Core;
 
 /// <summary>
-/// 资产种类（R1/D4）：card／effect／trigger／handler。与「加载方/来源」（<see cref="AssetLoadKind"/>）不同——
+/// 资产种类（R1/D4/D62）：card／effect／trigger／handler／service。与「加载方/来源」（<see cref="AssetLoadKind"/>）不同——
 /// 后者是文件级身份，本类型是**资产身份**的一等分型。
+/// <para>
+/// <c>Service</c>＝插件提供的引擎服务资产（判定器／资产服务／词条／卡组件／行动契约／投影提供者…），
+/// 具体子类由元数据的 <c>serviceKind</c> 字段区分（D62：单一 kind ＋ 子类字符串，新增服务种类不改枚举）。
+/// </para>
 /// </summary>
 public enum AssetKind
 {
@@ -20,6 +24,9 @@ public enum AssetKind
 
     /// <summary>handler（含内含 handler 条目）。</summary>
     Handler = 3,
+
+    /// <summary>引擎服务资产（插件提供；子类见 <c>serviceKind</c>）。**追加为 4**——保持既有排序/字节序不变。</summary>
+    Service = 4,
 }
 
 /// <summary>资产种类 token（规范小写：<c>card</c>／<c>effect</c>／<c>trigger</c>／<c>handler</c>）读写。</summary>
@@ -33,6 +40,7 @@ public static class AssetKindTokens
         AssetKind.Effect => "effect",
         AssetKind.Trigger => "trigger",
         AssetKind.Handler => "handler",
+        AssetKind.Service => "service",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "未定义的资产种类。"),
     };
 
@@ -45,6 +53,7 @@ public static class AssetKindTokens
             case "effect": kind = AssetKind.Effect; return true;
             case "trigger": kind = AssetKind.Trigger; return true;
             case "handler": kind = AssetKind.Handler; return true;
+            case "service": kind = AssetKind.Service; return true;
             default: kind = default; return false;
         }
     }

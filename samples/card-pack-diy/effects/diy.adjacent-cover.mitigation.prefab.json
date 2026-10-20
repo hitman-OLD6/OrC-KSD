@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 3,
+  "root": {
+    "id": "diy.adjacent-cover.mitigation",
+    "version": 1,
+    "oneShot": false,
+    "mainTrigger": {
+      "id": "t.mitigation",
+      "stableKey": "diy·交叉掩护·减伤",
+      "kind": "passive",
+      "viewType": "Orc.Game.Damage.DamageApplyView",
+      "hooks": [],
+      "events": [
+        {
+          "id": "onDamageApply",
+          "entry": "HandleAsync",
+          "csx": "Func<Orc.Game.Damage.DamageApplyView, Context, CancellationToken, Task> HandleAsync = (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Cards.Card self)\n    {\n        return Task.CompletedTask;\n    }\n\n    var runtime = Orc.Game.Effects.EffectRuntime.ResolveFor(self);\n    if (runtime is null)\n    {\n        return Task.CompletedTask;\n    }\n\n    if (runtime.Judge(Orc.Game.Judicators.JudicatorNames.UnitAdjacent, self, view.Target)\n        && runtime.Judge(Orc.Game.Judicators.JudicatorNames.UnitTypeMatch, view.Target, \"infantry\")\n        && runtime.Judge(Orc.Game.Judicators.JudicatorNames.UnitSide, self, view.Target))\n    {\n        view.Amount = System.Math.Max(0, view.Amount - 1);\n    }\n\n    return Task.CompletedTask;\n};\n",
+          "version": 1
+        }
+      ],
+      "version": 1
+    },
+    "otherTriggers": [],
+    "wrappers": [],
+    "injects": [
+      {
+        "target": "伤害处理触发器",
+        "band": "Rewrite",
+        "event": "onDamageApply",
+        "priority": 0
+      }
+    ]
+  }
+}

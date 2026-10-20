@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "diy.adjacent-cover",
+  "name": "交叉掩护",
+  "components": [
+    {
+      "component": "typeCategory",
+      "type": [
+        "infantry"
+      ]
+    },
+    {
+      "component": "factionCost",
+      "faction": "Germany",
+      "kredits": 2
+    },
+    {
+      "component": "battleStats",
+      "operationCost": 1,
+      "attack": 1,
+      "defense": 3
+    },
+    {
+      "component": "tagData",
+      "rarity": "Standard"
+    },
+    {
+      "component": "effects",
+      "prefabs": [
+        "diy.adjacent-cover.aura",
+        "diy.adjacent-cover.mitigation"
+      ]
+    }
+  ]
+}

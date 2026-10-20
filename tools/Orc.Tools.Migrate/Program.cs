@@ -1,5 +1,6 @@
 using Orc.Core;
 using Orc.Packages;
+using Orc.Plugins.BuiltIn;
 
 namespace Orc.Tools.Migrate;
 
@@ -29,6 +30,11 @@ internal static class Program
 
     private static int Main(string[] args)
     {
+        if (args.Contains("--plugin-assets", StringComparer.Ordinal))
+        {
+            return WritePluginAssets(args);
+        }
+
         if (!TryParse(args, out var options, out var error))
         {
             Console.Error.WriteLine($"参数错误：{error}");
@@ -220,4 +226,54 @@ internal static class Program
         bool ShowHelp,
         IReadOnlyList<string> Packages,
         string? Root);
+
+    /// <summary>
+    /// 插件资产清单生成（D63/Q34）：读内置 core 的代码声明 → 写 <c>assets.meta.json</c> ＋ 两 lock。
+    /// 用法：<c>--plugin-assets [--plugins-root &lt;目录&gt;]</c>（默认源码树内置插件根）。
+    /// </summary>
+    private static int WritePluginAssets(string[] args)
+    {
+        var pluginsRoot = ReadOption(args, "--plugins-root")
+            ?? Path.Combine("src", "Orc.Plugins.BuiltIn", "package", "plugins");
+
+        try
+        {
+            var package = BuiltInPluginPackage.Load(pluginsRoot);
+            var source = package.AssetSource
+                ?? throw new InvalidOperationException("内置插件未提供资产声明面。");
+
+            var registry = new AssetRegistry();
+            var result = PluginAssetRegistrar.Register(package.Manifest, source, registry);
+            PluginAssetManifestWriter.Write(
+                package.RootDirectory,
+                package.Manifest,
+                result.Registrations,
+                BuiltInCoreAssetSource.AssemblyName);
+
+            Console.WriteLine($"插件资产清单已写出：{package.RootDirectory}");
+            Console.WriteLine($"  资产 {result.Registrations.Count} 条（{BuiltInCoreAssetSource.AssemblyName}）");
+            Console.WriteLine(
+                $"  {PluginAssetRegistrar.ManifestFileName} / {AssetLockJson.FormalFileName} / {AssetLockJson.TestFileName}");
+            return 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+            or FormatException or InvalidOperationException)
+        {
+            Console.Error.WriteLine($"生成失败：{ex.Message}");
+            return 1;
+        }
+    }
+
+    private static string? ReadOption(string[] args, string name)
+    {
+        for (var i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], name, StringComparison.Ordinal))
+            {
+                return args[i + 1];
+            }
+        }
+
+        return null;
+    }
 }

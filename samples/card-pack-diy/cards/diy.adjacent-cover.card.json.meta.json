@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "diy",
+  "source": "cards/diy.adjacent-cover.card.json",
+  "assets": [
+    {
+      "guid": "4b5582c1-4727-0e0d-b7f2-fed27ff0b56a",
+      "kind": "card",
+      "id": "diy.adjacent-cover",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

@@ -248,13 +248,38 @@ internal static class DynamicEffectBuilder
 
     private static Type? ResolveViewType(string typeName)
     {
-        var type = Type.GetType(typeName);
-        if (type is null || !type.IsClass)
+        if (string.IsNullOrWhiteSpace(typeName))
         {
             return null;
         }
 
-        return type;
+        // ① 程序集限定名 / 当前程序集（既有口径）。
+        var type = Type.GetType(typeName);
+        if (type is { IsClass: true })
+        {
+            return type;
+        }
+
+        // ② 已加载程序集回退（游戏层视图类型——如 Orc.Game.Damage.DamageApplyView——
+        //    不写程序集限定名也能按全名解析；同名多命中＝不解析，交由作者写限定名收敛）。
+        Type? resolved = null;
+        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            var candidate = assembly.GetType(typeName, throwOnError: false);
+            if (candidate is not { IsClass: true })
+            {
+                continue;
+            }
+
+            if (resolved is not null && !ReferenceEquals(resolved, candidate))
+            {
+                return null; // 歧义：拒绝静默择一
+            }
+
+            resolved = candidate;
+        }
+
+        return resolved;
     }
 }
 

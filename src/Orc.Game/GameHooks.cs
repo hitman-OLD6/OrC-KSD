@@ -350,7 +350,16 @@ public static class GameHooks
     /// <summary>判定器名：失去点数的数字包裹（<c>resource.point.lose</c>；E1-25 后续）。</summary>
     public const string JudicatorPointLose = JudicatorNames.PointLose;
 
-    /// <summary>判定器名全量（23 条；稳定序＝定义序）。</summary>
+    /// <summary>判定器名：相邻关系判定（<c>unit.adjacent</c>；通用原子判定——纯几何关系）。</summary>
+    public const string JudicatorUnitAdjacent = JudicatorNames.UnitAdjacent;
+
+    /// <summary>判定器名：兵种判定（<c>unit.type</c>；通用原子判定——参数化兵种）。</summary>
+    public const string JudicatorUnitTypeMatch = JudicatorNames.UnitTypeMatch;
+
+    /// <summary>判定器名：归属判定（<c>unit.side</c>；通用原子判定——是否同一归属）。</summary>
+    public const string JudicatorUnitSide = JudicatorNames.UnitSide;
+
+    /// <summary>判定器名全量（27 条；稳定序＝定义序）。</summary>
     public static IReadOnlyList<string> JudicatorNameList { get; } = new[]
     {
         JudicatorCostCheck, JudicatorCounterUse, JudicatorMoveRecheck, JudicatorAttackRecheck, JudicatorActionInput,
@@ -363,6 +372,7 @@ public static class GameHooks
         JudicatorEffectTargetResolve,
         JudicatorPointSlotIncrement, JudicatorPointSlotGain, JudicatorPointSlotLose,
         JudicatorPointGain, JudicatorPointLose,
+        JudicatorUnitAdjacent, JudicatorUnitTypeMatch, JudicatorUnitSide,
     };
 
     /// <summary>判定器名装配面：21 条内置（5 条验证类＋6 条交战类＋3 条动作资格类＋1 条效果选靶类＋5 条资源类
@@ -379,6 +389,7 @@ public static class GameHooks
         JudicatorPointSlotIncrement, JudicatorPointSlotGain, JudicatorPointSlotLose,
         JudicatorPointGain, JudicatorPointLose,
         JudicatorTargetCandidateEligibility,
+        JudicatorUnitAdjacent, JudicatorUnitTypeMatch, JudicatorUnitSide,
     };
 
     /// <summary>判定器名装配面：示范类（经 <c>judicatorAssembly</c> 外部装配段注入）。</summary>
