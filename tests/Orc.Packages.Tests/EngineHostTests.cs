@@ -64,8 +64,8 @@ public sealed class EngineHostTests : IDisposable
 
         Assert.Empty(host.LoadFailures);
         Assert.Equal(2, host.Catalog.ById("p1").Count);
-        Assert.NotNull(host.Catalog.Find("p1", new AssetVersion(1, 2, 0)));
-        Assert.Null(host.Catalog.Find("p1", new AssetVersion(9, 0, 0)));
+        Assert.NotNull(host.Catalog.Find("p1", PackageVersion.Parse("1.2.0")));
+        Assert.Null(host.Catalog.Find("p1", PackageVersion.Parse("9.0.0")));
     }
 
     [Fact]
@@ -81,6 +81,21 @@ public sealed class EngineHostTests : IDisposable
         Assert.NotSame(snapshotA, snapshotB);
         Assert.Equal(new[] { "p1@1.0.0", "p2@2.1.0" }, snapshotA.VersionLocks);
         Assert.Equal(snapshotA.VersionLocks, snapshotB.VersionLocks);
+    }
+
+    [Fact]
+    public void 版本锁定_为id加内容指纹_审计记录()
+    {
+        // 包版本＝内容指纹：VersionLocks 记录 id@指纹（不含时间戳、不参与择版）。
+        var fingerprint = PackageVersion.Compute("p1", new[] { "a.json" });
+        WritePlugin("p1", fingerprint.ToString(), ("json", "a", "a.json"));
+
+        var host = EngineHost.Start(_root);
+        var snapshot = host.CreateSnapshot();
+
+        Assert.Equal(new[] { $"p1@{fingerprint}" }, snapshot.VersionLocks);
+        Assert.NotNull(snapshot.Find("p1", fingerprint));
+        Assert.Null(snapshot.Find("p1", PackageVersion.Parse("1.0.0")));
     }
 
     private void WritePlugin(string id, string version, params (string Type, string Name, string Path)[] assets)
@@ -101,7 +116,7 @@ public sealed class EngineHostTests : IDisposable
         }
 
         var manifest = new PackageManifest(
-            PackageKind.Plugin, id, Guid.NewGuid(), AssetVersion.Parse(version),
+            PackageKind.Plugin, id, Guid.NewGuid(), PackageVersion.Parse(version),
             Array.Empty<PackageDependency>(),
             assets.Select(a => new PackageAsset(a.Type, a.Name, a.Path)).ToArray());
         File.WriteAllText(Path.Combine(directory, PackageDiscovery.ManifestFileName), manifest.ToJson());

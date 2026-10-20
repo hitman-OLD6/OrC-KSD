@@ -1,0 +1,283 @@
+using Orc.Cards;
+using Orc.Core;
+using Orc.Game.Cards;
+using Orc.Game.Cards.Loading;
+using Orc.Game.Triggers;
+using Orc.Packages;
+
+namespace Orc.Packages.Loading;
+
+/// <summary>
+/// **卡组装载**（S7；R5/R7/R14/R15）：把「卡包目录 → 注册面 → 合并 lock → 资产加载器分层列表 →
+/// 卡牌加载器整批装载 → 卡库」这条链路收敛成一个对局级的装载对象，并以
+/// <see cref="IMatchCardLoader"/> 端口交给对局（依赖方向 `Orc.Packages → Orc.Game`，对局层不感知 GUID）。
+/// <para>
+/// 两个阶段，职责不重叠：
+/// <list type="bullet">
+///   <item>**准备期**（构造，对局创建前）：注册全部卡包（正式域）→ 读两域 lock → 计划分层列表缓存；
+///     此阶段还没有卡库（卡库随对局创建），故不落地。</item>
+///   <item>**装配期**（<see cref="Attach"/>，对局初始化内）：把卡库接到卡牌加载器 → 资产加载器装载分层列表
+///     （合法／警报卡＝套件补全后的定义，含资产域）→ 按装载列表把 **应用层 ID → GUID** 定版结果写进中间层。</item>
+/// </list>
+/// </para>
+/// <para>
+/// **时序硬约束**：本类型的任何方法都**不实例化卡**、不分配对局级卡牌 ID——实例化仍在
+/// <c>Match.Initialize</c> 的 <c>LoadDecksAsync</c> 内原位进行（ID 水位线语义挂在那条时序上）。
+/// </para>
+/// <para>单线程（对局装配期一次性使用）；不承诺并发安全。</para>
+/// </summary>
+public sealed class MatchCardAssembly : IMatchCardLoader
+{
+    private const string ManifestFileName = "manifest.json";
+
+    private readonly List<AssetLock> _locks;
+    private readonly List<PackageRegistrationResult> _registrations;
+    private readonly List<string> _warnings;
+    private CardLoaderTrigger? _loader;
+    private AssetLoader? _assetLoader;
+
+    private MatchCardAssembly(
+        AssetRegistry registry,
+        AssetIdBridge bridge,
+        List<AssetLock> locks,
+        List<PackageRegistrationResult> registrations,
+        List<string> warnings)
+    {
+        Registry = registry;
+        Bridge = bridge;
+        _locks = locks;
+        _registrations = registrations;
+        _warnings = warnings;
+    }
+
+    /// <summary>资产注册面（进程视图；本装配独占——同一条装载链只有一份 DTO）。</summary>
+    public AssetRegistry Registry { get; }
+
+    /// <summary>中间层（应用层 ID → GUID；正式／测试两域）。</summary>
+    public AssetIdBridge Bridge { get; }
+
+    /// <summary>注册期与 lock 期的告警（不阻断装载的人读留痕）。</summary>
+    public IReadOnlyList<string> Warnings => _warnings;
+
+    /// <summary>卡定义集（包链的 id 已前缀化为应用层 ID）——宿主用于建局前的读面/报告。</summary>
+    public IReadOnlyList<CardDefinitionEntry> Definitions
+        => _registrations.SelectMany(registration => registration.Content.Definitions).ToArray();
+
+    /// <summary>内联效果预制体（含文本转换产出的效果）。</summary>
+    public IReadOnlyList<EffectSnapshot> InlinePrefabs
+        => _registrations.SelectMany(registration => registration.Content.InlinePrefabs).ToArray();
+
+    /// <summary>卡 → 效果预制体声明（cardId 已前缀化）。</summary>
+    public IReadOnlyList<(string CardId, IReadOnlyList<string> PrefabIds)> Declarations
+        => _registrations.SelectMany(registration => registration.Content.Declarations).ToArray();
+
+    /// <summary>效果库目录（按装载序）。</summary>
+    public IReadOnlyList<string> EffectDirectories
+        => _registrations
+            .Select(registration => registration.Content.EffectsDirectory)
+            .Where(directory => directory is not null)
+            .Select(directory => directory!)
+            .ToArray();
+
+    /// <summary>包链的卡 id 前缀（<c>pack/{包id}/</c>；按装载序）。</summary>
+    public IReadOnlyList<string> PackPrefixes
+        => _registrations.Select(registration => registration.Content.Prefix).ToArray();
+
+    /// <summary>装配期装载结果（未 <see cref="Attach"/>＝null；结构性失败＝抛异常、不留在本属性）。</summary>
+    public AssetLoadResult? LoadResult { get; private set; }
+
+    /// <summary>最近一次装载批次的报告（未装载＝null；报告不落盘，只经返回值/工具返回）。</summary>
+    public CardLoadReport? LastReport { get; private set; }
+
+    /// <summary>
+    /// 本局加载台账（S9）：记录每一次批次，给出「最近一批」与「按 GUID 合并、<c>refCount</c> 累加」的累积视图。
+    /// 每局一份（本类型即对局级装配），诊断工具只读此处、不复制报告模型。
+    /// </summary>
+    public CardLoadLedger Ledger { get; } = new();
+
+    /// <summary>本局实际使用的卡牌加载器（未 <see cref="Attach"/>＝null）。</summary>
+    public CardLoaderTrigger? Loader => _loader;
+
+    /// <summary>
+    /// 准备期：**注册**卡包目录（只解析元数据并生成 DTO，不实例化、不进对局），并读入两域 lock。
+    /// </summary>
+    /// <param name="packDirectories">卡包目录（须含 <c>manifest.json</c>——加载严格按元数据）。</param>
+    /// <exception cref="ArgumentException">目录列表为空或含空白项。</exception>
+    /// <exception cref="DirectoryNotFoundException">目录不存在。</exception>
+    /// <exception cref="InvalidDataException">目录不是卡包；或包级结构性非法（整包不注册）。</exception>
+    public static MatchCardAssembly Register(IReadOnlyList<string> packDirectories)
+    {
+        ArgumentNullException.ThrowIfNull(packDirectories);
+        if (packDirectories.Count == 0)
+        {
+            throw new ArgumentException("至少需要一个卡包目录。", nameof(packDirectories));
+        }
+
+        var registry = new AssetRegistry();
+        var bridge = new AssetIdBridge();
+        var locks = new List<AssetLock>();
+        var registrations = new List<PackageRegistrationResult>();
+        var warnings = new List<string>();
+
+        foreach (var rawDirectory in packDirectories)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(rawDirectory);
+            var directory = Path.GetFullPath(rawDirectory);
+            if (!Directory.Exists(directory))
+            {
+                throw new DirectoryNotFoundException($"卡包目录不存在：{directory}");
+            }
+
+            var manifestPath = Path.Combine(directory, ManifestFileName);
+            if (!File.Exists(manifestPath))
+            {
+                throw new InvalidDataException(
+                    $"目录 '{directory}' 不是卡包（缺 manifest.json）——加载严格按元数据（R3），目录链已退役。");
+            }
+
+            var manifest = PackageManifest.Parse(File.ReadAllText(manifestPath), out var manifestWarnings);
+            warnings.AddRange(manifestWarnings.Select(warning => $"{manifest.Id}：{warning}"));
+            registrations.Add(PackageRegistrar.Register(directory, manifest, registry));
+
+            foreach (var domain in new[] { AssetDomain.Formal, AssetDomain.Test })
+            {
+                if (AssetLockJson.ReadPackage(directory, domain) is { } @lock)
+                {
+                    locks.Add(@lock);
+                }
+                else if (domain == AssetDomain.Formal)
+                {
+                    warnings.Add($"{manifest.Id}：缺少正式 lock（{Path.GetFileName(AssetLockJson.PathFor(directory, domain))}）——整包不参与加载");
+                }
+            }
+        }
+
+        var assembly = new MatchCardAssembly(registry, bridge, locks, registrations, warnings);
+        if (assembly.Definitions.Count == 0)
+        {
+            throw new InvalidDataException(
+                "卡包目录未装载到任何卡定义（检查 lock 是否覆盖已注册资产）；诊断："
+                + string.Join("；", warnings.Take(6)));
+        }
+
+        // 定版（lock 决议）在**注册期**一次算完并写入中间层：卡组解析（裸局部 ID → 应用层 ID）不依赖对局卡库，
+        // 故宿主可在建局前解析卡位；装载期只按同一份计划落地（装载器再算一次是纯函数、结果必然一致）。
+        var plan = LoadListPlanner.Plan(registry, locks);
+        if (!plan.IsValid)
+        {
+            throw new InvalidDataException(
+                "卡组装载计划结构性非法（lock 冲突／环依赖）："
+                + string.Join("；", plan.Issues.Where(issue => issue.IsFatal).Select(issue => issue.ToString())));
+        }
+
+        if (plan.Formal.Items.All(item => item.Kind != AssetKind.Card)
+            && plan.Test.Items.All(item => item.Kind != AssetKind.Card))
+        {
+            throw new InvalidDataException(
+                "lock 未覆盖任何卡资产（正式／测试两域均无可装载卡）；诊断：" + string.Join("；", warnings.Take(6)));
+        }
+
+        assembly.BindPlan(plan);
+        return assembly;
+    }
+
+    /// <summary>
+    /// 装配期（对局初始化内）：接入本局卡库 → 资产加载器装载分层列表 → 中间层写入定版结果。
+    /// </summary>
+    /// <param name="library">本局卡库。</param>
+    /// <param name="triggers">本局触发器注册表（加载器登记进 LowLevel 审计面——仅记账、不挂载）。</param>
+    /// <exception cref="ArgumentNullException">参数为 null。</exception>
+    /// <exception cref="InvalidOperationException">重复接入；或装载链结构性失败（lock 冲突／环依赖／装载失败）。</exception>
+    public void Attach(CardLibrary library, TriggerRegistry triggers)
+    {
+        ArgumentNullException.ThrowIfNull(library);
+        ArgumentNullException.ThrowIfNull(triggers);
+        if (_loader is not null)
+        {
+            throw new InvalidOperationException("卡组装载已接入过卡库（一个装载链只服务一个对局——重复接入被拒绝）。");
+        }
+
+        _loader = new CardLoaderTrigger(Registry, Bridge, library);
+        _loader.RegisterIn(triggers); // 对局级审计面：仅记账（注册与挂载解耦）
+        _assetLoader = new AssetLoader(Registry, _loader);
+
+        // 先正式后测试（R15：两段加载；跨域绝不互相合并——由 AssetLoader/Planner 保证）。
+        var result = _assetLoader.Load(_locks);
+        LoadResult = result;
+        if (!result.Ok || result.Plan is null)
+        {
+            throw new InvalidOperationException(
+                $"卡组装载失败（{result.Status}）：{result.Failure ?? DescribeIssues(result)}");
+        }
+
+        BindPlan(result.Plan);
+    }
+
+    /// <summary>
+    /// 整批装载（双方牌堆＝一次调用；局内新增卡＝一元清单）：解析经中间层，装载经卡牌加载器；
+    /// 产出与输入同序的卡位结局（卡位留空＝非法／未注册／未入 lock），并把本批产出的卡同步进中间层。
+    /// </summary>
+    /// <param name="slots">卡位清单（可为空）。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <exception cref="ArgumentNullException">slots 为 null。</exception>
+    /// <exception cref="InvalidOperationException">尚未 <see cref="Attach"/>（装配时序错误）。</exception>
+    public async Task<CardLoadOutcome> LoadBatchAsync(
+        IReadOnlyList<MatchCardSlot> slots, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(slots);
+        if (_loader is null)
+        {
+            throw new InvalidOperationException("卡组装载尚未接入卡库（Attach 未执行——装配时序错误）。");
+        }
+
+        var items = slots
+            .Select(slot => new CardLoadItem(slot.PlayerId, slot.Index, slot.Reference))
+            .ToArray();
+
+        var result = await _loader.LoadBatchAsync(items, ct).ConfigureAwait(false);
+        LastReport = result.Report;
+        Ledger.Record(result.Report); // 本局累积视图（按 GUID 合并、refCount 累加）
+
+        // 中间层同步（S7 第 6 条）：本批产出的卡（含局内单卡新增）写入 (域, 种类, 应用层 ID) → GUID。
+        foreach (var card in result.Cards)
+        {
+            Bridge.Bind(card.Domain, AssetKind.Card, card.AppId, card.AssetGuid);
+        }
+
+        var byGuid = result.Cards.ToDictionary(card => card.AssetGuid);
+        var outcomes = new CardSlotOutcome[result.Report.Slots.Count];
+        for (var i = 0; i < outcomes.Length; i++)
+        {
+            var slot = result.Report.Slots[i];
+            outcomes[i] = slot.AssetGuid is { } guid && byGuid.TryGetValue(guid, out var card)
+                ? new CardSlotOutcome(CardSlotStatus.Loaded, card.AppId)
+                : CardSlotOutcome.Empty;
+        }
+
+        return new CardLoadOutcome(result.BatchId, outcomes);
+    }
+
+    /// <summary>
+    /// 中间层写入定版结果：装载列表的每条（含内含资产）→（域, 种类, 应用层 ID）→ GUID。
+    /// 正式段先写、测试段后写——同名映射由中间层的域遮蔽表裁决（正式域解析永不看到测试映射）。
+    /// </summary>
+    private void BindPlan(AssetLoadPlan plan)
+    {
+        foreach (var domain in new[] { AssetDomain.Formal, AssetDomain.Test })
+        {
+            foreach (var item in plan.For(domain).Items)
+            {
+                Bridge.Bind(item.Domain, item.Kind, item.AppId, item.AssetGuid);
+                foreach (var embedded in item.Embedded)
+                {
+                    Bridge.Bind(embedded.Domain, embedded.Kind, embedded.AppId, embedded.AssetGuid);
+                }
+            }
+        }
+    }
+
+    private static string DescribeIssues(AssetLoadResult result)
+        => result.Issues.Count == 0
+            ? "（无问题明细）"
+            : string.Join("；", result.Issues.Take(6).Select(issue => issue.ToString()));
+}

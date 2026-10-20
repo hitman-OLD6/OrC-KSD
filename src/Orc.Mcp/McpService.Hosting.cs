@@ -140,6 +140,7 @@ public sealed partial class McpService : IMcpHost, IMcpActions
     internal Orc.Game.Match? DetachMatch()
     {
         var match = Executor.Detach();
+        CardAssembly = null; // 对局丢弃 ⇒ 本局加载台账随之失效（累积视图是「本局」语义）
         if (match is not null)
         {
             MatchChanged?.Invoke(this, new MatchLifecycleEventArgs(MatchLifecycleChange.Disposed, match));

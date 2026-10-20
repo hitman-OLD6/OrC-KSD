@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "diy",
+  "source": "cards/diy.field-rescue.card.json",
+  "assets": [
+    {
+      "guid": "096cb203-7716-b0a1-8045-af63aac3c4dc",
+      "kind": "card",
+      "id": "diy.field-rescue",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

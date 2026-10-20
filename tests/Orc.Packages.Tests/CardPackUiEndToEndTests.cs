@@ -49,7 +49,8 @@ public sealed class CardPackUiEndToEndTests : IDisposable
         var host = EngineHost.FromDiscovery(
             PackageDiscovery.Discover(_root),
             evaluator: null,
-            extraPackages: [BuiltInPluginPackage.Load(), .. UiPluginPackage.Packages(pluginsRoot)]);
+            extraPackages: [BuiltInPluginPackage.Load(), .. UiPluginPackage.Packages(pluginsRoot)],
+            pluginLoadOrder: BuiltInPluginPackage.LoadOrder);
 
         // ① 卡包进入引擎目录
         Assert.Contains(host.Catalog.Packages, p => p.Manifest.Id == PackId);
@@ -59,7 +60,7 @@ public sealed class CardPackUiEndToEndTests : IDisposable
 
         // ③ 包内容装载：卡 id 带 `pack/<包id>/` 前缀；文本→效果产出内联预制体
         var package = host.Catalog.ById(PackId).Single();
-        var content = CardPackLoader.Load(package.RootDirectory, package.Manifest);
+        var content = PackageRegistrar.Register(package.RootDirectory, package.Manifest, host.Assets).Content;
         Assert.Contains(content.Definitions, d => d.Id == "pack/sample.synthetic/sample.rifle");
         Assert.Contains(content.InlinePrefabs, p => !string.IsNullOrWhiteSpace(p.Root.Id));
         // 词条随内容一并解析（信息面）；**注册**由 `.ui` 插件按约定执行（上方断言）。
@@ -75,7 +76,7 @@ public sealed class CardPackUiEndToEndTests : IDisposable
 
         // ⑤ 卡包生命周期锁：对局进行中禁止卸载/重载
         host.LockCardPacks();
-        Assert.False(host.TryUnloadCardPack(PackId, Orc.Core.AssetVersion.Parse("1.0.0"), out var lockFailure));
+        Assert.False(host.TryUnloadCardPack(PackId, PackageVersion.Parse("1.0.0"), out var lockFailure));
         Assert.Contains("对局进行中", lockFailure);
         host.UnlockCardPacks();
     }
@@ -90,11 +91,12 @@ public sealed class CardPackUiEndToEndTests : IDisposable
 
         var host = EngineHost.FromDiscovery(
             PackageDiscovery.Discover(_root), evaluator: null,
-            extraPackages: [BuiltInPluginPackage.Load(), .. UiPluginPackage.Packages(pluginsRoot)]);
+            extraPackages: [BuiltInPluginPackage.Load(), .. UiPluginPackage.Packages(pluginsRoot)],
+            pluginLoadOrder: BuiltInPluginPackage.LoadOrder);
         var snapshot = host.CreateSnapshot();
 
         var contents = snapshot.CardPacks
-            .Select(p => CardPackLoader.Load(p.RootDirectory, p.Manifest)).ToArray();
+            .Select(p => PackageRegistrar.Register(p.RootDirectory, p.Manifest, host.Assets).Content).ToArray();
         var definitions = contents.SelectMany(c => c.Definitions).ToArray();
 
         var registry = new CardEffectRegistry();

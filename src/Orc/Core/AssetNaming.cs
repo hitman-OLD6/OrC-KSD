@@ -4,9 +4,9 @@ namespace Orc.Core;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 资产命名文法（资产化 S2）：`{类型名}：{资产名}@{包GUID8}#{版本}`
-//   · 类型名＝加载方/来源（json 数据 / csx 逻辑 / asm 程序集）；
+//   · 类型名＝加载方/来源（json 数据 / csx 逻辑 / asm 程序集）——**文件级身份**；
 //   · 包GUID8＝所属包稳定身份前 8 位（包内资产继承包的 GUID）；
-//   · 版本＝x.y.z 语义化（随包版本）。
+//   · 版本＝1..8 段纯数字（规范形右补 0；包版本不再沿用本类型）。
 // 读宽写窄（对齐项目既有原则）：解析接受全角/半角冒号与大小写；写出规范（全角冒号、小写类型名与 GUID8）。
 // 版本**约束**（`*`/`^` 通配、择版）归包管理器（S6），本文件只承载**具体版本**的资产名。
 // ─────────────────────────────────────────────────────────────────────────────
@@ -44,13 +44,73 @@ public enum AssetActivationPhase
     PostCommand = 1,
 }
 
-/// <summary>语义化版本（x.y.z）。</summary>
-/// <param name="Major">主版本。</param>
-/// <param name="Minor">次版本。</param>
-/// <param name="Patch">修订版本。</param>
-public readonly record struct AssetVersion(int Major, int Minor, int Patch) : IComparable<AssetVersion>
+/// <summary>
+/// 资产版本：<c>1..8</c> 段纯数字（<c>.</c> 分隔、非负、每段 ≤ <see cref="int.MaxValue"/>）＋<b>规范形</b>语义。
+/// <para>
+/// 规范形＝右补 0 至 <see cref="MaxSegments"/> 段：<b>比较、相等、哈希一律按规范形</b>（故 <c>1.2</c> ≡ <c>1.2.0</c>）；
+/// <see cref="ToString"/> 保留**书写段数**（<c>1.0.0</c> 不被写成 <c>1</c>）——展示用，**禁止以字符串比对版本**（R17/D26）。
+/// </para>
+/// <para>递增＝严格大于旧版（允许增段；降级与补 0 后相等皆非法）；默认自动递增＝<see cref="Increment"/>（尾段 +1）。</para>
+/// </summary>
+public readonly struct AssetVersion : IEquatable<AssetVersion>, IComparable<AssetVersion>, IComparable
 {
-    /// <summary>解析 <c>x.y.z</c>（三段非负整数）。</summary>
+    /// <summary>版本段数上限（R17）。</summary>
+    public const int MaxSegments = 8;
+
+    private readonly int[]? _segments;
+
+    /// <summary>三段构造（等同 <c>FromSegments([major, minor, patch])</c>；既有调用面保留）。</summary>
+    public AssetVersion(int major, int minor, int patch)
+        : this([major, minor, patch])
+    {
+    }
+
+    /// <summary>内部构造：1..8 段、非负——**全部构造路径在此统一校验**（R17）。</summary>
+    /// <exception cref="ArgumentOutOfRangeException">段数不在 1..8，或任一段为负。</exception>
+    private AssetVersion(int[] segments)
+    {
+        if (segments.Length is < 1 or > MaxSegments)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(segments), segments.Length, $"资产版本须为 1..{MaxSegments} 段。");
+        }
+
+        foreach (var segment in segments)
+        {
+            if (segment < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(segments), segment, "资产版本段不得为负。");
+            }
+        }
+
+        _segments = segments;
+    }
+
+    /// <summary>由 1..8 段构造（构造时拷贝 ⇒ 对外不可变）。</summary>
+    /// <exception cref="ArgumentOutOfRangeException">段数不在 1..8，或任一段为负。</exception>
+    public static AssetVersion FromSegments(ReadOnlySpan<int> segments) => new(segments.ToArray());
+
+    /// <summary>书写段数（<c>1.2</c>＝2；<c>default</c>＝0）。</summary>
+    public int SegmentCount => _segments?.Length ?? 0;
+
+    /// <summary>只读段视图（书写段数；<c>default</c>＝空）。</summary>
+    public ReadOnlySpan<int> Segments => _segments ?? ReadOnlySpan<int>.Empty;
+
+    /// <summary>取第 <paramref name="index"/> 段（缺失段＝0；负索引＝0）。</summary>
+    public int SegmentAt(int index)
+        => index >= 0 && index < SegmentCount ? _segments![index] : 0;
+
+    /// <summary>主版本（≡ <c>SegmentAt(0)</c>）。</summary>
+    public int Major => SegmentAt(0);
+
+    /// <summary>次版本（≡ <c>SegmentAt(1)</c>；缺失＝0）。</summary>
+    public int Minor => SegmentAt(1);
+
+    /// <summary>修订版本（≡ <c>SegmentAt(2)</c>；缺失＝0）。</summary>
+    public int Patch => SegmentAt(2);
+
+    /// <summary>解析 <c>1..8</c> 段版本串（非负整数；非法＝false）。</summary>
     public static bool TryParse(string? text, out AssetVersion version)
     {
         version = default;
@@ -60,39 +120,130 @@ public readonly record struct AssetVersion(int Major, int Minor, int Patch) : IC
         }
 
         var parts = text.Split('.');
-        if (parts.Length != 3
-            || !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var major)
-            || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var minor)
-            || !int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var patch))
+        if (parts.Length is < 1 or > MaxSegments)
         {
             return false;
         }
 
-        version = new AssetVersion(major, minor, patch);
+        var segments = new int[parts.Length];
+        for (var i = 0; i < parts.Length; i++)
+        {
+            if (!int.TryParse(parts[i], NumberStyles.None, CultureInfo.InvariantCulture, out segments[i]))
+            {
+                return false;
+            }
+        }
+
+        version = new AssetVersion(segments);
         return true;
     }
 
-    /// <summary>解析 <c>x.y.z</c>；非法＝<see cref="FormatException"/>。</summary>
+    /// <summary>解析版本串；非法＝<see cref="FormatException"/>。</summary>
+    /// <exception cref="ArgumentNullException">text 为 null。</exception>
     public static AssetVersion Parse(string text)
         => TryParse(text, out var version)
             ? version
-            : throw new FormatException($"非法语义化版本 '{text}'（期望 x.y.z）。");
+            : throw new FormatException(
+                $"非法资产版本 '{text}'（期望 1..{MaxSegments} 段非负整数，以 . 分隔）。");
 
-    /// <inheritdoc />
-    public int CompareTo(AssetVersion other)
+    /// <summary>默认自动递增：尾段 +1（保留书写段数；<c>1.2</c>→<c>1.3</c>、<c>1.0.0</c>→<c>1.0.1</c>）。</summary>
+    /// <exception cref="InvalidOperationException">尾段已为 <see cref="int.MaxValue"/>（无法递增）。</exception>
+    public AssetVersion Increment()
     {
-        var c = Major.CompareTo(other.Major);
-        if (c != 0)
+        var segments = SegmentCount == 0 ? [0] : _segments!.ToArray();
+        var last = segments.Length - 1;
+        if (segments[last] == int.MaxValue)
         {
-            return c;
+            throw new InvalidOperationException($"资产版本 '{this}' 的尾段已达上限，无法递增。");
         }
 
-        c = Minor.CompareTo(other.Minor);
-        return c != 0 ? c : Patch.CompareTo(other.Patch);
+        segments[last]++;
+        return new AssetVersion(segments);
+    }
+
+    /// <summary>是否**严格大于**旧版（D26 的递增判定：降级与补 0 后相等皆不成立）。</summary>
+    public bool IsUpgradeOver(AssetVersion previous) => CompareTo(previous) > 0;
+
+    /// <summary>按规范形（右补 0 至 8 段）逐段比较，第一处不等决定大小。</summary>
+    public int CompareTo(AssetVersion other)
+    {
+        for (var i = 0; i < MaxSegments; i++)
+        {
+            var c = SegmentAt(i).CompareTo(other.SegmentAt(i));
+            if (c != 0)
+            {
+                return c;
+            }
+        }
+
+        return 0;
     }
 
     /// <inheritdoc />
-    public override string ToString() => $"{Major}.{Minor}.{Patch}";
+    public int CompareTo(object? obj) => obj switch
+    {
+        null => 1,
+        AssetVersion other => CompareTo(other),
+        _ => throw new ArgumentException($"不可与类型 '{obj.GetType()}' 比较。", nameof(obj)),
+    };
+
+    /// <summary>按规范形相等（<c>1.2</c> ≡ <c>1.2.0</c>）。</summary>
+    public bool Equals(AssetVersion other) => CompareTo(other) == 0;
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is AssetVersion other && Equals(other);
+
+    /// <summary>按规范形取哈希（与 <see cref="Equals(AssetVersion)"/> 一致——registry 以版本作字典键）。</summary>
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        for (var i = 0; i < MaxSegments; i++)
+        {
+            hash.Add(SegmentAt(i));
+        }
+
+        return hash.ToHashCode();
+    }
+
+    /// <summary>判等（规范形）。</summary>
+    public static bool operator ==(AssetVersion left, AssetVersion right) => left.Equals(right);
+
+    /// <summary>不等（规范形）。</summary>
+    public static bool operator !=(AssetVersion left, AssetVersion right) => !left.Equals(right);
+
+    /// <summary>小于（规范形比较）。</summary>
+    public static bool operator <(AssetVersion left, AssetVersion right) => left.CompareTo(right) < 0;
+
+    /// <summary>小于或等于（规范形比较）。</summary>
+    public static bool operator <=(AssetVersion left, AssetVersion right) => left.CompareTo(right) <= 0;
+
+    /// <summary>大于（规范形比较）。</summary>
+    public static bool operator >(AssetVersion left, AssetVersion right) => left.CompareTo(right) > 0;
+
+    /// <summary>大于或等于（规范形比较）。</summary>
+    public static bool operator >=(AssetVersion left, AssetVersion right) => left.CompareTo(right) >= 0;
+
+    /// <summary>按**书写段数**写出（展示用；<c>1.0.0</c> 不被写成 <c>1</c>）。</summary>
+    public override string ToString()
+    {
+        if (SegmentCount == 0)
+        {
+            return "0";
+        }
+
+        var builder = new System.Text.StringBuilder();
+        for (var i = 0; i < SegmentCount; i++)
+        {
+            if (i > 0)
+            {
+                builder.Append('.');
+            }
+
+            builder.Append(_segments![i].ToString(CultureInfo.InvariantCulture));
+        }
+
+        return builder.ToString();
+    }
 }
 
 /// <summary>
@@ -194,7 +345,7 @@ public sealed record AssetName(AssetLoadKind Kind, string LocalName, string Pack
         => TryParse(text, out var name)
             ? name!
             : throw new FormatException(
-                $"非法资产名 '{text}'（期望 {{类型名}}{CanonicalSeparator}{{资产名}}@{{包GUID8}}#{{x.y.z}}）。");
+                $"非法资产名 '{text}'（期望 {{类型名}}{CanonicalSeparator}{{资产名}}@{{包GUID8}}#{{1..8 段版本}}）。");
 
     private static bool IsHex(string text)
     {

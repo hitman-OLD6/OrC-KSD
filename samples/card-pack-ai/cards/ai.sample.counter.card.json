@@ -6,6 +6,37 @@
     { "component": "typeCategory", "type": ["countermeasure"] },
     { "component": "factionCost", "faction": "Germany", "kredits": 1 },
     { "component": "battleStats", "operationCost": 0, "attack": 0, "defense": 0 },
-    { "component": "tagData", "rarity": "Standard" }
+    { "component": "tagData", "rarity": "Standard" },
+    {
+      "component": "effects",
+      "inline": [
+        {
+          "schemaVersion": 2,
+          "root": {
+            "id": "ai.sample.counter.effect",
+            "version": 1,
+            "mainTrigger": {
+              "id": "t.main",
+              "stableKey": "AI 样例·反制（空效果）",
+              "kind": "passive",
+              "viewType": "Orc.Cards.CardEventView",
+              "hooks": ["card.played"],
+              "events": [
+                {
+                  "id": "onPlayed",
+                  "entry": "HandleAsync",
+                  "csx": "// AI 样例·反制：空效果（保持「打出无额外行为」的样例语义；D40 要求反制卡必须带 effects）。\nFunc<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleAsync = (view, ctx, ct) => Task.CompletedTask;\n",
+                  "version": 1
+                }
+              ],
+              "version": 1
+            },
+            "otherTriggers": [],
+            "wrappers": [],
+            "injects": []
+          }
+        }
+      ]
+    }
   ]
 }

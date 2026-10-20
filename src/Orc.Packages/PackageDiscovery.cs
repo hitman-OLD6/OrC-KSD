@@ -5,12 +5,18 @@ namespace Orc.Packages;
 /// <param name="RootDirectory">包根目录（资源相对路径的基准）。</param>
 public sealed record DiscoveredPackage(PackageManifest Manifest, string RootDirectory);
 
-/// <summary>包发现报告：成功清单 ＋ 失败明细（单包失败＝隔离记录、不阻断其余）。</summary>
+/// <summary>包发现报告：成功清单 ＋ 失败明细（单包失败＝隔离记录、不阻断其余）＋ 迁移告警。</summary>
 /// <param name="Packages">发现的包（稳定序＝目录名序）。</param>
 /// <param name="Failures">失败明细（<c>路径：原因</c>）。</param>
+/// <param name="Warnings">迁移告警（如已退役的包级 <c>dependsOn</c>；不阻断）。</param>
 public sealed record PackageDiscoveryReport(
     IReadOnlyList<DiscoveredPackage> Packages,
-    IReadOnlyList<string> Failures);
+    IReadOnlyList<string> Failures,
+    IReadOnlyList<string>? Warnings = null)
+{
+    /// <summary>迁移告警（未提供＝空）。</summary>
+    public IReadOnlyList<string> WarningList => Warnings ?? Array.Empty<string>();
+}
 
 /// <summary>
 /// 包发现（S5）：两种方式皆可——①**约定目录扫描**（<c>&lt;base&gt;/plugins/&lt;包&gt;/manifest.json</c> 与
@@ -35,15 +41,16 @@ public static class PackageDiscovery
         ArgumentNullException.ThrowIfNull(baseDirectory);
 
         var failures = new List<string>();
+        var warnings = new List<string>();
         var found = new List<DiscoveredPackage>();
 
-        ScanRoot(Path.Combine(baseDirectory, PluginsRootName), PackageKind.Plugin, found, failures);
-        ScanRoot(Path.Combine(baseDirectory, PacksRootName), PackageKind.CardPack, found, failures);
+        ScanRoot(Path.Combine(baseDirectory, PluginsRootName), PackageKind.Plugin, found, failures, warnings);
+        ScanRoot(Path.Combine(baseDirectory, PacksRootName), PackageKind.CardPack, found, failures, warnings);
 
         var ordered = found
             .OrderBy(p => p.RootDirectory, StringComparer.Ordinal)
             .ToArray();
-        return new PackageDiscoveryReport(ordered, failures);
+        return new PackageDiscoveryReport(ordered, failures, warnings);
     }
 
     /// <summary>显式清单（每行一个包根目录；<c>#</c> 开头＝注释、空行＝跳过）。</summary>
@@ -53,6 +60,7 @@ public static class PackageDiscovery
         ArgumentNullException.ThrowIfNull(listFilePath);
 
         var failures = new List<string>();
+        var warnings = new List<string>();
         var found = new List<DiscoveredPackage>();
         if (!File.Exists(listFilePath))
         {
@@ -69,20 +77,21 @@ public static class PackageDiscovery
             }
 
             var directory = Path.IsPathRooted(line) ? line : Path.Combine(baseDirectory, line);
-            LoadOne(directory, expected: null, found, failures);
+            LoadOne(directory, expected: null, found, failures, warnings);
         }
 
         var ordered = found
             .OrderBy(p => p.RootDirectory, StringComparer.Ordinal)
             .ToArray();
-        return new PackageDiscoveryReport(ordered, failures);
+        return new PackageDiscoveryReport(ordered, failures, warnings);
     }
 
     private static void ScanRoot(
         string root,
         PackageKind expected,
         List<DiscoveredPackage> found,
-        List<string> failures)
+        List<string> failures,
+        List<string> warnings)
     {
         if (!Directory.Exists(root))
         {
@@ -91,7 +100,7 @@ public static class PackageDiscovery
 
         foreach (var directory in Directory.EnumerateDirectories(root).OrderBy(d => d, StringComparer.Ordinal))
         {
-            LoadOne(directory, expected, found, failures);
+            LoadOne(directory, expected, found, failures, warnings);
         }
     }
 
@@ -99,7 +108,8 @@ public static class PackageDiscovery
         string directory,
         PackageKind? expected,
         List<DiscoveredPackage> found,
-        List<string> failures)
+        List<string> failures,
+        List<string> warnings)
     {
         var manifestPath = Path.Combine(directory, ManifestFileName);
         if (!File.Exists(manifestPath))
@@ -110,7 +120,12 @@ public static class PackageDiscovery
 
         try
         {
-            var manifest = PackageManifest.Parse(File.ReadAllText(manifestPath));
+            var manifest = PackageManifest.Parse(File.ReadAllText(manifestPath), out var migrationWarnings);
+            foreach (var warning in migrationWarnings)
+            {
+                warnings.Add($"{manifestPath}：{warning}");
+            }
+
             if (expected is { } kind && manifest.Kind != kind)
             {
                 failures.Add(

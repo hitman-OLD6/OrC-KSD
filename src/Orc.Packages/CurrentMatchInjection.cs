@@ -24,7 +24,7 @@ public static class CardPackInjection
         ICurrentMatchInjector injector,
         AssetCatalogSnapshot snapshot,
         string packId,
-        AssetVersion version,
+        PackageVersion version,
         IReadOnlyList<string> effectPrefabIds,
         CancellationToken ct = default)
     {

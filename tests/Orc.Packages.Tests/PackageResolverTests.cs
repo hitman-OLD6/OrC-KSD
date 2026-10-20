@@ -69,86 +69,58 @@ public class PackageResolverTests
         }
     }
 
-    // ---------- 解析与排序 ----------
+    // ---------- 解析（S4：包版本去解析化） ----------
 
     [Fact]
-    public void 依赖先于依赖方_同层按声明序()
+    public void 同ID包多版本并存_全部参与加载_不择版()
     {
         var report = PackageResolver.Resolve(Report(
-            Pkg("b", "1.0.0", deps: [new PackageDependency("a", "1.0.0")]),
-            Pkg("a", "1.0.0")));
+            Pkg("a", "aaa111"),
+            Pkg("a", "bbb222"),
+            Pkg("a", "ccc333")));
 
         Assert.Empty(report.Failures);
-        Assert.Equal(new[] { "a", "b" }, report.LoadOrder.Select(p => p.Manifest.Id));
+        Assert.Equal(3, report.LoadOrder.Count);
+        Assert.All(report.LoadOrder, p => Assert.Equal("a", p.Manifest.Id));
     }
 
     [Fact]
-    public void 版本选择_满足约束取最高版()
+    public void 包版本不参与择版_指纹不同不影响加载集()
     {
+        // 包版本＝内容指纹：既不是"最高版"也不参与依赖；三个不同指纹的包原样全部加载。
         var report = PackageResolver.Resolve(Report(
-            Pkg("b", "1.0.0", deps: [new PackageDependency("a", "1.*.*")]),
-            Pkg("a", "1.0.0"),
-            Pkg("a", "1.3.0"),
-            Pkg("a", "1.1.0")));
+            Pkg("pack", "1.0.0"),
+            Pkg("pack", "9.9.9-tmp")));
 
-        // 多版本并存：a 的三个版本均参与加载（目录即加载集）；b 解析到最高满足版（1.3.0）——b 须在其之后
         Assert.Empty(report.Failures);
-        Assert.Equal(4, report.LoadOrder.Count);
-
-        var indexOfB = report.LoadOrder.ToList().FindIndex(p => p.Manifest.Id == "b");
-        var indexOfA130 = report.LoadOrder.ToList().FindIndex(
-            p => p.Manifest.Id == "a" && p.Manifest.Version == new AssetVersion(1, 3, 0));
-
-        Assert.True(indexOfB > indexOfA130, $"b 应在 a@1.3.0 之后（b={indexOfB}, a@1.3.0={indexOfA130}）。");
+        Assert.Equal(2, report.LoadOrder.Count);
+        Assert.Contains(report.LoadOrder, p => p.Manifest.Version.IsTemporary);
     }
 
     [Fact]
-    public void 依赖缺失_隔离该包且不阻断其余()
+    public void 包级dependsOn已退役_不再影响解析()
     {
         var report = PackageResolver.Resolve(Report(
-            Pkg("good", "1.0.0"),
-            Pkg("bad", "1.0.0", deps: [new PackageDependency("missing", "1.0.0")])));
+            Pkg("b", "b1", deps: [new PackageDependency("missing", "1.0.0")]),
+            Pkg("a", "a1")));
 
-        Assert.Single(report.LoadOrder);
-        Assert.Equal("good", report.LoadOrder[0].Manifest.Id);
-        Assert.Single(report.Failures);
-        Assert.Contains("missing", report.Failures[0]);
+        // 依赖一律资产级：包级 dependsOn 既不做存在性校验、也不建拓扑边。
+        Assert.Empty(report.Failures);
+        Assert.Equal(new[] { "b", "a" }, report.LoadOrder.Select(p => p.Manifest.Id));
     }
 
     [Fact]
-    public void 无满足版本_隔离()
+    public void 包身份被不同id共用_隔离后者()
     {
-        var report = PackageResolver.Resolve(Report(
-            Pkg("b", "1.0.0", deps: [new PackageDependency("a", "2.0.0")]),
-            Pkg("a", "1.0.0")));
+        var shared = Guid.NewGuid();
+        var report = PackageResolver.Resolve(new PackageDiscoveryReport(
+            new[] { Pkg("a", "v1", guid: shared), Pkg("b", "v1", guid: shared) },
+            Array.Empty<string>()));
 
         Assert.Single(report.LoadOrder);
         Assert.Equal("a", report.LoadOrder[0].Manifest.Id);
-        Assert.Contains("无满足约束", report.Failures[0]);
-    }
-
-    [Fact]
-    public void 无效传递_连带隔离()
-    {
-        var report = PackageResolver.Resolve(Report(
-            Pkg("c", "1.0.0", deps: [new PackageDependency("b", "1.0.0")]),
-            Pkg("b", "1.0.0", deps: [new PackageDependency("missing", "1.0.0")])));
-
-        Assert.Empty(report.LoadOrder);
-        Assert.Equal(2, report.Failures.Count);
-        Assert.Contains(report.Failures, f => f.Contains("传递"));
-    }
-
-    [Fact]
-    public void 循环依赖_隔离()
-    {
-        var report = PackageResolver.Resolve(Report(
-            Pkg("a", "1.0.0", deps: [new PackageDependency("b", "1.0.0")]),
-            Pkg("b", "1.0.0", deps: [new PackageDependency("a", "1.0.0")])));
-
-        Assert.Empty(report.LoadOrder);
-        Assert.Equal(2, report.Failures.Count);
-        Assert.All(report.Failures, f => Assert.Contains("循环", f));
+        var failure = Assert.Single(report.Failures);
+        Assert.Contains("包身份", failure);
     }
 
     [Fact]
@@ -162,10 +134,10 @@ public class PackageResolverTests
     }
 
     private static DiscoveredPackage Pkg(
-        string id, string version, PackageDependency[]? deps = null)
+        string id, string version, PackageDependency[]? deps = null, Guid? guid = null)
         => new(
             new PackageManifest(
-                PackageKind.Plugin, id, Guid.NewGuid(), AssetVersion.Parse(version),
+                PackageKind.Plugin, id, guid ?? Guid.NewGuid(), PackageVersion.Parse(version),
                 deps ?? Array.Empty<PackageDependency>(), Array.Empty<PackageAsset>()),
             "root/" + id + "/" + version);
 

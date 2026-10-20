@@ -21,8 +21,28 @@ public sealed class CardDefinition
     /// <exception cref="ArgumentException">name 为 null/空白；components 含 null/重复类型；缺 factionCost/tagData。</exception>
     /// <exception cref="ArgumentOutOfRangeException">国籍/稀有度为未定义枚举值。</exception>
     public CardDefinition(string name, IEnumerable<ICardDataComponentDefinition> components, bool isGuard = false)
+        : this(name, components, isGuard, allowBlankName: false)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+    }
+
+    /// <summary>
+    /// 定义构造核心（<paramref name="allowBlankName"/>＝加载期补全路径唯一放宽项：名称缺失按类型默认值（空串）填充）。
+    /// </summary>
+    private CardDefinition(
+        string? name,
+        IEnumerable<ICardDataComponentDefinition> components,
+        bool isGuard,
+        bool allowBlankName)
+    {
+        if (allowBlankName)
+        {
+            ArgumentNullException.ThrowIfNull(name);
+        }
+        else
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        }
+
         ArgumentNullException.ThrowIfNull(components);
 
         var list = new List<ICardDataComponentDefinition>();
@@ -66,7 +86,7 @@ public sealed class CardDefinition
         var battleStats = Find<BattleStatsDefinition>(list);
         var keywords = Find<KeywordsDefinition>(list);
 
-        Name = name;
+        Name = name!;
         Components = list.ToArray();
         IsGuard = isGuard;
 
@@ -90,6 +110,24 @@ public sealed class CardDefinition
         BecomesVeteran = keywords?.BecomesVeteran;
         VeteranOf = keywords?.VeteranOf;
     }
+
+    /// <summary>
+    /// **加载期补全构造**（R5/D41；卡牌加载器专用）：缺失字段已按类型默认值（0／null／空串）填充后建定义——
+    /// 与主构造的唯一差异是**允许空名称**（<c>name</c> 缺失＝警报档、照常可玩），其余校验（组件唯一性、
+    /// <c>factionCost</c>／<c>tagData</c> 必备、国籍/稀有度取值）一律保留。
+    /// <para>
+    /// 说明：主构造的「名称非空白」fail-fast 是代码注册路径的配置错误防线，与 D40「<c>name</c> 缺失＝警报」冲突；
+    /// 二者以不同入口并存——本入口只服务合法性检测套件产出，不改变既有路径行为。
+    /// </para>
+    /// </summary>
+    /// <param name="name">卡牌名称（null＝按类型默认值取空串）。</param>
+    /// <param name="components">组件定义集（须含 <c>factionCost</c> 与 <c>tagData</c>——套件已补全默认项）。</param>
+    /// <exception cref="ArgumentNullException">name 或 components 为 null。</exception>
+    /// <exception cref="ArgumentException">components 含 null/重复类型；缺 factionCost/tagData。</exception>
+    /// <exception cref="ArgumentOutOfRangeException">国籍/稀有度为未定义枚举值。</exception>
+    public static CardDefinition CreateForLoading(
+        string? name, IEnumerable<ICardDataComponentDefinition> components)
+        => new(name ?? string.Empty, components, isGuard: false, allowBlankName: true);
 
     /// <summary>
     /// 创建定义（兼容构造：既有 12 参数；内部转换为组件定义集——校验与既有行为一致、fail-fast 保留）。

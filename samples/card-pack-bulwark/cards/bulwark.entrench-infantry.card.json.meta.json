@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "orc.bulwark",
+  "source": "cards/bulwark.entrench-infantry.card.json",
+  "assets": [
+    {
+      "guid": "0e25acc9-46b2-c711-ef64-2bc2a8682c49",
+      "kind": "card",
+      "id": "bulwark.entrench-infantry",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

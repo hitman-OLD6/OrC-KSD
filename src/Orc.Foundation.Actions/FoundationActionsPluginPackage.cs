@@ -60,7 +60,7 @@ public static class FoundationActionsPluginPackage
             AssetScope.Match, AssetActivationPhase.PostCommand);
         var asset = new LoadedAsset(
             descriptor,
-            new AssetName(AssetLoadKind.Asm, "register.postCommand", manifest.Guid8, manifest.Version),
+            new AssetName(AssetLoadKind.Asm, "register.postCommand", manifest.Guid8, new AssetVersion(1, 0, 0)),
             manifestPath);
 
         return new LoadedPackage(

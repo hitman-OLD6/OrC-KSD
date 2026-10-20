@@ -33,7 +33,7 @@ public sealed class PackageLifecycleTests : IDisposable
         var before = host.CreateSnapshot();
         Assert.Single(before.CardPacks);
 
-        Assert.True(host.TryUnloadCardPack("pack", new AssetVersion(1, 0, 0), out var failure), failure);
+        Assert.True(host.TryUnloadCardPack("pack", PackageVersion.Parse("1.0.0"), out var failure), failure);
 
         Assert.Single(before.CardPacks); // 已冻结快照不变
         Assert.Empty(host.CreateSnapshot().CardPacks);
@@ -45,7 +45,7 @@ public sealed class PackageLifecycleTests : IDisposable
         WritePlugin("plug", "1.0.0");
         var host = EngineHost.Start(_root);
 
-        Assert.False(host.TryUnloadCardPack("plug", new AssetVersion(1, 0, 0), out var failure));
+        Assert.False(host.TryUnloadCardPack("plug", PackageVersion.Parse("1.0.0"), out var failure));
         Assert.Contains("只能冷加载", failure);
     }
 
@@ -91,7 +91,7 @@ public sealed class PackageLifecycleTests : IDisposable
 
         // 回滚：目录仍保有原包（原状保留），且资源仍在原位置（未被清理）
         var still = Assert.Single(host.Catalog.ById("pack"));
-        Assert.Equal(new AssetVersion(1, 0, 0), still.Manifest.Version);
+        Assert.Equal(PackageVersion.Parse("1.0.0"), still.Manifest.Version);
     }
 
     [Fact]
@@ -117,7 +117,7 @@ public sealed class PackageLifecycleTests : IDisposable
         var directory = Path.Combine(_root, "packs", id + "-" + version);
         Directory.CreateDirectory(directory);
         var manifest = new PackageManifest(
-            PackageKind.CardPack, id, Guid.NewGuid(), AssetVersion.Parse(version),
+            PackageKind.CardPack, id, Guid.NewGuid(), PackageVersion.Parse(version),
             Array.Empty<PackageDependency>(), new[] { new PackageAsset("json", "cards", "cards.json") });
         File.WriteAllText(Path.Combine(directory, PackageDiscovery.ManifestFileName), manifest.ToJson());
         File.WriteAllText(Path.Combine(directory, "cards.json"), "{\"cards\":[]}");
@@ -128,7 +128,7 @@ public sealed class PackageLifecycleTests : IDisposable
         var directory = Path.Combine(_root, "plugins", id + "-" + version);
         Directory.CreateDirectory(directory);
         var manifest = new PackageManifest(
-            PackageKind.Plugin, id, Guid.NewGuid(), AssetVersion.Parse(version),
+            PackageKind.Plugin, id, Guid.NewGuid(), PackageVersion.Parse(version),
             Array.Empty<PackageDependency>(), Array.Empty<PackageAsset>());
         File.WriteAllText(Path.Combine(directory, PackageDiscovery.ManifestFileName), manifest.ToJson());
     }

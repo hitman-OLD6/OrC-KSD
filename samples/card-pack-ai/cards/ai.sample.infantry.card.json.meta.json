@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "ai.sample",
+  "source": "cards/ai.sample.infantry.card.json",
+  "assets": [
+    {
+      "guid": "17910c6f-cca7-3d55-0761-7432bda97425",
+      "kind": "card",
+      "id": "ai.sample.infantry",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

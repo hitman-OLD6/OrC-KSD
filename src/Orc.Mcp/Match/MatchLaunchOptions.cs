@@ -13,7 +13,10 @@ public sealed record MatchSeatConfig(int Seat, IReadOnlyList<string> Deck, strin
 /// </summary>
 public sealed class MatchLaunchOptions
 {
-    /// <summary>卡包目录列表（按顺序装载；含 <c>manifest.json</c> 走包链，否则走目录链）。</summary>
+    /// <summary>
+    /// 卡包目录列表（按顺序注册与装载；**加载严格按元数据**——每个目录须含 <c>manifest.json</c>）。
+    /// S7 起目录链（无 manifest 的裸卡目录）已退役：无元数据即无资产身份，不能进入中间层与 lock 定版。
+    /// </summary>
     public required IReadOnlyList<string> PackDirectories { get; init; }
 
     /// <summary>0 号座位。</summary>

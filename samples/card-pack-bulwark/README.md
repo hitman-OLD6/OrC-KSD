@@ -12,10 +12,12 @@
 
 ```
 card-pack-bulwark/
-├── manifest.json        kind=cardpack / id=orc.bulwark / version=1.0.0
+├── manifest.json        kind=cardpack / id=orc.bulwark / version=内容指纹 / metadata[]
+├── lock.formal.json     正式 lock（本包资产 GUID，S10a 迁移时按 sidecar 生成）
+├── lock.test.json       测试 lock
 ├── keywords.json        三个词条 → prefab 绑定
-├── effects/             三个 csx 行为制品
-└── cards/               三张示例卡（各带一个词条）
+├── effects/             三个 csx 行为制品（各带 .meta.json sidecar）
+└── cards/               三张示例卡（各带一个词条；各带 .meta.json sidecar）
 ```
 
 ## 约定

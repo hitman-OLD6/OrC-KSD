@@ -26,7 +26,7 @@ public sealed class CardPackKeywordLoader : IPackageLifecycleObserver
             return; // 插件无卡包词条
         }
 
-        foreach (var keyword in CardPackLoader.ReadKeywords(package.RootDirectory))
+        foreach (var keyword in PackageScanner.ReadKeywords(package.RootDirectory))
         {
             Register(keyword, package.Manifest.Id);
         }

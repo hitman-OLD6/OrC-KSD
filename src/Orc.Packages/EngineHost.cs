@@ -56,8 +56,8 @@ public sealed class AssetCatalog
     public IReadOnlyList<LoadedPackage> ById(string id)
         => _packages.Where(p => string.Equals(p.Manifest.Id, id, StringComparison.Ordinal)).ToArray();
 
-    /// <summary>按包 id ＋ 具体版本查（未找到＝null）。</summary>
-    public LoadedPackage? Find(string id, AssetVersion version)
+    /// <summary>按包 id ＋ 包版本（内容指纹）查（未找到＝null）。</summary>
+    public LoadedPackage? Find(string id, PackageVersion version)
         => _packages.FirstOrDefault(
             p => string.Equals(p.Manifest.Id, id, StringComparison.Ordinal) && p.Manifest.Version == version);
 
@@ -118,8 +118,8 @@ public sealed class AssetCatalogSnapshot
     public IReadOnlyList<LoadedPackage> ById(string id)
         => _packages.Where(p => string.Equals(p.Manifest.Id, id, StringComparison.Ordinal)).ToArray();
 
-    /// <summary>按包 id ＋ 具体版本查（未找到＝null）。</summary>
-    public LoadedPackage? Find(string id, AssetVersion version)
+    /// <summary>按包 id ＋ 包版本（内容指纹）查（未找到＝null）。</summary>
+    public LoadedPackage? Find(string id, PackageVersion version)
         => _packages.FirstOrDefault(
             p => string.Equals(p.Manifest.Id, id, StringComparison.Ordinal) && p.Manifest.Version == version);
 
@@ -140,19 +140,23 @@ public sealed class EngineHost
 {
     private readonly IPluginScriptEvaluator _evaluator;
     private readonly List<string> _failures;
+    private readonly List<string> _warnings;
     private readonly PackageLifecycleNotifier _lifecycle;
     private bool _cardPacksLocked;
 
     private EngineHost(
         AssetCatalog catalog,
         IReadOnlyList<string> failures,
+        IReadOnlyList<string> warnings,
         IPluginScriptEvaluator evaluator,
         PackageLifecycleNotifier lifecycle)
     {
         Catalog = catalog;
         _failures = new List<string>(failures);
+        _warnings = new List<string>(warnings);
         _evaluator = evaluator;
         _lifecycle = lifecycle;
+        CardData = new RuntimeCardCatalog(Assets);
     }
 
     /// <summary>
@@ -173,6 +177,9 @@ public sealed class EngineHost
     /// <summary>装载失败明细（发现/解析/装载/脚本求值/进程级装配/热加载 合并；隔离整包）。</summary>
     public IReadOnlyList<string> LoadFailures => _failures;
 
+    /// <summary>迁移告警（如已退役的包级 <c>dependsOn</c>；不阻断装载）。</summary>
+    public IReadOnlyList<string> LoadWarnings => _warnings;
+
     /// <summary>全局（进程级）装配结果（冷加载期；P11 甲）。</summary>
     public GlobalActivationResult GlobalActivation { get; private init; } =
         new(Array.Empty<string>(), Array.Empty<string>());
@@ -187,14 +194,20 @@ public sealed class EngineHost
 
     /// <summary>由发现报告冷加载（可测路径）。csx 注册脚本在此**编译一次**（冷加载期）。</summary>
     /// <exception cref="ArgumentNullException">discovery 为 null。</exception>
+    /// <exception cref="InvalidOperationException">插件装载序声明违规（未覆盖／有环／未知包 ID）。</exception>
     /// <param name="extraPackages">
     /// 额外**代码入口包**（S7·P10c；如随引擎/前端发布的 `.ui` 内置插件——其 csx 入口绑定到本进程程序集，
     /// 不经磁盘发现）。在磁盘包之后并入装载序。
     /// </param>
+    /// <param name="pluginLoadOrder">
+    /// 插件装载序的**显式声明**（S4；内置包注册清单）。非 null 时执行三项启动断言并按声明排序；
+    /// 任一断言不满足＝启动失败并指名。
+    /// </param>
     public static EngineHost FromDiscovery(
         PackageDiscoveryReport discovery,
         IPluginScriptEvaluator? evaluator = null,
-        IReadOnlyList<LoadedPackage>? extraPackages = null)
+        IReadOnlyList<LoadedPackage>? extraPackages = null,
+        IReadOnlyList<PackageLoadOrderEntry>? pluginLoadOrder = null)
     {
         ArgumentNullException.ThrowIfNull(discovery);
         evaluator ??= new Script.CSharpPluginScriptEvaluator();
@@ -220,6 +233,11 @@ public sealed class EngineHost
             loaded.AddRange(extraPackages);
         }
 
+        if (pluginLoadOrder is not null)
+        {
+            loaded = OrderPlugins(loaded, pluginLoadOrder);
+        }
+
         var lifecycle = new PackageLifecycleNotifier();
         var global = ActivateGlobalPhase(loaded, lifecycle);
         failures.AddRange(global.Failures);
@@ -231,10 +249,32 @@ public sealed class EngineHost
             failures.AddRange(lifecycle.Notify(PackageLifecycleChange.Loaded, package));
         }
 
-        return new EngineHost(new AssetCatalog(loaded), failures, evaluator, lifecycle)
+        return new EngineHost(new AssetCatalog(loaded), failures, discovery.WarningList, evaluator, lifecycle)
         {
             GlobalActivation = global,
         };
+    }
+
+    /// <summary>
+    /// 按显式装载序排列插件（卡包保持原序并排在插件之后），并执行三项启动断言。
+    /// </summary>
+    private static List<LoadedPackage> OrderPlugins(
+        List<LoadedPackage> loaded, IReadOnlyList<PackageLoadOrderEntry> pluginLoadOrder)
+    {
+        var plugins = loaded.Where(p => p.Manifest.Kind == PackageKind.Plugin).ToArray();
+        var discoveredIds = plugins.Select(p => p.Manifest.Id).ToArray();
+        var order = PluginLoadOrder.Sort(pluginLoadOrder, discoveredIds, out var violations);
+        if (violations.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "插件装载序非法（启动失败）：" + string.Join("；", violations));
+        }
+
+        var ordered = order
+            .SelectMany(id => plugins.Where(p => string.Equals(p.Manifest.Id, id, StringComparison.Ordinal)))
+            .ToList();
+        ordered.AddRange(loaded.Where(p => p.Manifest.Kind != PackageKind.Plugin));
+        return ordered;
     }
 
     /// <summary>
@@ -279,9 +319,14 @@ public sealed class EngineHost
 
     /// <summary>
     /// **引擎级运行期卡数据目录**（S4·R5/D7·第一级）：注册进此处的卡随 <see cref="CreateSnapshot"/> 冻结进
-    /// **之后新建**的对局；只追加不覆盖。
+    /// **之后新建**的对局；只追加不覆盖。底层字典由 <see cref="Assets"/> 承载。
     /// </summary>
-    public RuntimeCardCatalog CardData { get; } = new();
+    public RuntimeCardCatalog CardData { get; }
+
+    /// <summary>
+    /// **资产注册表**（进程级；S3/I2）：资产版本的唯一登记面（键＝GUID；只做注册、不择版）。
+    /// </summary>
+    public AssetRegistry Assets { get; } = new();
 
     /// <summary>冻结本局资产目录快照（对局内不可变；每局独立）。含引擎级运行期卡数据。</summary>
     public AssetCatalogSnapshot CreateSnapshot() => new(Catalog.Packages, CardData.Snapshot());
@@ -318,7 +363,8 @@ public sealed class EngineHost
         PackageManifest manifest;
         try
         {
-            manifest = PackageManifest.Parse(File.ReadAllText(manifestPath));
+            manifest = PackageManifest.Parse(File.ReadAllText(manifestPath), out var warnings);
+            _warnings.AddRange(warnings);
         }
         catch (Exception ex) when (ex is FormatException or System.Text.Json.JsonException)
         {
@@ -332,21 +378,7 @@ public sealed class EngineHost
             return false;
         }
 
-        foreach (var dependency in manifest.Dependencies)
-        {
-            if (!AssetVersionConstraint.TryParse(dependency.Version, out var constraint))
-            {
-                failure = $"依赖 '{dependency.Id}' 的版本约束 '{dependency.Version}' 非法";
-                return false;
-            }
-
-            if (!Catalog.ById(dependency.Id).Any(p => constraint.IsSatisfiedBy(p.Manifest.Version)))
-            {
-                failure = $"依赖 '{dependency.Id}' 无满足约束 '{dependency.Version}' 的版本";
-                return false;
-            }
-        }
-
+        // 包级依赖已退役（S4/D31：依赖一律资产级）——热加载不再做包版本择版校验。
         try
         {
             loaded = Materialize(new ResolvedPackage(manifest, packageRoot), _evaluator);
@@ -369,7 +401,7 @@ public sealed class EngineHost
     /// **卸载**一个卡包（S 批次 5）：仅卡包可卸载（插件只能冷加载＝拒绝）。已冻结快照不受影响。
     /// </summary>
     /// <exception cref="ArgumentNullException">id 为 null。</exception>
-    public bool TryUnloadCardPack(string id, AssetVersion version, out string? failure)
+    public bool TryUnloadCardPack(string id, PackageVersion version, out string? failure)
     {
         ArgumentNullException.ThrowIfNull(id);
 
@@ -504,7 +536,7 @@ public sealed class EngineHost
             return failures;
         }
 
-        foreach (var directory in Directory.EnumerateDirectories(packsDirectory).OrderBy(d => d, StringComparer.Ordinal))
+        foreach (var directory in PackageScanner.EnumeratePackageDirectories(packsDirectory))
         {
             if (!TryLoadCardPack(directory, out var failure))
             {

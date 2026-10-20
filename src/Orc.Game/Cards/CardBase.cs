@@ -46,6 +46,19 @@ public abstract class CardBase : Orc.Cards.Card
     /// <summary>本卡的定义（代码注册形态；名称/类别/四项数值可读）。</summary>
     public CardDefinition Definition { get; }
 
+    /// <summary>
+    /// 资产域（R14/D20/S6）：实例**随身携带**的域标记——由加载段（<see cref="CardLibrary.Instantiate"/> 经
+    /// <see cref="CardLibrary.DomainOf"/>）写入，未归域的独立构造默认正式域。
+    /// <para>
+    /// **不得参与任何玩法逻辑判定**：合法消费方只有构筑/存档、UI 展示、诊断报告三类。
+    /// 需要区分域的玩法逻辑视为需求缺口（回退讨论），不得就地读本属性。
+    /// </para>
+    /// </summary>
+    public Orc.Core.AssetDomain AssetDomain { get; internal set; } = Orc.Core.AssetDomain.Formal;
+
+    /// <summary>是否为测试资产（域的诊断/展示读面；同样**不得**用于玩法判定）。</summary>
+    public bool IsTestAsset => AssetDomain == Orc.Core.AssetDomain.Test;
+
     private readonly Dictionary<string, (object Trigger, Type ViewType)> _namedTriggers = new(StringComparer.Ordinal);
 
     /// <summary>登记具名触发器（S5；子类构造期调用）：供效果预制体 <c>injects</c> 声明按名解析注入目标。</summary>

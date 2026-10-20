@@ -4,6 +4,7 @@ using Orc.Core;
 using Orc.Game.Actions;
 using Orc.Game.Board;
 using Orc.Game.Cards;
+using Orc.Game.Cards.Loading;
 using Orc.Game.Players;
 
 namespace Orc.Game;
@@ -121,6 +122,8 @@ public sealed class MatchCardService
     private readonly Func<Player, CancellationToken, Task>? _shuffleDeckAction;
     private readonly Func<MatchState>? _stateProvider;
     private readonly Func<IAddToHandAction?>? _addToHandActionProvider;
+    private readonly IMatchCardLoader? _cardLoader;
+    private readonly HashSet<string> _runtimeRegistered = new(StringComparer.Ordinal);
 
     /// <summary>
     /// 创建卡牌服务。
@@ -132,6 +135,10 @@ public sealed class MatchCardService
     /// <param name="shuffleDeckAction">洗切动作面（洗入；对局装配＝Match.ShuffleDeckAsync——发 deck.shuffled；缺省＝洗入不可用）。</param>
     /// <param name="stateProvider">对局状态读取器（门禁——仅「进行」态；缺省＝独立构造无门禁）。</param>
     /// <param name="addToHandActionProvider">加入手牌动作面（S7：放置到手牌的唯一入口；缺省＝独立构造时按需自建最小实例）。</param>
+    /// <param name="cardLoader">
+    /// 卡牌加载器端口（S7：局内新增卡——token／升级／老兵——走**单卡 <c>LoadBatchAsync</c>**（一元清单），
+    /// 并同步更新中间层；缺省＝null＝独立构造路径——按卡库既有条目直接实例化）。
+    /// </param>
     /// <exception cref="ArgumentNullException">engine / library 为 null。</exception>
     public MatchCardService(
         LogicEngine engine,
@@ -141,7 +148,8 @@ public sealed class MatchCardService
         Func<Player, CancellationToken, Task>? shuffleDeckAction = null,
         Func<MatchState>? stateProvider = null,
         CardEffectRegistry? effectRegistry = null,
-        Func<IAddToHandAction?>? addToHandActionProvider = null)
+        Func<IAddToHandAction?>? addToHandActionProvider = null,
+        IMatchCardLoader? cardLoader = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(library);
@@ -154,6 +162,7 @@ public sealed class MatchCardService
         _stateProvider = stateProvider;
         _effectRegistry = effectRegistry;
         _addToHandActionProvider = addToHandActionProvider;
+        _cardLoader = cardLoader;
     }
 
     /// <summary>加入手牌动作面（对局路径＝装配链注入的同一实例；独立构造＝经动作目录查询面按默认实现集创建并登记）。</summary>
@@ -192,6 +201,9 @@ public sealed class MatchCardService
 
         // ③ 定义登记（同 id 重复＝拒绝；library 自身即 fail-fast）。
         _library.Register(registration.Id, registration.Definition);
+
+        // ④ 记账：该 id 是**运行期直接注册**的（无资产身份）——单卡装载路径按此识别「不进资产解析」的卡。
+        _runtimeRegistered.Add(registration.Id);
     }
 
     // ---------- 创建（卡牌工厂） ----------
@@ -213,9 +225,48 @@ public sealed class MatchCardService
         ArgumentNullException.ThrowIfNull(owner);
         EnsureInProgress();
 
-        var card = _library.Instantiate(definitionId); // 未注册＝明确失败（KeyNotFoundException——先于任何状态变更、无残留）
+        // S7：局内新增卡（token／升级／老兵）走**单卡加载路径**（一元清单的整批调用——同一入口，不设第二条装载路径）。
+        // 装载只做解析／校验／定义生成与中间层同步，实例 ID 仍由下方 LoadAsync 按水位线顺序分配。
+        var libraryKey = await LoadSingleAsync(definitionId, owner, ct).ConfigureAwait(false);
+
+        var card = _library.Instantiate(libraryKey); // 未注册＝明确失败（KeyNotFoundException——先于任何状态变更、无残留）
         await card.LoadAsync(owner, ct);
         return card;
+    }
+
+    /// <summary>
+    /// 单卡装载（S7；一元清单）：经卡牌加载器端口解析／校验／落地，返回**卡库键**（解析后的应用层 ID）。
+    /// <para>
+    /// 结局为「卡位留空」时：卡库里已有该键（运行期直接注册的卡——无资产身份，不进资产解析）⇒ 按既有条目继续；
+    /// 否则＝明确失败（未注册／非法卡不生成）。无端口的独立构造路径＝原样返回入参。
+    /// </para>
+    /// </summary>
+    /// <exception cref="KeyNotFoundException">卡未由卡牌加载器产出可玩定义（未注册／非法）。</exception>
+    private async Task<string> LoadSingleAsync(string definitionId, Player owner, CancellationToken ct)
+    {
+        if (_cardLoader is null)
+        {
+            return definitionId;
+        }
+
+        var slot = MatchCardSlot.ForPlayer(owner.Index, 0, definitionId);
+        var outcome = await _cardLoader.LoadBatchAsync(new[] { slot }, ct).ConfigureAwait(false);
+        var result = outcome.Slots.Count == 1 ? outcome.Slots[0] : CardSlotOutcome.Empty;
+
+        if (result.IsLoaded && result.AppId is { Length: > 0 } appId)
+        {
+            return appId;
+        }
+
+        if (_runtimeRegistered.Contains(definitionId) && _library.Contains(definitionId))
+        {
+            // 运行期直接注册的卡（RuntimeCardRegistration——无资产身份、无 GUID）：装载链无定义可解析，
+            // 按卡库既有条目实例化（该路径的注册/去重语义由 RegisterCard 自身负责）。
+            return definitionId;
+        }
+
+        throw new KeyNotFoundException(
+            $"卡 '{definitionId}' 未由卡牌加载器产出可玩定义（未注册或判非法——实例化被拒绝）。");
     }
 
     /// <summary>

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "orc.bulwark",
+  "source": "cards/bulwark.field-repair.card.json",
+  "assets": [
+    {
+      "guid": "6af88a08-7708-3b9f-191b-0e3b0a76aaf4",
+      "kind": "card",
+      "id": "bulwark.field-repair",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

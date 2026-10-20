@@ -107,7 +107,7 @@ public sealed class PackageDiscoveryTests : IDisposable
     {
         Directory.CreateDirectory(directory);
         var manifest = new PackageManifest(
-            kind, id, Guid.NewGuid(), new Orc.Core.AssetVersion(1, 0, 0),
+            kind, id, Guid.NewGuid(), PackageVersion.Parse("1.0.0"),
             Array.Empty<PackageDependency>(), Array.Empty<PackageAsset>());
         File.WriteAllText(Path.Combine(directory, PackageDiscovery.ManifestFileName), manifest.ToJson());
     }

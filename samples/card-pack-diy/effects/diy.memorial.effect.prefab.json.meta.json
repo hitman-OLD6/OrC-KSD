@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "diy",
+  "source": "effects/diy.memorial.effect.prefab.json",
+  "assets": [
+    {
+      "guid": "64afa74d-90a5-e45f-3f9d-6312f96e66ac",
+      "kind": "effect",
+      "id": "diy.memorial.effect",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

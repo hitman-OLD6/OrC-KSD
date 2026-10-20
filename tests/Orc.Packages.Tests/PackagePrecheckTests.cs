@@ -5,31 +5,22 @@ using Xunit;
 namespace Orc.Packages.Tests;
 
 /// <summary>
-/// 资产化 S11 验收：包级 dry-run 预检——依赖可解析性／资产名全局唯一／包 GUID 冲突／卡包空资产告警；
-/// 纯只读（Errors/Warnings 分列，无 Error 放行）。
+/// 资产化 S11 验收（S4 修订）：包级 dry-run 预检——资产名全局唯一／包 GUID 冲突／卡包空资产告警；
+/// 包级依赖已退役（依赖一律资产级），不再参与预检。纯只读（Errors/Warnings 分列，无 Error 放行）。
 /// </summary>
 public class PackagePrecheckTests
 {
     private static readonly Guid SharedGuid = Guid.Parse("ab12cd34-0000-0000-0000-000000000000");
 
     [Fact]
-    public void 依赖齐备_放行()
+    public void 包级依赖已退役_不再参与预检()
     {
         var report = PackagePrecheck.Validate(Report(
-            Pkg("p1", "1.0.0"),
+            Pkg("p1", "1.0.0", dependsOn: ("missing", "1.0.0")),
             Pkg("p2", "1.0.0", guid: null, dependsOn: ("p1", "1.*.*"))));
 
         Assert.True(report.Ok);
         Assert.Empty(report.Errors);
-    }
-
-    [Fact]
-    public void 依赖缺失_阻断()
-    {
-        var report = PackagePrecheck.Validate(Report(Pkg("p1", "1.0.0", dependsOn: ("missing", "1.0.0"))));
-
-        Assert.False(report.Ok);
-        Assert.Contains(report.Errors, e => e.Contains("missing"));
     }
 
     [Fact]
@@ -40,8 +31,8 @@ public class PackagePrecheckTests
             Pkg("b", "1.0.0", guid: SharedGuid, assets: ("json", "table", "t.json"))));
 
         Assert.False(report.Ok);
-        Assert.Contains(report.Errors, e => e.Contains("重复"));
-        Assert.Contains(report.Errors, e => e.Contains("包身份须唯一"));
+        Assert.Contains(report.Errors, e => e.Contains("包身份"));
+        Assert.Contains(report.Errors, e => e.Contains("身份须唯一"));
     }
 
     [Fact]
@@ -65,7 +56,7 @@ public class PackagePrecheckTests
     }
 
     [Fact]
-    public void 快照预检_依赖须在本局内可满足()
+    public void 快照预检_只校验资产名唯一_依赖不再参与()
     {
         var snapshot = AssetCatalogSnapshot.FromPackages(new[]
         {
@@ -75,8 +66,8 @@ public class PackagePrecheckTests
 
         var report = PackagePrecheck.Validate(snapshot);
 
-        Assert.False(report.Ok);
-        Assert.Contains(report.Errors, e => e.Contains("无满足约束"));
+        Assert.True(report.Ok);
+        Assert.Empty(report.Errors);
     }
 
     private static PackageManifest Pkg(
@@ -90,7 +81,7 @@ public class PackagePrecheckTests
             kind,
             id,
             guid ?? Guid.NewGuid(),
-            AssetVersion.Parse(version),
+            PackageVersion.Parse(version),
             dependsOn is { } dep ? new[] { new PackageDependency(dep.Id, dep.Version) } : Array.Empty<PackageDependency>(),
             assets is { } a ? new[] { new PackageAsset(a.Type, a.Name, a.Path) } : Array.Empty<PackageAsset>());
 

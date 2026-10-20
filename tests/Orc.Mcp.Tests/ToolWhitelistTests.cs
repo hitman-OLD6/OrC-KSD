@@ -60,12 +60,27 @@ public class ToolWhitelistTests
         "file.list",
         "file.read",
         "asset.promote",
+        // S9：后端编辑器全组（R9 能力集一一对应；非沙盒不登记）
+        "editor.pack_list",
+        "editor.session_begin",
+        "editor.session_end",
+        "editor.asset_list",
+        "editor.asset_get",
+        "editor.asset_commit",
+        "editor.asset_create",
+        "editor.asset_delete",
+        "editor.version_set",
+        "editor.dep_set",
+        "editor.lock_preview",
+        "editor.promote",
+        "editor.reload",
         "observe.snapshot",
         "observe.segments",
         "diag.report",
         "diag.audit_chain",
         "diag.hooks",
         "diag.entry_points",
+        "diag.card_load",
     ];
 
     [Fact]

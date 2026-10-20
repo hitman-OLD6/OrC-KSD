@@ -5,8 +5,8 @@ using Xunit;
 namespace Orc.Packages.Tests;
 
 /// <summary>
-/// 资产化 S9 验收：卡包热加载（只对新对局生效／插件不可热加载／依赖校验）／快照装配优先级（插件先、卡包后）／
-/// 当前对局显式注入。
+/// 资产化 S9 验收（S4 修订）：卡包热加载（只对新对局生效／插件不可热加载）／快照装配优先级（插件先、卡包后）／
+/// 当前对局显式注入。包级依赖已退役——热加载不再因包级 dependsOn 拒绝。
 /// </summary>
 public sealed class CardPackHotLoadTests : IDisposable
 {
@@ -56,27 +56,14 @@ public sealed class CardPackHotLoadTests : IDisposable
     }
 
     [Fact]
-    public void 依赖不满足_拒绝()
+    public void 包级dependsOn已退役_缺失依赖不再阻断热加载()
     {
         var host = EngineHost.Start(_root);
         WritePackage("packs", "need-plugin", PackageKind.CardPack, "1.0.0", dependsOn: ("missing", "1.0.0"));
 
         var ok = host.TryLoadCardPack(Path.Combine(_root, "packs", "need-plugin"), out var failure);
 
-        Assert.False(ok);
-        Assert.Contains("无满足约束", failure);
-    }
-
-    [Fact]
-    public void 依赖满足_可热加载()
-    {
-        WritePackage("plugins", "core", PackageKind.Plugin, "1.0.0");
-        var host = EngineHost.Start(_root);
-        WritePackage("packs", "p", PackageKind.CardPack, "1.0.0", dependsOn: ("core", "1.*.*"));
-
-        var ok = host.TryLoadCardPack(Path.Combine(_root, "packs", "p"), out var failure);
-
-        Assert.True(ok, failure);
+        Assert.True(ok, failure); // 依赖一律资产级：包级 dependsOn 只产迁移告警，不再拒绝
     }
 
     [Fact]
@@ -101,13 +88,13 @@ public sealed class CardPackHotLoadTests : IDisposable
 
         // 版本不在本局快照 ⇒ 拒绝
         var rejected = await CardPackInjection.InjectEffectsAsync(
-            injector, snapshot, "pack1", new AssetVersion(9, 0, 0), new[] { "e1" });
+            injector, snapshot, "pack1", PackageVersion.Parse("9.0.0"), new[] { "e1" });
         Assert.Single(rejected);
         Assert.Empty(injector.Injected);
 
         // 存在于快照 ⇒ 逐条注入
         var accepted = await CardPackInjection.InjectEffectsAsync(
-            injector, snapshot, "pack1", new AssetVersion(1, 0, 0), new[] { "e1", "e2" });
+            injector, snapshot, "pack1", PackageVersion.Parse("1.0.0"), new[] { "e1", "e2" });
         Assert.Empty(accepted);
         Assert.Equal(new[] { "e1", "e2" }, injector.Injected);
     }
@@ -131,7 +118,7 @@ public sealed class CardPackHotLoadTests : IDisposable
         Directory.CreateDirectory(directory);
 
         var manifest = new PackageManifest(
-            kind, id, Guid.NewGuid(), AssetVersion.Parse(version),
+            kind, id, Guid.NewGuid(), PackageVersion.Parse(version),
             dependsOn is { } dep ? new[] { new PackageDependency(dep.Id, dep.Version) } : Array.Empty<PackageDependency>(),
             Array.Empty<PackageAsset>());
         File.WriteAllText(Path.Combine(directory, PackageDiscovery.ManifestFileName), manifest.ToJson());

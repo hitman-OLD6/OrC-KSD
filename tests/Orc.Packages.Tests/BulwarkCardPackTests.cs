@@ -22,9 +22,13 @@ public sealed class BulwarkCardPackTests
         var manifest = PackageManifest.Parse(File.ReadAllText(Path.Combine(PackRoot, "manifest.json")));
         Assert.Equal("orc.bulwark", manifest.Id);
         Assert.Equal(PackageKind.CardPack, manifest.Kind);
-        Assert.Equal("1.0.0", manifest.Version.ToString());
 
-        var content = CardPackLoader.Load(PackRoot, manifest);
+        // 包版本＝内容指纹（S4/R17；S10a 迁移后不再是字面 "1.0.0"）：同内容恒得同一指纹、不含时间戳。
+        Assert.Equal(PackageManifest.CurrentSchemaVersion, manifest.SchemaVersion);
+        Assert.Equal(PackageVersion.Compute(manifest.Id, manifest.MetadataList), manifest.Version);
+        Assert.Empty(manifest.Dependencies);
+
+        var content = PackageRegistrar.Register(PackRoot, manifest, new AssetRegistry()).Content;
 
         Assert.Equal(3, content.Definitions.Count);
         Assert.All(content.Definitions, d => Assert.StartsWith("pack/orc.bulwark/", d.Id, StringComparison.Ordinal));

@@ -28,6 +28,7 @@ public sealed class CardLibrary
 {
     private readonly LogicEngine _engine;
     private readonly Dictionary<string, CardDefinition> _definitions = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, AssetDomain> _domains = new(StringComparer.Ordinal);
     private readonly Func<Player?>? _turnPlayerProvider;
     private readonly Func<KeywordLoadContext?>? _keywordLoadContextProvider;
     private readonly Func<int>? _matchCardIdProvider;
@@ -59,10 +60,13 @@ public sealed class CardLibrary
     }
 
     /// <summary>注册定义（id 为注册键）。</summary>
+    /// <param name="id">应用层 ID（本库不感知 GUID）。</param>
+    /// <param name="definition">卡定义。</param>
+    /// <param name="domain">资产域（S3/R14：仅用于构筑/存档/展示/诊断，**不得参与玩法判定**）。</param>
     /// <exception cref="ArgumentException">id 为 null/空白。</exception>
     /// <exception cref="ArgumentNullException">definition 为 null。</exception>
     /// <exception cref="InvalidOperationException">同一 id 重复注册（被拒绝）。</exception>
-    public void Register(string id, CardDefinition definition)
+    public void Register(string id, CardDefinition definition, AssetDomain domain = AssetDomain.Formal)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentNullException.ThrowIfNull(definition);
@@ -71,7 +75,65 @@ public sealed class CardLibrary
         {
             throw new InvalidOperationException($"卡牌 id '{id}' 已注册（重复注册被拒绝）。");
         }
+
+        _domains[id] = domain;
     }
+
+    /// <summary>
+    /// **替换**已存在键的定义（S3/D20：专供测试段遮蔽）——只允许替换**已存在**的键，
+    /// 缺失键＝拒绝（不得借此新增条目）；并记录该键的资产域。
+    /// </summary>
+    /// <param name="appId">应用层 ID。</param>
+    /// <param name="definition">新定义。</param>
+    /// <param name="domain">替换后的资产域。</param>
+    /// <exception cref="ArgumentException">appId 为 null/空白。</exception>
+    /// <exception cref="ArgumentNullException">definition 为 null。</exception>
+    /// <exception cref="KeyNotFoundException">键未注册（缺失键＝拒绝）。</exception>
+    public void Replace(string appId, CardDefinition definition, AssetDomain domain)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(appId);
+        ArgumentNullException.ThrowIfNull(definition);
+
+        if (!_definitions.ContainsKey(appId))
+        {
+            throw new KeyNotFoundException(
+                $"卡牌 id '{appId}' 未注册——Replace 只替换已存在键（缺失键＝拒绝）。");
+        }
+
+        _definitions[appId] = definition;
+        _domains[appId] = domain;
+    }
+
+    /// <summary>该键的资产域。</summary>
+    /// <exception cref="ArgumentException">id 为 null/空白。</exception>
+    /// <exception cref="KeyNotFoundException">未注册的 id。</exception>
+    public AssetDomain DomainOf(string id)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        return _domains.TryGetValue(id, out var domain)
+            ? domain
+            : throw new KeyNotFoundException($"卡牌 id '{id}' 未注册。");
+    }
+
+    /// <summary>
+    /// 摘除已注册条目（S6 装载段专用：资产加载器「从首个变更层起重装」时先摘旧段、回滚时亦用它——
+    /// 与 <see cref="Register"/> 的「重复即抛」不冲突：注册语义仍是只追加）。
+    /// </summary>
+    /// <param name="id">应用层 ID。</param>
+    /// <returns>摘除成功＝true；未注册/null/空白＝false（幂等，不抛错）。</returns>
+    public bool Remove(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return false;
+        }
+
+        _domains.Remove(id);
+        return _definitions.Remove(id);
+    }
+
+    /// <summary>是否为测试资产（S6/R14：域的合法消费方＝构筑/存档、UI 展示、诊断报告）。</summary>
+    public bool IsTestAsset(string id) => Contains(id) && _domains[id] == AssetDomain.Test;
 
     /// <summary>存在性查询：已注册＝true；未注册/ null/空白＝false（不抛错）。</summary>
     public bool Contains(string id) => !string.IsNullOrWhiteSpace(id) && _definitions.ContainsKey(id);
@@ -142,6 +204,9 @@ public sealed class CardLibrary
             ? null
             : () => _effectLoadContextProvider(id);
         card.DiscardCardProvider = _discardCardAction;
+
+        // S6/R14：域标记随实例走（加载段写入、实例可查 IsTestAsset）——不得用于玩法判定。
+        card.AssetDomain = DomainOf(id);
 
         if (card is UnitCard unitCard)
         {

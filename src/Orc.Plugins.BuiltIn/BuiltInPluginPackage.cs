@@ -20,6 +20,23 @@ public static class BuiltInPluginPackage
     /// <summary>包稳定身份（固定字面——跨版本不变）。</summary>
     public static readonly Guid PackageGuid = Guid.Parse("b0070000-0000-4000-8000-000000000001");
 
+    /// <summary>UI 插件包 id（<c>orc.builtin.ui</c>；装载序声明用——纯 id，不引用该程序集）。</summary>
+    public const string UiPackageId = "orc.builtin.ui";
+
+    /// <summary>底层逻辑集包 id（<c>orc.foundation.actions</c>；装载序声明用）。</summary>
+    public const string FoundationActionsPackageId = "orc.foundation.actions";
+
+    /// <summary>
+    /// **内置包注册清单**（S4）：为每个内置插件声明显式装载序（<c>LoadAfter[]</c>——纯包 ID、代码内、
+    /// **不进 manifest**）。宿主启动期据此做三项断言（覆盖／无环／无未知包 ID）。
+    /// </summary>
+    public static IReadOnlyList<PackageLoadOrderEntry> LoadOrder { get; } =
+    [
+        new(PackageId, Array.Empty<string>()),
+        new(UiPackageId, Array.Empty<string>()),
+        new(FoundationActionsPackageId, [PackageId]),
+    ];
+
     /// <summary>默认插件根（程序集输出目录下的 <c>package/plugins</c>）。</summary>
     public static string DefaultPluginsRoot
         => Path.Combine(AppContext.BaseDirectory, "package", "plugins");
@@ -59,7 +76,7 @@ public static class BuiltInPluginPackage
             AssetScope.Match, AssetActivationPhase.PreCommand);
         var preAsset = new LoadedAsset(
             preDescriptor,
-            new AssetName(AssetLoadKind.Asm, "register", manifest.Guid8, manifest.Version),
+            new AssetName(AssetLoadKind.Asm, "register", manifest.Guid8, new AssetVersion(1, 0, 0)),
             manifestPath);
 
         var postDescriptor = new PackageAsset(
@@ -67,7 +84,7 @@ public static class BuiltInPluginPackage
             AssetScope.Match, AssetActivationPhase.PostCommand);
         var postAsset = new LoadedAsset(
             postDescriptor,
-            new AssetName(AssetLoadKind.Asm, "register.postCommand", manifest.Guid8, manifest.Version),
+            new AssetName(AssetLoadKind.Asm, "register.postCommand", manifest.Guid8, new AssetVersion(1, 0, 0)),
             manifestPath);
 
         var processDescriptor = new PackageAsset(
@@ -75,7 +92,7 @@ public static class BuiltInPluginPackage
             AssetScope.Process, AssetActivationPhase.PreCommand);
         var processAsset = new LoadedAsset(
             processDescriptor,
-            new AssetName(AssetLoadKind.Asm, "register.process", manifest.Guid8, manifest.Version),
+            new AssetName(AssetLoadKind.Asm, "register.process", manifest.Guid8, new AssetVersion(1, 0, 0)),
             manifestPath);
 
         return new LoadedPackage(

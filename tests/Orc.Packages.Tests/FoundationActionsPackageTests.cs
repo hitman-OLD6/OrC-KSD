@@ -7,8 +7,8 @@ using Xunit;
 namespace Orc.Packages.Tests;
 
 /// <summary>
-/// P5b 验收：底层逻辑集的**物理包**（清单解析、身份校验、依赖排序）。
-/// 不建对局——只验证包发现/装载与 <c>dependsOn</c> 拓扑序。
+/// P5b 验收（S4 修订）：底层逻辑集的**物理包**（清单解析、身份校验、装载序）。
+/// 不建对局——只验证包发现/装载与 <c>LoadAfter[]</c> 显式装配序（包级 dependsOn 已退役）。
 /// </summary>
 public class FoundationActionsPackageTests
 {
@@ -23,34 +23,26 @@ public class FoundationActionsPackageTests
         Assert.Contains(discovery.Packages, p => p.Manifest.Id == BuiltInPluginPackage.PackageId);
         Assert.Contains(discovery.Packages, p => p.Manifest.Id == FoundationActionsPluginPackage.PackageId);
 
-        // ② 清单解析：kind/id/guid/version/依赖/空资产声明合法
+        // ② 清单解析：kind/id/guid/version/空资产声明合法（包级 dependsOn 已退役，读入仅为迁移告警）
         var loaded = FoundationActionsPluginPackage.Load();
         Assert.Equal(PackageKind.Plugin, loaded.Manifest.Kind);
         Assert.Equal(FoundationActionsPluginPackage.PackageId, loaded.Manifest.Id);
         Assert.Equal(FoundationActionsPluginPackage.PackageGuid, loaded.Manifest.Guid);
         Assert.Equal("1.0.0", loaded.Manifest.Version.ToString());
-        Assert.Contains(
-            loaded.Manifest.Dependencies,
-            d => d.Id == BuiltInPluginPackage.PackageId && d.Version == "1.*.*");
         Assert.Empty(loaded.Manifest.Assets);
         var entry = Assert.Single(loaded.Assets);
         Assert.Equal("register.postCommand", entry.Asset.Name);
 
-        // ③ 依赖排序：故意把 foundation 放在声明序前面，解析后 core 必须先于 foundation
-        var core = BuiltInPluginPackage.Load();
-        var declared = new PackageDiscoveryReport(
-            new[]
-            {
-                new DiscoveredPackage(loaded.Manifest, loaded.RootDirectory),
-                new DiscoveredPackage(core.Manifest, core.RootDirectory),
-            },
-            Array.Empty<string>());
+        // ③ 装载序：由注册清单的 LoadAfter[] 决定（foundation 声明须在 core 之后）
+        var order = PluginLoadOrder.Sort(
+            BuiltInPluginPackage.LoadOrder,
+            new[] { FoundationActionsPluginPackage.PackageId, BuiltInPluginPackage.PackageId },
+            out var violations);
 
-        var resolution = PackageResolver.Resolve(declared);
-        Assert.Empty(resolution.Failures);
+        Assert.Empty(violations);
         Assert.Equal(
             new[] { BuiltInPluginPackage.PackageId, FoundationActionsPluginPackage.PackageId },
-            resolution.LoadOrder.Select(p => p.Manifest.Id).ToArray());
+            order);
     }
 
     [Fact]

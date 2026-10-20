@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "demo",
+  "source": "effects/demo.rally.prefab.json",
+  "assets": [
+    {
+      "guid": "8e483519-d746-de5f-66cf-bbfd609e5cbc",
+      "kind": "effect",
+      "id": "demo.rally",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

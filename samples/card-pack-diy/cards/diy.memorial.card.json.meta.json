@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "diy",
+  "source": "cards/diy.memorial.card.json",
+  "assets": [
+    {
+      "guid": "5d3aea70-8102-a1ef-bdd5-5db8fecbccb7",
+      "kind": "card",
+      "id": "diy.memorial",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

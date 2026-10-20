@@ -156,7 +156,7 @@ public class PackageActivationTests
         (AssetScope Scope, AssetActivationPhase Phase, Action<IPluginRegistrationContext> Register)[] scripts)
     {
         var manifest = new PackageManifest(
-            kind, id, Guid.NewGuid(), new AssetVersion(1, 0, 0),
+            kind, id, Guid.NewGuid(), PackageVersion.Parse("1.0.0"),
             Array.Empty<PackageDependency>(),
             scripts.Select((_, i) => new PackageAsset("csx", $"script{i}", $"csx/script{i}.csx")).ToArray());
 
@@ -168,7 +168,7 @@ public class PackageActivationTests
             var descriptor = new PackageAsset("csx", $"script{i}", $"csx/script{i}.csx", scope, phase);
             var asset = new LoadedAsset(
                 descriptor,
-                new AssetName(AssetLoadKind.Csx, $"script{i}", manifest.Guid8, manifest.Version),
+                new AssetName(AssetLoadKind.Csx, $"script{i}", manifest.Guid8, new AssetVersion(1, 0, 0)),
                 "unused");
             assets.Add(asset);
             loaded.Add(new LoadedPluginScript(asset, register));

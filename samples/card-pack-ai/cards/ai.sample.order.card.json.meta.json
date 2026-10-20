@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "ai.sample",
+  "source": "cards/ai.sample.order.card.json",
+  "assets": [
+    {
+      "guid": "13ee3334-4c2b-d767-9ff7-3896a44207d5",
+      "kind": "card",
+      "id": "ai.sample.order",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

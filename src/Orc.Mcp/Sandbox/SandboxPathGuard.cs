@@ -1,3 +1,5 @@
+using Orc.Packages.Fs;
+
 namespace Orc.Mcp.Sandbox;
 
 /// <summary>
@@ -22,30 +24,37 @@ public sealed class SandboxPathViolationException : Exception
 /// <summary>
 /// 沙盒路径守卫：把"相对沙盒根的路径"解析为规范化绝对路径，并保证结果**落在根内**。
 /// <para>
+/// 自 S8 起本类型只是 <see cref="IEditableRootPolicy"/> 的一个实现（单根）：路径归一规则
+/// **只有一份**（<see cref="PathNormalizer"/>，位于 <c>Orc.Packages</c>），本类型只负责
+/// ①把相对路径拼到根上；②按「直接父目录命中授权根」判定写目标。
+/// </para>
+/// <para>
 /// 全防要点（默认策略，无开关）：
 /// ①拒绝空白路径；②拒绝 UNC 路径（<c>\\server\share</c> / <c>//server/share</c>）；
-/// ③拒绝绝对路径（一律只接受根内相对路径）；④拒绝 <c>..</c> 穿越（经规范化后复核，而非仅文本匹配）；
-/// ⑤拒绝经由**符号链接/重解析点**逃逸出根；⑥Windows 下按大小写不敏感比较；
+/// ③拒绝绝对路径（一律只接受根内相对路径）；④拒绝 <c>..</c> 穿越；
+/// ⑤拒绝经由**符号链接/重解析点**逃逸出根（realpath 归一后复核）；⑥Windows 下按大小写不敏感比较；
 /// ⑦写前对**规范化后的最终路径**复核（防"校验后拼接"类绕过）。
 /// </para>
 /// </summary>
-public sealed class SandboxPathGuard
+public sealed class SandboxPathGuard : IEditableRootPolicy
 {
-    private static readonly StringComparison PathComparison =
-        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-
-    private readonly string _root;
+    private readonly NormalizedPath _root;
+    private readonly EditableRootPolicy _policy;
 
     public SandboxPathGuard(string root)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
-        _root = Normalize(Path.GetFullPath(root));
+        _root = PathNormalizer.Normalize(root);
+        _policy = new EditableRootPolicy(_root.Value);
     }
 
     /// <summary>沙盒根（规范化绝对路径；含尾分隔符）。</summary>
-    public string Root => _root;
+    public string Root => _root.Value + Path.DirectorySeparatorChar;
 
-    /// <summary>解析根内相对路径为规范化绝对路径（违规＝抛 <see cref="SandboxPathViolationException"/>）。</summary>
+    /// <summary>授权根（沙盒模式＝单根）。</summary>
+    public IReadOnlyList<string> Roots => _policy.Roots;
+
+    /// <summary>把绝对路径解析为根内路径为可写目标（纯判定，不建目录）。</summary>
     public string Resolve(string relativePath)
     {
         if (string.IsNullOrWhiteSpace(relativePath))
@@ -54,8 +63,7 @@ public sealed class SandboxPathGuard
         }
 
         var input = relativePath.Trim();
-
-        if (input.StartsWith(@"\\", StringComparison.Ordinal) || input.StartsWith("//", StringComparison.Ordinal))
+        if (PathNormalizer.IsUncPath(input))
         {
             throw new SandboxPathViolationException(relativePath, "不允许 UNC 路径");
         }
@@ -65,24 +73,28 @@ public sealed class SandboxPathGuard
             throw new SandboxPathViolationException(relativePath, "不允许绝对路径（只接受沙盒根内的相对路径）");
         }
 
-        string full;
-        try
-        {
-            full = Normalize(Path.GetFullPath(Path.Combine(_root, input)));
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            throw new SandboxPathViolationException(relativePath, $"路径无法解析（{ex.GetType().Name}）");
-        }
-
-        if (!IsUnder(full, _root))
+        if (PathNormalizer.ContainsParentSegment(input))
         {
             throw new SandboxPathViolationException(relativePath, "路径越出沙盒根");
         }
 
-        EnsureNoReparsePointEscape(full);
+        NormalizedPath full;
+        try
+        {
+            full = PathNormalizer.Combine(_root, input);
+        }
+        catch (PathViolationException ex)
+        {
+            throw new SandboxPathViolationException(relativePath, ex.Reason);
+        }
 
-        return full.Equals(_root, PathComparison) ? _root : full.TrimEnd(Path.DirectorySeparatorChar);
+        if (!full.IsUnderOrEqual(_root))
+        {
+            // 含符号链接逃逸：realpath 归一后落在根外。
+            throw new SandboxPathViolationException(relativePath, "路径越出沙盒根");
+        }
+
+        return full.Value;
     }
 
     /// <summary>尝试解析（失败＝false，不抛错）。</summary>
@@ -102,51 +114,23 @@ public sealed class SandboxPathGuard
         }
     }
 
-    /// <summary>解析**写**目标（在 <see cref="Resolve"/> 之上再复核一次规范化结果；写前必须调用）。</summary>
+    /// <summary>解析**写**目标（在 <see cref="Resolve"/> 之上再做一次授权判定；写前必须调用）。</summary>
     public string ResolveWrite(string relativePath)
     {
         var full = Resolve(relativePath);
 
-        // 写前复核：最终路径再次判归属（防"校验后拼接"类绕过）。
-        if (!IsUnder(full, _root))
+        // 写前复核：最终路径的直接父目录须命中授权根（防"校验后拼接"类绕过）。
+        if (!_policy.TryApprove(full, out var reason))
         {
-            throw new SandboxPathViolationException(relativePath, "写目标越出沙盒根");
+            throw new SandboxPathViolationException(relativePath, $"写目标越出沙盒根：{reason}");
         }
 
         return full;
     }
 
-    private static string Normalize(string fullPath)
-    {
-        var trimmed = fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        return trimmed + Path.DirectorySeparatorChar;
-    }
+    /// <inheritdoc />
+    public bool Approve(string absolutePath) => _policy.Approve(absolutePath);
 
-    private static bool IsUnder(string fullPath, string rootWithSeparator)
-        => fullPath.Equals(rootWithSeparator.TrimEnd(Path.DirectorySeparatorChar), PathComparison)
-           || fullPath.StartsWith(rootWithSeparator, PathComparison);
-
-    /// <summary>逐级检查既有路径段是否为重解析点（符号链接/junction），防逃逸。</summary>
-    private static void EnsureNoReparsePointEscape(string fullPath)
-    {
-        var current = new DirectoryInfo(fullPath);
-
-        // 文件路径：先看自身，再看各级父目录。
-        while (current is not null)
-        {
-            try
-            {
-                if (current.Exists && (current.Attributes & FileAttributes.ReparsePoint) != 0)
-                {
-                    throw new SandboxPathViolationException(fullPath, $"路径经过重解析点（符号链接/junction）：'{current.FullName}'");
-                }
-            }
-            catch (UnauthorizedAccessException)
-            {
-                // 无权限读取属性：交给后续 IO 操作报错（不静默放行也不误判）。
-            }
-
-            current = current.Parent;
-        }
-    }
+    /// <inheritdoc />
+    public bool TryApprove(string absolutePath, out string? reason) => _policy.TryApprove(absolutePath, out reason);
 }

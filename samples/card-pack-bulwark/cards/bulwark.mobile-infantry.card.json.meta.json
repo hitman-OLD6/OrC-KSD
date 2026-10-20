@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "orc.bulwark",
+  "source": "cards/bulwark.mobile-infantry.card.json",
+  "assets": [
+    {
+      "guid": "244f66b0-2af1-04ab-fd86-ca1add4420f9",
+      "kind": "card",
+      "id": "bulwark.mobile-infantry",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

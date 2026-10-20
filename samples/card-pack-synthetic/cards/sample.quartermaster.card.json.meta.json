@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "sample.synthetic",
+  "source": "cards/sample.quartermaster.card.json",
+  "assets": [
+    {
+      "guid": "f72fe9a5-d096-5060-0ecc-985e12613da4",
+      "kind": "card",
+      "id": "sample.quartermaster",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

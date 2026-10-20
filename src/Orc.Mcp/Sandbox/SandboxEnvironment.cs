@@ -13,7 +13,7 @@ public sealed record SandboxScaffoldResult(
 /// <summary>
 /// 沙盒环境：**唯一可写根**的结构、脚手架与读面。
 /// <para>
-/// 目录约定（与 <c>CardPackLoader</c> 一致）：<c>&lt;SandboxRoot&gt;/pack/{manifest.json, cards/, effects/}</c>；
+/// 目录约定（与 <see cref="Orc.Packages.PackageScanner"/> 一致）：<c>&lt;SandboxRoot&gt;/pack/{manifest.json, cards/, effects/}</c>；
 /// 卡数据体文件＝<c>cards/*.card.json</c>，效果预制体＝<c>effects/*.prefab.json</c>。
 /// 脚手架随**沙盒模式启动**创建（manifest 的 <c>guid</c> 一次性生成并持久化——保证资产名稳定）。
 /// </para>

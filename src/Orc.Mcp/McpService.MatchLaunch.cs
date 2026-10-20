@@ -1,4 +1,5 @@
 ﻿using System.Text.Json.Nodes;
+using Orc.Core;
 using Orc.Foundation.Actions;
 using Orc.Game;
 using Orc.Game.Cards;
@@ -6,6 +7,7 @@ using Orc.Game.Collections;
 using Orc.Mcp.Contracts;
 using Orc.Mcp.Match;
 using Orc.Packages;
+using Orc.Packages.Loading;
 using Orc.Plugins.BuiltIn;
 
 namespace Orc.Mcp;
@@ -56,10 +58,11 @@ public sealed partial class McpService
         FoundationActions.Register();
         NoteProcessStateChange("builtin.process-defaults（内置词条/组件进程级注册，幂等）");
 
-        MatchContentLoadResult content;
+        // S7：卡组装载＝注册面 ＋ 两域 lock ＋ 资产加载器（分层列表）＋ 卡牌加载器；卡库在初始化期接入。
+        MatchCardAssembly assembly;
         try
         {
-            content = MatchContentLoader.Load(options.PackDirectories);
+            assembly = MatchCardAssembly.Register(options.PackDirectories);
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or FormatException
             or InvalidOperationException or ArgumentException or DirectoryNotFoundException)
@@ -71,8 +74,8 @@ public sealed partial class McpService
         string[] deckB;
         try
         {
-            deckA = options.SeatA.Deck.Select(content.ResolveCardId).ToArray();
-            deckB = options.SeatB.Deck.Select(content.ResolveCardId).ToArray();
+            deckA = options.SeatA.Deck.Select(id => ResolveDeckCardId(assembly, id)).ToArray();
+            deckB = options.SeatB.Deck.Select(id => ResolveDeckCardId(assembly, id)).ToArray();
         }
         catch (InvalidOperationException ex)
         {
@@ -80,7 +83,7 @@ public sealed partial class McpService
         }
 
         var effectRegistry = new CardEffectRegistry();
-        foreach (var (cardId, prefabIds) in content.Declarations)
+        foreach (var (cardId, prefabIds) in assembly.Declarations)
         {
             effectRegistry.DeclarePrefab(cardId, prefabIds);
         }
@@ -99,7 +102,7 @@ public sealed partial class McpService
             match = new Orc.Game.Match(
                 new CardList(deckA),
                 new CardList(deckB),
-                content.Definitions,
+                assembly.Definitions,
                 seed: options.Seed,
                 options: new MatchOptions
                 {
@@ -109,7 +112,8 @@ public sealed partial class McpService
                 },
                 targeterBridge: Bridge,
                 effectRegistry: effectRegistry,
-                packageActivator: packageActivator);
+                packageActivator: packageActivator,
+                cardLoader: assembly);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
@@ -119,12 +123,12 @@ public sealed partial class McpService
         EffectRegistry = effectRegistry;
 
         // 内联预制体与效果库须在 Initialize 前注册（卡装载链在 Initialize 内解析效果引用）。
-        foreach (var snapshot in content.InlinePrefabs)
+        foreach (var snapshot in assembly.InlinePrefabs)
         {
             match.Engine.Prefabs.RegisterPrefab(snapshot);
         }
 
-        foreach (var directory in content.EffectDirectories)
+        foreach (var directory in assembly.EffectDirectories)
         {
             var report = match.Engine.Prefabs.LoadDirectory(directory);
             if (report.Failures.Count > 0)
@@ -136,6 +140,7 @@ public sealed partial class McpService
         }
 
         AttachMatch(match);
+        CardAssembly = assembly; // S9：诊断面（diag.card_load）经此读取本局加载台账
 
         var outcome = await Executor
             .RunAsync(
@@ -174,8 +179,8 @@ public sealed partial class McpService
             ["state"] = match.State.ToString(),
             ["phase"] = match.Phase.ToString(),
             ["turn"] = match.TurnNumber,
-            ["definitions"] = content.Definitions.Count,
-            ["packs"] = new JsonArray(content.PackPrefixes.Select(p => (JsonNode)JsonValue.Create(p)!).ToArray()),
+            ["definitions"] = assembly.Definitions.Count,
+            ["packs"] = new JsonArray(assembly.PackPrefixes.Select(p => (JsonNode)JsonValue.Create(p)!).ToArray()),
             ["players"] = players,
         });
     }
@@ -189,6 +194,26 @@ public sealed partial class McpService
     /// <summary>销毁活跃对局（进程内宿主入口；对局不可序列化，销毁即丢弃）。</summary>
     /// <returns>被销毁的对局（无＝null）。</returns>
     public Orc.Game.Match? DisposeMatch() => DetachMatch();
+
+    /// <summary>
+    /// 卡组条目解析（**唯一实现＝<see cref="AssetIdBridge"/>**，S3/S7）：应用层 ID 直配，裸局部 ID 在中间层内唯一才可解析。
+    /// 解析失败＝调用方输入错误（卡组是不可静默删减的显式契约）；卡级**非法**（已注册但判定不通过）不在此拦——
+    /// 那些卡位按 R5 留空、开局继续。
+    /// </summary>
+    /// <param name="assembly">卡组装载（中间层来源）。</param>
+    /// <param name="reference">卡组条目（全名或裸局部 ID）。</param>
+    /// <exception cref="InvalidOperationException">未注册／歧义（提示给出全名）。</exception>
+    private static string ResolveDeckCardId(MatchCardAssembly assembly, string reference)
+    {
+        var resolution = assembly.Bridge.Resolve(AssetKind.Card, reference);
+        return resolution.Status switch
+        {
+            IdResolutionStatus.Resolved => resolution.AppId!,
+            IdResolutionStatus.Ambiguous => throw new InvalidOperationException(
+                $"卡 id '{reference}' 在多个卡包中重名（{string.Join("、", resolution.Candidates)}），请给出全名。"),
+            _ => throw new InvalidOperationException($"卡 id '{reference}' 不在已装载的卡定义中。"),
+        };
+    }
 
     private static string? ValidateDeck(MatchSeatConfig seat, int requiredSize)
     {

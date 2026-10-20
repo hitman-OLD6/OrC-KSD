@@ -78,6 +78,40 @@ public class SandboxPathGuardTests : IDisposable
         Assert.StartsWith(_root, resolved, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void Guard_Is_An_EditableRootPolicy_With_Single_Root()
+    {
+        // S8：沙盒守卫只是 IEditableRootPolicy 的一个实现（单根），路径规则只有一份（PathNormalizer）。
+        Orc.Packages.Fs.IEditableRootPolicy policy = _guard;
+
+        Assert.Single(policy.Roots);
+        Assert.True(policy.Approve(Path.Combine(_root, "pack", "a.card.json")));
+        Assert.False(policy.Approve(Path.Combine(Path.GetTempPath(), "outside.card.json")));
+        Assert.False(policy.TryApprove(Path.Combine(_root, "..", "escape.txt"), out _));
+    }
+
+    [Fact]
+    public void Resolve_Symlink_Escape_Is_Rejected()
+    {
+        var outside = Path.Combine(Path.GetTempPath(), "orc-mcp-guard-out-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outside);
+        var link = Path.Combine(_root, "link");
+        try
+        {
+            Directory.CreateSymbolicLink(link, outside);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+        {
+            Directory.Delete(outside, recursive: true);
+            return; // 平台不允许建链：本机不适用
+        }
+
+        var exception = Assert.Throws<SandboxPathViolationException>(() => _guard.Resolve("link/evil.txt"));
+        Assert.Contains("越出沙盒根", exception.Message, StringComparison.Ordinal);
+
+        Directory.Delete(outside, recursive: true);
+    }
+
     public void Dispose()
     {
         try

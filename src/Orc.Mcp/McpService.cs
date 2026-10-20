@@ -35,6 +35,7 @@ public sealed partial class McpService
         Bridge = new TargeterBridgeAdapter(options.TargetSelectionTimeout, KeyOf);
         Executor = new MatchExecutor(Bridge);
         Segments = new SegmentCache(options.SegmentCacheCapacity);
+        Editor = CreateEditor();
 
         Orc.Mcp.Tools.ToolRegistration.RegisterAll(this);
     }

@@ -15,7 +15,8 @@ public sealed record PackagePrecheckReport(IReadOnlyList<string> Errors, IReadOn
 
 /// <summary>
 /// 包级分发预检器（S11 之①：**纯只读** dry-run 校验）：在装载/建局**之前**检出——
-/// ①依赖可解析性（缺失／无满足版本／循环）；②**资产全名全局唯一**（不唯一＝后者不予加载）。
+/// ①包身份唯一性（同 GUID 不得跨 id 共用）；②**资产全名全局唯一**（不唯一＝后者不予加载）。
+/// 包级依赖已退役（S4/D31：依赖一律资产级），故不再做依赖可解析性校验。
 /// 载荷外情形（建模期 fail-fast 之②／装载期单卡隔离之③）由既有链路承担；本预检只报事实、不改状态。
 /// </summary>
 public static class PackagePrecheck
@@ -44,34 +45,13 @@ public static class PackagePrecheck
         return new PackagePrecheckReport(Dedupe(errors), Dedupe(warnings));
     }
 
-    /// <summary>预检一个对局快照（建局装配前；校验资产全局唯一与包依赖在本局内可满足）。</summary>
+    /// <summary>预检一个对局快照（建局装配前；校验资产全局唯一）。</summary>
     /// <exception cref="ArgumentNullException">snapshot 为 null。</exception>
     public static PackagePrecheckReport Validate(AssetCatalogSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-
-        var errors = new List<string>(DuplicateAssetFullNames(snapshot.Packages.Select(p => p.Manifest)));
-
-        foreach (var package in snapshot.Packages)
-        {
-            foreach (var dependency in package.Manifest.Dependencies)
-            {
-                if (!AssetVersionConstraint.TryParse(dependency.Version, out var constraint))
-                {
-                    errors.Add(
-                        $"{package.Manifest.Id}@{package.Manifest.Version}：依赖 '{dependency.Id}' 的版本约束 '{dependency.Version}' 非法。");
-                    continue;
-                }
-
-                if (!snapshot.ById(dependency.Id).Any(p => constraint.IsSatisfiedBy(p.Manifest.Version)))
-                {
-                    errors.Add(
-                        $"{package.Manifest.Id}@{package.Manifest.Version}：依赖 '{dependency.Id}' 在本局快照中无满足约束 '{dependency.Version}' 的版本。");
-                }
-            }
-        }
-
-        return new PackagePrecheckReport(Dedupe(errors), Array.Empty<string>());
+        return new PackagePrecheckReport(
+            DuplicateAssetFullNames(snapshot.Packages.Select(p => p.Manifest)).ToArray(), Array.Empty<string>());
     }
 
     private static IEnumerable<string> DuplicateAssetFullNames(IEnumerable<PackageManifest> manifests)

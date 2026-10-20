@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "diy",
+  "source": "cards/diy.fire-support.card.json",
+  "assets": [
+    {
+      "guid": "b4647db5-e9ed-bab4-ea64-3a5283ed7cd4",
+      "kind": "card",
+      "id": "diy.fire-support",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

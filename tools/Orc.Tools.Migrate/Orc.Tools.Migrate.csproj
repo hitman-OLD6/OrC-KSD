@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Orc.Tools.Migrate</AssemblyName>
+    <RootNamespace>Orc.Tools.Migrate</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 迁移逻辑全在 Orc.Packages 的纯函数（AssetMigrationTool）；本工程只做参数解析与人读渲染。 -->
+    <ProjectReference Include="..\..\src\Orc.Packages\Orc.Packages.csproj" />
+  </ItemGroup>
+
+</Project>

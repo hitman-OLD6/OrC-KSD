@@ -18,6 +18,8 @@
 ```
 samples/card-pack-diy/
 ├── README.md
+├── manifest.json                      包清单 v2（id=diy / metadata[]；S10a 迁移补齐）
+├── lock.formal.json / lock.test.json  两 lock（S10a 迁移生成）
 ├── cards/
 │   ├── diy.fire-support.card.json     火力支援（指令，1 费）——示例 1
 │   ├── diy.volley.card.json           齐射（指令，2 费）——示例 2
@@ -29,6 +31,9 @@ samples/card-pack-diy/
     ├── diy.memorial.effect.prefab.json
     └── diy.field-rescue.effect.prefab.json
 ```
+
+> 每个资产源文件同目录另有 `<源文件名>.meta.json` 资产元数据 sidecar（S10a 迁移生成，初始版本 `1.0.0`）。
+> 本包 `manifest.json` 的 `id=diy` 由目录名去 `card-pack-` 前缀派生，`guid` 由 `id` 确定性派生。
 
 ## 2. 卡表
 

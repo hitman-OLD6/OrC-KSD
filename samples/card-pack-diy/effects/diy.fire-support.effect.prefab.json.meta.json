@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "diy",
+  "source": "effects/diy.fire-support.effect.prefab.json",
+  "assets": [
+    {
+      "guid": "18070ad9-9618-b42d-e132-9357f2a20e81",
+      "kind": "effect",
+      "id": "diy.fire-support.effect",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

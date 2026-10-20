@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "ai.sample",
+  "source": "cards/ai.sample.armor.card.json",
+  "assets": [
+    {
+      "guid": "ae4be6b1-bb19-5646-fa4e-dd2cc7d1d62b",
+      "kind": "card",
+      "id": "ai.sample.armor",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

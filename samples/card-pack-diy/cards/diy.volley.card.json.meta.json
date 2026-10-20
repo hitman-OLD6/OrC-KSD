@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "diy",
+  "source": "cards/diy.volley.card.json",
+  "assets": [
+    {
+      "guid": "c5c68add-ca48-02f8-c497-e59d380e626d",
+      "kind": "card",
+      "id": "diy.volley",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

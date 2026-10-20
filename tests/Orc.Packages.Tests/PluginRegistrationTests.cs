@@ -116,7 +116,7 @@ Action<IPluginRegistrationContext> Register = ctx => {
         }
 
         var manifest = new PackageManifest(
-            PackageKind.Plugin, id, Guid.NewGuid(), AssetVersion.Parse(version),
+            PackageKind.Plugin, id, Guid.NewGuid(), PackageVersion.Parse(version),
             Array.Empty<PackageDependency>(),
             assets.Select(a => new PackageAsset(a.Type, a.Name, a.Path)).ToArray());
         File.WriteAllText(Path.Combine(directory, PackageDiscovery.ManifestFileName), manifest.ToJson());

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "ai.sample",
+  "source": "cards/ai.sample.artillery.card.json",
+  "assets": [
+    {
+      "guid": "f319350c-55f4-eb22-2dc3-2205ceff9b6c",
+      "kind": "card",
+      "id": "ai.sample.artillery",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

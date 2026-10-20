@@ -124,4 +124,30 @@ public class CardLibraryTests
     {
         Assert.Null(Type.GetType("Orc.Game.Cards.CardStatsData, Orc.Game"));
     }
+
+    [Fact]
+    public void Replace_只替换已存在键_并记录域() // S3/R14：测试段遮蔽专供入口
+    {
+        var library = CreateLibrary(out _);
+        var replacement = new CardDefinition("替换卡", 9, 9, 9, 9, faction: Faction.Germany, rarity: Rarity.Standard);
+
+        library.Replace("c01", replacement, AssetDomain.Test);
+
+        Assert.Same(replacement, library.Get("c01"));
+        Assert.Equal(AssetDomain.Test, library.DomainOf("c01"));
+        Assert.True(library.IsTestAsset("c01"));
+        Assert.Equal(5, library.Definitions.Count); // 未新增条目
+        Assert.False(library.IsTestAsset("c02"));
+        Assert.Equal(AssetDomain.Formal, library.DomainOf("c02"));
+    }
+
+    [Fact]
+    public void Replace_缺失键_拒绝()
+    {
+        var library = CreateLibrary(out _);
+        var definition = new CardDefinition("新卡", 0, 0, 0, 0, faction: Faction.Germany, rarity: Rarity.Standard);
+
+        Assert.Throws<KeyNotFoundException>(() => library.Replace("no.such.card", definition, AssetDomain.Test));
+        Assert.False(library.Contains("no.such.card"));
+    }
 }

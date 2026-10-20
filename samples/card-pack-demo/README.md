@@ -13,6 +13,8 @@
 ```
 card-pack-demo/
 ├── README.md                            本文档
+├── manifest.json                        包清单 v2（id=demo / metadata[] 列各 sidecar；S10a 迁移补齐）
+├── lock.formal.json / lock.test.json    两 lock（正式／测试；本包资产 GUID，S10a 迁移生成）
 ├── cards/                               卡目录 A（主卡目录）
 │   ├── demo.rifleman.card.json              步枪兵——基础单位卡（无效果）
 │   ├── demo.grenadier.card.json             掷弹兵——内联 csx 效果（对象态）
@@ -23,6 +25,10 @@ card-pack-demo/
 └── effects/                             效果库目录（1 个）
     └── demo.rally.prefab.json               集结号——被 cards/ 与 cards-support/ 跨目录共享
 ```
+
+> 每个资产源文件同目录另有 `<源文件名>.meta.json` 资产元数据 sidecar（S10a 迁移生成，初始版本 `1.0.0`；
+> 一个源文件一份、文件名可由源文件名唯一推出）。本包 `manifest.json` 的 `id=demo` 由目录名去 `card-pack-`
+> 前缀派生，`guid` 由 `id` 确定性派生（重跑迁移不漂移）。
 
 | 文件 | 内容 | 演示点 |
 |------|------|--------|

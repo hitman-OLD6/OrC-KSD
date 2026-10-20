@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "sample.synthetic",
+  "source": "cards/sample.rifle.card.json",
+  "assets": [
+    {
+      "guid": "3c286472-6eb9-0bfd-5f41-d0c0002b7c33",
+      "kind": "card",
+      "id": "sample.rifle",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

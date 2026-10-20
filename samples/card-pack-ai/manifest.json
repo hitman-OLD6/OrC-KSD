@@ -1,8 +1,14 @@
 {
-  "kind": "cardpack",
+  "schemaVersion": 2,
   "id": "ai.sample",
   "guid": "b0070000-0000-4000-8000-0000000000a2",
-  "version": "1.0.0",
-  "dependsOn": [],
-  "assets": []
+  "kind": "cardpack",
+  "version": "2c957a899ba8e555080f4b659a75e7a6",
+  "metadata": [
+    "cards/ai.sample.armor.card.json.meta.json",
+    "cards/ai.sample.artillery.card.json.meta.json",
+    "cards/ai.sample.counter.card.json.meta.json",
+    "cards/ai.sample.infantry.card.json.meta.json",
+    "cards/ai.sample.order.card.json.meta.json"
+  ]
 }

@@ -1,6 +1,7 @@
 using Orc.Core;
 using Orc.Game.Board;
 using Orc.Game.Cards;
+using Orc.Game.Cards.Loading;
 using Orc.Game.Collections;
 using Orc.Game.Commanding;
 using Orc.Game.Effects;
@@ -28,12 +29,13 @@ namespace Orc.Game;
 /// </summary>
 public sealed class Match
 {
-    private readonly CardList _deckForPlayerA;
-    private readonly CardList _deckForPlayerB;
+    private CardList _deckForPlayerA;
+    private CardList _deckForPlayerB;
     private readonly IReadOnlyList<CardDefinitionEntry> _cardDefinitions;
     private readonly MatchRandomService _randomService;
     private readonly int _firstPlayerIndex;
     private readonly MatchOptions _options;
+    private readonly IMatchCardLoader? _cardLoader; // S7：对局卡牌加载器端口（null＝代码内定义集直注册——测试/独立装配路径）
 
     private TurnManager? _turnManager;
     private PlayerManager? _playerManager;
@@ -75,6 +77,12 @@ public sealed class Match
     /// <param name="deckConfigForPlayerA">可选玩家A 构筑配置（S10「G12补」加性装配输入——主国/盟国；提供即校验〔创建期 fail-fast：成对、值域〕、初始化期注入；缺省＝null＝未配置〔读面 null、不抛错〕）。</param>
     /// <param name="deckConfigForPlayerB">可选玩家B 构筑配置（同 deckConfigForPlayerA——按玩家分别提供）。</param>
     /// <param name="judicatorAssembly">可选判定器装配段（J1 加性装配输入；J2：外部段＝追加/定制通道——内置注册段〔默认验证判定器〕固定无条件执行）；对局装配期一次性调用〔注册表创建之后、卡加载之前〕——执行判定器注册、注册动作返回条目等价句柄供持用；缺省＝null＝无外部追加〔内置验证判定器恒在、可达面照常〕）。</param>
+    /// <param name="cardLoader">
+    /// 可选**卡牌加载器端口**（S7 接线输入；由宿主提供实现——`Orc.Packages` 的卡组装载：
+    /// 资产加载器产出分层列表 → 卡牌加载器整批装载 → 合法卡进卡库）。
+    /// 提供时：初始化期先整批装载双方牌堆（**不分配实例 ID**）、非法卡位留空，卡库由装载链写入（含资产域）；
+    /// 缺省＝null＝沿用代码内定义集直注册（测试/独立装配路径）。
+    /// </param>
     /// <exception cref="ArgumentNullException">deckForPlayerA / deckForPlayerB / cardDefinitions 为 null。</exception>
     /// <exception cref="ArgumentException">卡组名单为空或含 null/空白 id；定义集含 null 条目；构筑配置成对缺失（只提供其一）。</exception>
     /// <exception cref="ArgumentOutOfRangeException">先手指定越界；指挥点上限非正整数；起手张数为负；构筑配置值非法（未定义枚举值 / 主国非五主国 / 盟国==主国 / 盟国==Neutral）。</exception>
@@ -90,7 +98,8 @@ public sealed class Match
         PlayerDeckConfiguration? deckConfigForPlayerA = null,
         PlayerDeckConfiguration? deckConfigForPlayerB = null,
         Action<JudicatorRegistry>? judicatorAssembly = null,
-        Orc.Game.Plugins.IMatchPackageActivator? packageActivator = null)
+        Orc.Game.Plugins.IMatchPackageActivator? packageActivator = null,
+        IMatchCardLoader? cardLoader = null)
     {
         ArgumentNullException.ThrowIfNull(deckForPlayerA);
         ArgumentNullException.ThrowIfNull(deckForPlayerB);
@@ -157,6 +166,7 @@ public sealed class Match
         _deckConfigForPlayerB = deckConfigForPlayerB;
         _judicatorAssembly = judicatorAssembly;
         _packageActivator = packageActivator;
+        _cardLoader = cardLoader;
         Engine = new LogicEngine();
     }
 
@@ -397,6 +407,12 @@ public sealed class Match
         => _judicators
             ?? throw new InvalidOperationException("判定器注册表尚未创建（装配链内部访问时序错误）。");
 
+    /// <summary>
+    /// 玩家管理器（装配链内部面；准备态合法）：S7 时序断言的读取面——
+    /// 「ID 水位线快照仍在校牌加载之后原位执行」需要在对局仍处准备态时可读（对外 <see cref="PlayerManager"/> 受就绪门禁）。
+    /// </summary>
+    internal PlayerManager? AssemblyPlayerManager => _playerManager;
+
     // ---------- 便捷转发读面（只读、不复制状态；仅"进行"态可访问） ----------
 
     /// <summary>双玩家（→ 玩家管理器）。</summary>
@@ -425,7 +441,7 @@ public sealed class Match
     public GameEnvironment Environment => RequireReady(_environment);
 
     /// <summary>
-    /// 初始化（两步式第二步；完成后置"进行"态）：管理器群（卡牌库批量注册 → 资源 → 玩家 → 战场〔构造期 HQ 占位〕→ 判定器注册〔J1 加性：注册表创建＋装配期注册段——卡加载前就绪〕→ 指挥管理器〔2C 加性：流程触发器创建＋底层注册〕）→
+    /// 初始化（两步式第二步；完成后置"进行"态）：管理器群（卡牌库批量注册〔S7：有卡牌加载器时＝整批装载双方牌堆〕→ 资源 → 玩家 → 战场〔构造期 HQ 占位〕→ 判定器注册〔J1 加性：注册表创建＋装配期注册段——卡加载前就绪〕→ 指挥管理器〔2C 加性：流程触发器创建＋底层注册〕）→
     /// 双方卡组洗切（W4-1：经 <see cref="ShuffleDeckAsync"/> 各发一条 deck.shuffled 信号）→ 加载（逐张 card.load；含对局级 ID 分配与元数据装配〔W1-1〕、词条装载〔2C〕）→ ID 水位线快照〔W1-1：起手装载之前〕→
     /// 起手装载（静默）→〔2C 接线：回合恢复钩子〕→ 先手回合开始序列（3 条更新）→ 置"进行"。初始化中异常直接传播（对局保持"准备"态）。
     /// </summary>
@@ -460,9 +476,22 @@ public sealed class Match
             ResolveJudicatorBinding,
             // P4：反制卡一次性消耗的弃置委托——复用 PlayerManager.DiscardCardAsync（延迟读取：玩家管理器后置创建）。
             (cardPlayer, card, source, ct) => _playerManager!.DiscardCardAsync(cardPlayer, card, ct, source));
-        foreach (var entry in _cardDefinitions)
+
+        // S7 接线：卡从哪来、是否合法（两条链路，实例化时序两者一致）
+        // ① 卡牌加载器链路：资产加载器产出分层列表 → 卡牌加载器**整批**装载双方牌堆 → 合法卡进卡库（含资产域）。
+        //    **硬约束**：整批装载只做解析／校验／DTO 生成，**不分配任何实例 ID**——实例化仍在 LoadDecksAsync 内原位进行
+        //    （ID 水位线快照时机与顺序不变，见下方 SnapshotCardIdWatermark）。
+        // ② 无加载器的独立装配路径（既有测试/工具）：代码内定义集直注册——语义与接线前逐字一致。
+        if (_cardLoader is null)
         {
-            _cardLibrary.Register(entry.Id, entry.Definition);
+            foreach (var entry in _cardDefinitions)
+            {
+                _cardLibrary.Register(entry.Id, entry.Definition);
+            }
+        }
+        else
+        {
+            await LoadDecksFromCardLoaderAsync(_cardLoader, ct);
         }
 
         // E1-25：资源管理器注入引擎（发槽信号）＋判定器延迟读取面（判定器注册表在本行之后创建——延迟求值）。
@@ -521,7 +550,9 @@ public sealed class Match
             // 前端资产迁移 S4：运行期卡注册需登记效果声明（卡 → 预制体 id）。
             _effectRegistry,
             // S7：加入手牌动作面（对局装配＝指挥管理器持有的同一动作实例）。
-            () => _commandManager?.AddToHandAction);
+            () => _commandManager?.AddToHandAction,
+            // S7：局内新增卡的单卡装载面（对局装配＝同一卡牌加载器实例；null＝独立装配路径不设装载）。
+            _cardLoader);
         foreach (var player in _playerManager.Players)
         {
             player.ConfigureCardService(_cardService);
@@ -790,6 +821,69 @@ public sealed class Match
             // A1 受控变更（缺省）：置"换牌"相位——先手回合延后至双方确认（见 MulliganManager）
             _lifecycle.MarkMulligan();
         }
+    }
+
+    // ---------- S7：卡牌加载器接线（整批装载双方牌堆） ----------
+
+    /// <summary>
+    /// 接入卡牌加载器并把**双方牌堆合并为一次整批装载**（S7）：
+    /// 卡库由装载链写入（合法／警报卡＝套件补全后的定义，含资产域）→ 按卡位结局**原位剪除留空卡位**
+    /// 并把条目规范为解析后的应用层 ID（卡库键形态）。
+    /// <para>
+    /// **不做实例化、不分配实例 ID**：实例仍在 <see cref="PlayerManager.LoadDecksAsync"/> 内逐张创建
+    /// （ID 水位线快照仍在其后原位执行——时序不因链路替换而前移）。
+    /// </para>
+    /// </summary>
+    /// <exception cref="InvalidOperationException">装载链结构性失败；或卡位结局与输入不同长（装配契约不符）。</exception>
+    private async Task LoadDecksFromCardLoaderAsync(IMatchCardLoader loader, CancellationToken ct)
+    {
+        loader.Attach(_cardLibrary!, TriggerRegistry);
+
+        var slots = new List<MatchCardSlot>(_deckForPlayerA.Count + _deckForPlayerB.Count);
+        for (var i = 0; i < _deckForPlayerA.Count; i++)
+        {
+            slots.Add(MatchCardSlot.ForPlayer(0, i, _deckForPlayerA[i]));
+        }
+
+        for (var i = 0; i < _deckForPlayerB.Count; i++)
+        {
+            slots.Add(MatchCardSlot.ForPlayer(1, i, _deckForPlayerB[i]));
+        }
+
+        var outcome = await loader.LoadBatchAsync(slots, ct).ConfigureAwait(false);
+        if (outcome.Slots.Count != slots.Count)
+        {
+            throw new InvalidOperationException(
+                $"卡牌加载批次结局与卡位清单不同长（输入 {slots.Count}、结局 {outcome.Slots.Count}）——装配契约不符。");
+        }
+
+        var playerACount = _deckForPlayerA.Count;
+        _deckForPlayerA = PruneDeck(_deckForPlayerA, outcome.Slots, offset: 0);
+        _deckForPlayerB = PruneDeck(_deckForPlayerB, outcome.Slots, offset: playerACount);
+
+        // 牌堆全量留空＝开局无从继续（非「个别卡位非法」场景）：明确失败而不是让抽取阶段报空集合。
+        if (_deckForPlayerA.Count == 0 || _deckForPlayerB.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"整批装载后牌堆为空（玩家A {_deckForPlayerA.Count} 张／玩家B {_deckForPlayerB.Count} 张，批次 {outcome.BatchId}）"
+                + "——所有卡位均未产出可玩定义，对局无法开局。");
+        }
+    }
+
+    /// <summary>按卡位结局重建牌堆：只保留装载成功的卡位，条目写入解析后的应用层 ID（牌堆＝该序）。</summary>
+    private static CardList PruneDeck(CardList deck, IReadOnlyList<CardSlotOutcome> slots, int offset)
+    {
+        var pruned = new CardList();
+        for (var i = 0; i < deck.Count; i++)
+        {
+            var slot = slots[offset + i];
+            if (slot.IsLoaded && slot.AppId is { Length: > 0 } appId)
+            {
+                pruned.Add(appId);
+            }
+        }
+
+        return pruned;
     }
 
     // ---------- 对局全流程动作面（A1：开局换牌／认输） ----------

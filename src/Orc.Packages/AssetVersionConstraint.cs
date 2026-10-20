@@ -12,15 +12,18 @@ public enum VersionSegmentKind
     /// <summary>任意（<c>*</c>）。</summary>
     Any = 1,
 
-    /// <summary>下界向上取新（<c>^</c>／<c>^N</c>）：该段 ≥ 下界（<c>^</c> 省略数字＝下界 0，即任意）；不设上限，择版取满足约束的最高版。</summary>
+    /// <summary>下界向上取新（<c>^</c>／<c>^N</c>）：该段 ≥ 下界（<c>^</c> 省略数字＝下界 0，即任意）；不设上限。</summary>
     AtLeast = 2,
 }
 
 /// <summary>
 /// 版本约束（依赖引用用；S6）：形如 <c>1.2.3</c> / <c>1.*.*</c> / <c>1.^.*</c>。
 /// 语义：**第一段（主版）恒精确锁定**；第二、三段可为精确值／<c>*</c>（任意）／<c>^</c>（下界向上取新）。
-/// 匹配：<c>Exact</c> 须相等；<c>Any</c> 与 <c>AtLeast</c> 均不设上限（差异体现在择版偏好——统一取满足约束的最高版）。
-/// 选择策略由包管理器统一承担（<see cref="PackageResolver"/>：取满足约束的最高版）。
+/// 匹配：<c>Exact</c> 须相等；<c>Any</c> 与 <c>AtLeast</c> 均不设上限。
+/// <para>
+/// S4 起**只服务资产级依赖**（<c>sidecar</c> 的 <c>dependsOn</c>）：包级 <c>dependsOn</c> 已退役，
+/// 包版本不再参与任何择版（<c>SelectHighest</c> 已退役）。
+/// </para>
 /// </summary>
 public readonly struct AssetVersionConstraint : IEquatable<AssetVersionConstraint>
 {

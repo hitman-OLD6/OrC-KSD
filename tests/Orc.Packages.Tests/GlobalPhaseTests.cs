@@ -63,7 +63,7 @@ Action<IPluginRegistrationContext> Register = ctx =>
     {
         var package = new LoadedPackage(
             new PackageManifest(
-                PackageKind.Plugin, "p1", Guid.NewGuid(), new AssetVersion(1, 0, 0),
+                PackageKind.Plugin, "p1", Guid.NewGuid(), PackageVersion.Parse("1.0.0"),
                 Array.Empty<PackageDependency>(), Array.Empty<PackageAsset>()),
             "root", Array.Empty<LoadedAsset>(), Array.Empty<LoadedPluginScript>());
 
@@ -84,7 +84,7 @@ Action<IPluginRegistrationContext> Register = ctx =>
         File.WriteAllText(Path.Combine(directory, "csx", "register.csx"), script);
 
         var manifest = new PackageManifest(
-            PackageKind.Plugin, id, Guid.NewGuid(), new AssetVersion(1, 0, 0),
+            PackageKind.Plugin, id, Guid.NewGuid(), PackageVersion.Parse("1.0.0"),
             Array.Empty<PackageDependency>(),
             new[]
             {

@@ -53,7 +53,7 @@ public static class UiPluginPackage
             AssetScope.Process, AssetActivationPhase.PreCommand);
         var processAsset = new LoadedAsset(
             processDescriptor,
-            new AssetName(AssetLoadKind.Asm, "register.process", manifest.Guid8, manifest.Version),
+            new AssetName(AssetLoadKind.Asm, "register.process", manifest.Guid8, new AssetVersion(1, 0, 0)),
             manifestPath);
 
         var matchDescriptor = new PackageAsset(
@@ -61,7 +61,7 @@ public static class UiPluginPackage
             AssetScope.Match, AssetActivationPhase.PreCommand);
         var matchAsset = new LoadedAsset(
             matchDescriptor,
-            new AssetName(AssetLoadKind.Asm, "register.match", manifest.Guid8, manifest.Version),
+            new AssetName(AssetLoadKind.Asm, "register.match", manifest.Guid8, new AssetVersion(1, 0, 0)),
             manifestPath);
 
         return new LoadedPackage(

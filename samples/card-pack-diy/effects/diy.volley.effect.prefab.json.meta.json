@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "diy",
+  "source": "effects/diy.volley.effect.prefab.json",
+  "assets": [
+    {
+      "guid": "9e449c34-54ce-dcc1-ff97-eed69d8ff302",
+      "kind": "effect",
+      "id": "diy.volley.effect",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

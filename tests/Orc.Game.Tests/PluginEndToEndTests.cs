@@ -116,7 +116,7 @@ Action<IPluginRegistrationContext> Register = ctx =>
         File.WriteAllText(Path.Combine(directory, "csx", "register.csx"), script);
 
         var manifest = new PackageManifest(
-            PackageKind.Plugin, id, Guid.NewGuid(), new AssetVersion(1, 0, 0),
+            PackageKind.Plugin, id, Guid.NewGuid(), PackageVersion.Parse("1.0.0"),
             Array.Empty<PackageDependency>(),
             new[] { new PackageAsset("csx", "register", "csx/register.csx") });
         File.WriteAllText(Path.Combine(directory, PackageDiscovery.ManifestFileName), manifest.ToJson());
@@ -127,7 +127,7 @@ Action<IPluginRegistrationContext> Register = ctx =>
         var directory = Path.Combine(_root, "packs", id);
         Directory.CreateDirectory(directory);
         var manifest = new PackageManifest(
-            PackageKind.CardPack, id, Guid.NewGuid(), new AssetVersion(1, 0, 0),
+            PackageKind.CardPack, id, Guid.NewGuid(), PackageVersion.Parse("1.0.0"),
             Array.Empty<PackageDependency>(),
             new[] { new PackageAsset("json", "cards", "cards.json") });
         File.WriteAllText(Path.Combine(directory, PackageDiscovery.ManifestFileName), manifest.ToJson());
