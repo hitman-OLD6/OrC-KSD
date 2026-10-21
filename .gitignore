@@ -27,13 +27,14 @@ TestResults/
 
 # 纵深防御：以下目录名在任何位置都不入库（即使不在 .ams-docs 下）
 **/_tools/
-**/tools/
 **/_work/
 **/isolate/
 **/verify-worktree/
 **/tmp-probe/
 **/_tmp/
 **/_probe/
+# ⚠ 不要加 **/tools/ —— Windows 下 .gitignore 大小写不敏感，会连 src/Orc.Mcp/Tools/ 一起吞掉
+#   （2026-10-21 实测：17 个 MCP 工具源码被静默忽略、从未入库；.ams-docs 下的 tools/ 已由 /.ams-docs/** 覆盖）
 
 # 例外：仓库自带的迁移工具（S10a 制品，tools/Orc.Tools.Migrate）必须入库
 !/tools/
