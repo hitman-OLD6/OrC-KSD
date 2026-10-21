@@ -13,6 +13,7 @@
     <Project Path="src/Orc.Ai/Orc.Ai.csproj" />
     <Project Path="src/Orc.Client/Orc.Client.csproj" />
     <Project Path="src/Orc.Server/Orc.Server.csproj" />
+    <Project Path="src/Orc.Mcp.Bridge/Orc.Mcp.Bridge.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Orc.Tests/Orc.Tests.csproj" />
