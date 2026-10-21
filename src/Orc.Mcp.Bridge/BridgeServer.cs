@@ -341,7 +341,18 @@ public sealed class BridgeServer
     /// </summary>
     private async Task<JsonNode> BuildBoardAsync(CancellationToken ct)
     {
-        var payload = await _transport.CallAsync("observe.view", new JsonObject(), ct).ConfigureAwait(false);
+        // panel=true：沙盒（Authoring）模式下 observe.view 默认只回摘要（players[]），
+        // 没有 view/actions，本方法会拿到空面板。显式索取投影面板才能拿到战线/槽位/攻击预览。
+        var payload = await _transport
+            .CallAsync("observe.view", new JsonObject { ["panel"] = true }, ct)
+            .ConfigureAwait(false);
+
+        if (!payload.Ok)
+        {
+            // 服务端未支持 panel 参数时退回摘要形态：此时面板字段为空但不硬失败。
+            payload = await _transport.CallAsync("observe.view", new JsonObject(), ct).ConfigureAwait(false);
+        }
+
         if (!payload.Ok || payload.Details is not JsonObject details)
         {
             throw new InvalidOperationException(payload.Message ?? "视图不可用。");

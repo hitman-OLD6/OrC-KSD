@@ -42,12 +42,14 @@ internal static class ObserveTools
         service.AddTool(
             "observe.view",
             "observe",
-            "对局摘要视图：沙盒模式＝全知摘要（含双方手牌明细）；player 模式＝按座位过滤的投影视图（不含对手手牌明细）。",
+            "对局摘要视图：沙盒模式＝全知摘要（含双方手牌明细）；player 模式＝按座位过滤的投影视图（不含对手手牌明细）。"
+            + "panel=true 时无视模式强制返回投影面板（整枚 view ＋ actions），供 MCP 桥构造 seat.board。",
             """
             {
               "type": "object",
               "properties": {
-                "seat": { "type": "integer", "minimum": 0, "maximum": 1, "description": "视角座位（缺省＝进程级 AgentSeat）" }
+                "seat": { "type": "integer", "minimum": 0, "maximum": 1, "description": "视角座位（缺省＝进程级 AgentSeat）" },
+                "panel": { "type": "boolean", "description": "true＝返回投影面板（view+actions）；沙盒摘要不含战线/槽位/攻击预览，桥需要面板形态" }
               },
               "additionalProperties": false
             }
@@ -145,9 +147,20 @@ internal static class ObserveTools
         }
 
         // R9d：player 模式＝按座位过滤的投影视图（不含对手手牌明细）；沙盒模式＝全知摘要。
-        if (service.Options.Mode != McpServiceMode.Authoring)
+        // panel=true：沙盒模式下也可显式索取投影面板——seat.board 需要 view/actions，
+        // 而沙盒摘要只有 players[]（无战线、槽位、攻击预览），桥侧无法自行还原。
+        if (ToolArgs.OptionalBool(args, "panel") || service.Options.Mode != McpServiceMode.Authoring)
         {
             return Task.FromResult(ProjectedView(service, match, args));
+        }
+
+        // 摘要面读 CurrentPlayer（换牌期尚为 null，引擎抛"回合尚未开始（当前行动方未定）"）。
+        // 这是阶段未就绪而非故障：按 not-ready 报告，别让桥的每次刷新把它记成 internal。
+        if (string.Equals(match.Phase.ToString(), "Mulligan", StringComparison.Ordinal))
+        {
+            return Task.FromResult(McpToolResult.Failure(
+                McpCodes.NotReady,
+                "对局尚未进入进行态（换牌阶段）——摘要视图暂不可用；需要面板请用 panel=true。"));
         }
 
         var players = new JsonArray();

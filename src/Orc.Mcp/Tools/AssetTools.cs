@@ -1,7 +1,9 @@
 using System.Text.Json.Nodes;
 using Orc.Cards;
 using Orc.Game.Cards.Data;
+using Orc.Game.Cards.Data.Components;
 using Orc.Mcp.Contracts;
+using Orc.Plugins.BuiltIn;
 
 namespace Orc.Mcp.Tools;
 
@@ -121,12 +123,26 @@ internal static class AssetTools
         var json = ToolArgs.RequireString(call.Arguments, "json");
         var overwrite = ToolArgs.OptionalBool(call.Arguments, "overwrite");
 
+        // 组件注册表是进程级、幂等的，但对局外（headless 等 agent 入座）尚未注册过。
+        // 不补齐就会把所有组件判成"未知"并隔离，随后规范化写出把整张卡写成只剩 id/name（静默丢组件）。
+        BuiltInPlugin.RegisterProcessDefaults();
+
         var read = CardDataJson.Read(json);
         if (read.Body is null)
         {
             return McpToolResult.Failure(
                 McpCodes.ValidationFailed,
                 $"卡数据体校验失败（未落盘）：{read.Error}",
+                new JsonObject { ["warnings"] = SandboxTools.ToJsonArray(read.Warnings) });
+        }
+
+        // 结构完整性（分发级，比"能反序列化"更严）：解析器允许 components 缺省（＝空），
+        // 但空组件卡没有任何可进入对局的面——写盘即放行会让坏卡在下游静默失效。
+        if (ValidateStructure(read.Body) is { } structureError)
+        {
+            return McpToolResult.Failure(
+                McpCodes.ValidationFailed,
+                $"卡数据体校验失败（未落盘）：{structureError}",
                 new JsonObject { ["warnings"] = SandboxTools.ToJsonArray(read.Warnings) });
         }
 
@@ -162,6 +178,29 @@ internal static class AssetTools
             ["schemaVersion"] = CardDataJson.SchemaVersion,
             ["warnings"] = warnings,
         });
+    }
+
+    /// <summary>
+    /// 卡数据体结构完整性（写盘前，分发级校验）。
+    /// <para>
+    /// 与 <see cref="CardDataJson.Read"/> 的分工：读面"能解析即收"（未知组件隔离、components 可缺省），
+    /// 写面要求"能进对局"——没有 <c>typeCategory</c> 的卡连单位/指令/反制都判不出来。
+    /// </para>
+    /// </summary>
+    /// <returns>不合规返回原因；合规返回 <c>null</c>。</returns>
+    private static string? ValidateStructure(CardDataBody body)
+    {
+        if (body.Components.Count == 0)
+        {
+            return "components 为空（至少需要 typeCategory；空组件卡无法判定类别、无法进入对局）。";
+        }
+
+        if (!body.Components.Any(component => component is TypeCategoryDefinition))
+        {
+            return "components 缺少 typeCategory（单位/指令/反制类别声明，必填）。";
+        }
+
+        return null;
     }
 
     private static McpToolResult WritePrefab(McpService service, McpToolCall call)

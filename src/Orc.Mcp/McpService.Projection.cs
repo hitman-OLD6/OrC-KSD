@@ -78,13 +78,23 @@ public sealed partial class McpService
                 return ActionOutcome.Completed(payload);
             });
         }
-        catch (InvalidOperationException ex)
-        {
-            return ActionOutcome.Failed(McpCodes.EngineRejected, ex.Message);
-        }
         catch (Exception ex)
         {
-            return ActionOutcome.Failed(McpCodes.Internal, $"投影失败：{ex.GetType().Name}: {ex.Message}");
+            // Mulligan / Preparing 期投影面还没有"当前玩家"（ComputeActions 依赖 CurrentPlayer）：
+            // 这不是故障而是阶段未就绪——按 not-ready 报告，别记 internal 污染 summary.errorCount。
+            // 注：`Orc.Game.Match` 命名空间与 `Match` 类型同名，此处无法书写枚举全名，故按相位名比较。
+            var notStarted = string.Equals(match.Phase.ToString(), "Mulligan", StringComparison.Ordinal)
+                || string.Equals(match.State.ToString(), "Preparing", StringComparison.Ordinal);
+            if (notStarted)
+            {
+                return ActionOutcome.Failed(
+                    McpCodes.NotReady,
+                    $"对局尚未进入进行态（相位 {match.Phase} / 状态 {match.State}）——按座位投影暂不可用。");
+            }
+
+            return ex is InvalidOperationException
+                ? ActionOutcome.Failed(McpCodes.EngineRejected, ex.Message)
+                : ActionOutcome.Failed(McpCodes.Internal, $"投影失败：{ex.GetType().Name}: {ex.Message}");
         }
     }
 

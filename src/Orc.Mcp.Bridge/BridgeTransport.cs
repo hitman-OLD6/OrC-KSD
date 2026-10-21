@@ -90,7 +90,16 @@ public sealed class OrcClientTransport : IBridgeTransport
             await client.InitializeAsync(new InitializeParams { ClientName = "orc-mcp-bridge" }, ct)
                 .ConfigureAwait(false);
 
-            var token = (await File.ReadAllTextAsync(_options.TokenFile, ct).ConfigureAwait(false)).Trim();
+            if (_options.NoResume)
+            {
+                // 编排连接：只连不绑座。服务端据「回环 + 未绑定座位」放行调试写类工具
+                // （card.write / card.load / effect.write / sandbox.* 等）。
+                client.NotificationReceived += notification => NotificationReceived?.Invoke(notification);
+                _client = client;
+                return BridgeConnectionState.Ready;
+            }
+
+            var token = (await File.ReadAllTextAsync(_options.TokenFile!, ct).ConfigureAwait(false)).Trim();
             if (token.Length == 0)
             {
                 await client.DisposeAsync().ConfigureAwait(false);

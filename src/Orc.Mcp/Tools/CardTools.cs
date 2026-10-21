@@ -86,6 +86,15 @@ internal static class CardTools
         }
 
         var paths = ResolveFiles(service, call);
+
+        // 效果库（pack/effects/*.prefab.json）不随卡文件装载：card.load 必须一并注册，
+        // 否则引用型效果（components.effects.prefabs）在运行期挂空——静默不触发、无任何告警。
+        // 内联效果（components.effects.inline）随卡文件自带，不走这一步。
+        var library = match.Engine.Prefabs.LoadDirectory(service.Sandbox.EffectsDirectory);
+        var libraryFailures = library.Failures
+            .Where(failure => !failure.Contains("已注册", StringComparison.Ordinal))
+            .ToArray();
+
         if (paths.Count == 0)
         {
             return McpToolResult.Success("沙盒卡包内没有卡文件可加载。");
@@ -146,6 +155,8 @@ internal static class CardTools
                         ["alreadyRegistered"] = alreadyRegistered,
                         ["failures"] = SandboxTools.ToJsonArray(load.Failures.Select(f => $"{f.File}: {f.Error}")),
                         ["warnings"] = SandboxTools.ToJsonArray(load.Warnings),
+                        ["effectsLoaded"] = library.Loaded,
+                        ["effectsFailures"] = SandboxTools.ToJsonArray(libraryFailures),
                         ["files"] = SandboxTools.ToJsonArray(paths),
                     };
 
