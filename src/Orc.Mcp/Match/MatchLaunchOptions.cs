@@ -53,4 +53,10 @@ public sealed class MatchLaunchOptions
     /// **协议面（房间开局）必须为 true**；仅诊断/测试场景可关闭（示例卡包卡种不足时无法组成 39 张合法卡组）。
     /// </summary>
     public bool EnforceDeckRules { get; init; } = true;
+
+    /// <summary>
+    /// 卡组规则档位（无头沙盒 S2b）：与房间态校验**共用同一档位**，避免"声明通过、开局失败"。
+    /// 缺省 <see cref="Orc.Game.Decks.DeckRuleTier.Strict"/>＝既有行为。
+    /// </summary>
+    public Orc.Game.Decks.DeckRuleTier DeckRuleTier { get; init; } = Orc.Game.Decks.DeckRuleTier.Strict;
 }

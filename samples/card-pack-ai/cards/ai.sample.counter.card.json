@@ -3,10 +3,27 @@
   "id": "ai.sample.counter",
   "name": "AI 样例反制",
   "components": [
-    { "component": "typeCategory", "type": ["countermeasure"] },
-    { "component": "factionCost", "faction": "Germany", "kredits": 1 },
-    { "component": "battleStats", "operationCost": 0, "attack": 0, "defense": 0 },
-    { "component": "tagData", "rarity": "Standard" },
+    {
+      "component": "typeCategory",
+      "type": [
+        "countermeasure"
+      ]
+    },
+    {
+      "component": "factionCost",
+      "faction": "Germany",
+      "kredits": 1
+    },
+    {
+      "component": "battleStats",
+      "operationCost": 0,
+      "attack": 0,
+      "defense": 0
+    },
+    {
+      "component": "tagData",
+      "rarity": "Standard"
+    },
     {
       "component": "effects",
       "inline": [
@@ -17,15 +34,17 @@
             "version": 1,
             "mainTrigger": {
               "id": "t.main",
-              "stableKey": "AI 样例·反制（空效果）",
+              "stableKey": "AI 样例·反制（ctx.Stop 硬拦截）",
               "kind": "passive",
-              "viewType": "Orc.Cards.CardEventView",
-              "hooks": ["card.played"],
+              "viewType": "Orc.Game.Triggers.CardTriggerView",
+              "hooks": [
+                "card.played"
+              ],
               "events": [
                 {
                   "id": "onPlayed",
                   "entry": "HandleAsync",
-                  "csx": "// AI 样例·反制：空效果（保持「打出无额外行为」的样例语义；D40 要求反制卡必须带 effects）。\nFunc<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleAsync = (view, ctx, ct) => Task.CompletedTask;\n",
+                  "csx": "// AI 样例·反制：命中即 ctx.Stop()——本次指令的结算段不执行（不发 card.played），照常扣费离手。\nFunc<Orc.Game.Triggers.CardTriggerView, Context, CancellationToken, Task> HandleAsync = (view, ctx, ct) =>\n{\n    ctx.Stop();\n    return Task.CompletedTask;\n};\n",
                   "version": 1
                 }
               ],

@@ -9,6 +9,25 @@ namespace Orc.Game.Decks;
 public sealed record DeckViolation(string Kind, string? CardId, string Message);
 
 /// <summary>
+/// 卡组规则档位（无头沙盒 S2b）：**分项放宽**，绝不"整体关闭"。
+/// <para>
+/// <c>Strict</c>＝与生产校验逐项等同；<c>Lenient</c>＝放宽张数/同名上限/配国，**保留** blank-id 与
+/// unknown-card（卡池权威是硬边界）；<c>None</c>＝跳过全部校验（仅既有测试夹具）。
+/// </para>
+/// </summary>
+public enum DeckRuleTier
+{
+    /// <summary>生产口径。</summary>
+    Strict,
+
+    /// <summary>放宽张数、同名上限、主国/盟国配对；保留空白 id 与卡池存在性。</summary>
+    Lenient,
+
+    /// <summary>全部跳过。</summary>
+    None,
+}
+
+/// <summary>
 /// 卡组合法性规则（多人支持 S7）：尺寸、卡池存在性、同名上限（按稀有度分档）、主国/盟国配对。
 /// <para>
 /// **唯一实现**：MCP 建局（开局复检）与房间填充（即时校验）共用，不允许各写一套。
@@ -35,17 +54,26 @@ public static class DeckRules
     /// <param name="deck">卡组名单（应用层 id；调用方应已解析为卡池键）。</param>
     /// <param name="pool">卡池（id → 定义）。</param>
     /// <param name="requiredSize">要求张数（&lt;=0＝不校验张数）。</param>
+    /// <param name="tier">规则档位（默认 strict＝既有行为逐项不变）。</param>
     public static IReadOnlyList<DeckViolation> Validate(
         IReadOnlyList<string> deck,
         IReadOnlyDictionary<string, CardDefinition> pool,
-        int requiredSize = DefaultRequiredSize)
+        int requiredSize = DefaultRequiredSize,
+        DeckRuleTier tier = DeckRuleTier.Strict)
     {
         ArgumentNullException.ThrowIfNull(deck);
         ArgumentNullException.ThrowIfNull(pool);
 
         var violations = new List<DeckViolation>();
 
-        if (requiredSize > 0 && deck.Count != requiredSize)
+        if (tier == DeckRuleTier.None)
+        {
+            return violations;
+        }
+
+        var lenient = tier == DeckRuleTier.Lenient;
+
+        if (!lenient && requiredSize > 0 && deck.Count != requiredSize)
         {
             violations.Add(new DeckViolation("size", null, $"卡组为 {deck.Count} 张，要求 {requiredSize} 张。"));
         }
@@ -68,6 +96,11 @@ public static class DeckRules
             var count = counts.GetValueOrDefault(id) + 1;
             counts[id] = count;
 
+            if (lenient)
+            {
+                continue;
+            }
+
             var limit = CopyLimit(definition.Rarity);
             if (count == limit + 1)
             {
@@ -83,9 +116,11 @@ public static class DeckRules
     }
 
     /// <summary>校验主国/盟国配对（未提供配置＝通过；配置成对由 <see cref="Match"/> 创建期另行校验）。</summary>
-    public static DeckViolation? ValidateFaction(PlayerDeckConfiguration? configuration)
+    public static DeckViolation? ValidateFaction(
+        PlayerDeckConfiguration? configuration,
+        DeckRuleTier tier = DeckRuleTier.Strict)
     {
-        if (configuration is null)
+        if (configuration is null || tier != DeckRuleTier.Strict)
         {
             return null;
         }

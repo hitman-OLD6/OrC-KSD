@@ -104,6 +104,12 @@ public sealed class CommandManager
     private readonly MatchActionServices _actionServices; // S4：动作服务面（对局级单实例——五个动作共用）
 
     /// <summary>
+    /// 动作服务面（**内部只读面**；沙盒原语复用效果侧唯一写点：<c>LandMoveAsync</c> / <c>ApplyDeathAsync</c>）。
+    /// 不新增写路径——原语经同一对局级实例、同一原子落地。
+    /// </summary>
+    internal MatchActionServices ActionServices => _actionServices;
+
+    /// <summary>
     /// 创建指挥管理器（创建四个内置流程触发器并装配默认链；订阅位置/入场/死亡更新以维护被守护状态）。
     /// </summary>
     /// <param name="engine">对局引擎（发射更新 / 触发子触发器）。</param>
@@ -570,7 +576,8 @@ public sealed class CommandManager
 
         await using var _actionScope = _engine.BeginAction();
 
-        var (kind, selected, targeting) = await RunSelectorAsync(unit, availability.Move.Candidates, ct);
+        var (kind, selected, targeting) = await RunSelectorAsync(
+            unit, availability.Move.Candidates, SelectorActions.Move, ct);
         if (kind == SelectorOutcomeKind.Cancelled)
         {
             return CommandResult.Cancelled(targeting); // 取消＝零副作用
@@ -625,7 +632,8 @@ public sealed class CommandManager
 
         await using var _actionScope = _engine.BeginAction();
 
-        var (kind, selected, targeting) = await RunSelectorAsync(unit, availability.Attack.Candidates, ct);
+        var (kind, selected, targeting) = await RunSelectorAsync(
+            unit, availability.Attack.Candidates, SelectorActions.Attack, ct);
         if (kind == SelectorOutcomeKind.Cancelled)
         {
             return CommandResult.Cancelled(targeting); // 取消＝零副作用
@@ -644,16 +652,21 @@ public sealed class CommandManager
     /// <summary>
     /// 限定候选交互（独立入口共用；场景＝场上单位指向）：单选槽（槽位参数＝被拖动单位）＋候选集合粗筛；
     /// 一次 Begin 一次 Complete 按槽位名回填（沿用既有桥接契约）。取消/失败经三态类别表达。
+    /// <para>
+    /// <paramref name="action"/>＝动作类别（R8 的 <c>pending.action</c>）——由调用方声明（移动/攻击），
+    /// 助手内**不**按候选 kind 推断：候选可能是并集或异常项，推断会失真并引入第二套规则。
+    /// </para>
     /// </summary>
     private async Task<(SelectorOutcomeKind Kind, Ref<Entity>? Selected, TargeterResult? Result)> RunSelectorAsync(
-        UnitCard unit, IReadOnlyList<Ref<Entity>> candidates, CancellationToken ct)
+        UnitCard unit, IReadOnlyList<Ref<Entity>> candidates, string action, CancellationToken ct)
     {
         Ref<Entity>? selected = null;
         var result = await _targeterManager.RunAsync(async flow =>
         {
             var step = await flow.Step(
                 SelectorTemplates.FieldUnit,
-                new ReferenceSetParameter(candidates, 1, 1, tag: unit));
+                // R2 加性：归属座位＝发起选靶的单位归属（此前未填 → 待决请求 Seat 恒 null → 广播给所有会话）。
+                new ReferenceSetParameter(candidates, 1, 1, tag: unit) { Owner = unit.Owner, Action = action });
 
             // 非法选择＝同一选择器重入（Q8a：内部处理、支持重试）。
             while (step.IsFailed && step.Failure == SelectorFailureReason.InvalidSelection)
@@ -1041,7 +1054,12 @@ public sealed class CommandManager
         {
             var step = await flow.Step(
                 SelectorTemplates.FieldUnit,
-                new ReferenceSetParameter(candidates, 1, 1, tag: unit));
+                // R2/R8：归属座位＋合并类别（移动 ∪ 攻击并集——发布时无法确定单一类别，故标 command）。
+                new ReferenceSetParameter(candidates, 1, 1, tag: unit)
+                {
+                    Owner = unit.Owner,
+                    Action = SelectorActions.Command,
+                });
 
             // 非法选择＝同一选择器重入（Q8a：内部处理、支持重试）。
             while (step.IsFailed && step.Failure == SelectorFailureReason.InvalidSelection)

@@ -106,7 +106,11 @@ public class Card : Entity
     /// </summary>
     /// <exception cref="ArgumentNullException">effect 为 null。</exception>
     /// <exception cref="InvalidOperationException">该实例已在列表（重复添加被拒绝）；或该效果实例已属于另一张卡牌。</exception>
-    public void AddEffect(Effect effect)
+    /// <param name="mountMainTriggers">
+    /// false＝即时装载时只挂 disposing、跳过主触发器（宿主自持调用面——反制卡效果装配经装载链传入）；
+    /// 默认 true＝既有行为。非反制卡装载路径一律不传本参数。
+    /// </param>
+    public void AddEffect(Effect effect, bool mountMainTriggers = true)
     {
         ArgumentNullException.ThrowIfNull(effect);
 
@@ -129,7 +133,7 @@ public class Card : Entity
 
         if (effect.Kind == TriggerKind.Passive)
         {
-            CardLoadout.MountEffect(this, effect); // 即时装载（幂等：未装载才执行；失败＝记录＋回滚为未生效、不阻断容器添加）
+            CardLoadout.MountEffect(this, effect, mountMainTriggers); // 即时装载（幂等：未装载才执行；失败＝记录＋回滚为未生效、不阻断容器添加）
         }
         else
         {
@@ -185,13 +189,17 @@ public class Card : Entity
     /// 与放置驱动装载（card.placed 处理器）/ Add 即时装载共用同一装载链与幂等语义：
     /// Add 即装载（W3-A3）后本面多为幂等跳过；对仍未装载者（如装载失败回滚后）＝兜底重试装载；主动效果不装载（仅列表进出）。
     /// </summary>
-    public void MountPassiveEffects()
+    /// <param name="mountMainTriggers">
+    /// false＝只挂 disposing、跳过主触发器（宿主自己承载调用面的装载方使用——反制卡效果装配）；
+    /// 默认 true＝既有行为（挂主触发器）。
+    /// </param>
+    public void MountPassiveEffects(bool mountMainTriggers = true)
     {
         foreach (var effect in EffectsSnapshot())
         {
             if (effect.Kind == TriggerKind.Passive)
             {
-                CardLoadout.MountEffect(this, effect);
+                CardLoadout.MountEffect(this, effect, mountMainTriggers);
             }
             else
             {

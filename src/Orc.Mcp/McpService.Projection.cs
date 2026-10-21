@@ -92,8 +92,14 @@ public sealed partial class McpService
     /// 动作可用性（S4b 候选集版本）：
     /// 可打出集合、部署空隙、可移动目标槽、可攻击目标、能否结束回合、换牌开关。
     /// <para>
-    /// 不预测伤害与死亡（`attackPreviews` 只给攻击者/目标，伤害字段为 null，死亡标记恒 false）——
-    /// 伤害预演需要独立模拟，与真实结算存在漂移风险。
+    /// <b>候选来源＝引擎</b>（R3）：<c>attackPreviews</c> 与 <c>moves</c> 一律读
+    /// <see cref="Orc.Game.Commanding.CommandManager.GetCommandAvailability"/> 给出的候选——
+    /// 与 <c>command.attack</c> / <c>command.move</c> 同一来源、同一过滤链，投影层**不**自建第二套目标规则。
+    /// </para>
+    /// <para>
+    /// 含**基础**伤害与死亡判定（<c>damageToDefender</c> / <c>damageToAttacker</c> / <c>defenderDies</c> /
+    /// <c>attackerDies</c>：按有效攻防计算、不经伤害管线），**不含**词条与效果改写——
+    /// 那是结算期才有的事实，预演不做模拟以免与真实结算漂移。HQ 条目不做死亡判定（血量远高于单次攻击）。
     /// </para>
     /// <para>`orderTargets` 仍为空：指令目标在打出后由选靶请求提供。</para>
     /// </summary>
@@ -147,18 +153,38 @@ public sealed partial class McpService
 
                 if (availability.Move?.CanUse == true)
                 {
-                    var line = battlefield.FrontLine;
-                    for (var i = 0; i < line.Count; i++)
+                    // 候选＝引擎目的地（前沿空槽；后撤语义下为己方支援线空槽）——不再自行枚举前线空槽。
+                    foreach (var candidate in availability.Move.Candidates)
                     {
-                        if (line[i].Occupant is null)
+                        var destination = candidate.IsAlive ? candidate.Value as Orc.Game.Board.Slot : null;
+                        if (destination is null)
                         {
+                            continue;
+                        }
+
+                        // toZone/slotIndex 由槽所属线给出：slotIndex 的语义随 toZone 解释（support 时指己方支援线槽位）。
+                        if (!TryLocateSlot(battlefield.FrontLine, destination, out var index))
+                        {
+                            if (!TryLocateSlot(battlefield.GetSupportLine(player), destination, out index))
+                            {
+                                continue; // 未知线：不猜测，直接略过
+                            }
+
                             moves.Add(new JsonObject
                             {
                                 ["uid"] = unit.Id.ToString("N"),
-                                ["toZone"] = "front",
-                                ["slotIndex"] = i,
+                                ["toZone"] = "support",
+                                ["slotIndex"] = index,
                             });
+                            continue;
                         }
+
+                        moves.Add(new JsonObject
+                        {
+                            ["uid"] = unit.Id.ToString("N"),
+                            ["toZone"] = "front",
+                            ["slotIndex"] = index,
+                        });
                     }
                 }
 
@@ -166,22 +192,36 @@ public sealed partial class McpService
                 {
                     var attackerAttack = EffectiveAttack(unit);
 
-                    foreach (var target in AttackTargets(player, enemy, battlefield))
+                    foreach (var candidate in availability.Attack.Candidates)
                     {
+                        // 候选＝引擎合法目标（敌支援线 → 前线 → 敌 HQ，逐项经 combat.target.legal）。
+                        if (!candidate.IsAlive)
+                        {
+                            continue;
+                        }
+
+                        var target = candidate.Value;
                         var defenderAttack = target is Orc.Game.Cards.UnitCard defender
                             ? EffectiveAttack(defender)
                             : 0;
+
+                        // 死亡判定＝基础伤害是否达到当前有效血量（不含伤害管线上的词条/效果改写）。
+                        // HQ 不走此判定（血量远高于单次攻击；真打死由终局检测负责）。
+                        var defenderHealth = target is Orc.Game.Cards.UnitCard defendingUnit
+                            ? EffectiveHealth(defendingUnit)
+                            : int.MaxValue;
+                        var attackerHealth = EffectiveHealth(unit);
 
                         attackPreviews.Add(new JsonObject
                         {
                             ["attackerUid"] = unit.Id.ToString("N"),
                             ["defenderUid"] = target.Id.ToString("N"),
 
-                            // 基础伤害（有效攻击力）；**不含**伤害管线上的词条/效果改写与死亡判定。
+                            // 基础伤害（有效攻击力）；**不含**伤害管线上的词条/效果改写。
                             ["damageToDefender"] = attackerAttack,
                             ["damageToAttacker"] = defenderAttack,
-                            ["defenderDies"] = false,
-                            ["attackerDies"] = false,
+                            ["defenderDies"] = attackerAttack >= defenderHealth,
+                            ["attackerDies"] = defenderAttack > 0 && defenderAttack >= attackerHealth,
                         });
                     }
                 }
@@ -206,6 +246,10 @@ public sealed partial class McpService
     private static int EffectiveAttack(Orc.Game.Cards.UnitCard unit)
         => unit.Modifiers.GetEffectiveValue(Orc.Game.Cards.CardStatFields.Attack);
 
+    /// <summary>单位当前有效血量（含防御修正；用于攻击预览的死亡判定）。</summary>
+    private static int EffectiveHealth(Orc.Game.Cards.UnitCard unit)
+        => unit.Modifiers.GetEffectiveValue(Orc.Game.Cards.CardStatFields.Defense);
+
     /// <summary>己方在场单位（前线＋己方支援线）。</summary>
     private static IEnumerable<Orc.Game.Cards.UnitCard> OwnUnits(
         Orc.Game.Players.Player player,
@@ -228,27 +272,20 @@ public sealed partial class McpService
         }
     }
 
-    /// <summary>
-    /// 可攻击目标（候选集，不含伤害预测）：敌方前线单位；敌前线为空时可指向敌方 HQ。
-    /// </summary>
-    private static IEnumerable<Orc.Core.Entity> AttackTargets(
-        Orc.Game.Players.Player player,
-        Orc.Game.Players.Player enemy,
-        Orc.Game.Board.Battlefield battlefield)
+    /// <summary>槽位在该线中的序号（引用同一性定位；不在该线＝false）。</summary>
+    private static bool TryLocateSlot(
+        IReadOnlyList<Orc.Game.Board.Slot> line, Orc.Game.Board.Slot slot, out int index)
     {
-        var found = false;
-        foreach (var slot in battlefield.FrontLine)
+        for (var i = 0; i < line.Count; i++)
         {
-            if (slot.Occupant is Orc.Game.Cards.UnitCard unit && !ReferenceEquals(unit.Owner, player))
+            if (ReferenceEquals(line[i], slot))
             {
-                found = true;
-                yield return unit;
+                index = i;
+                return true;
             }
         }
 
-        if (!found && enemy.Hq is { } hq)
-        {
-            yield return hq;
-        }
+        index = -1;
+        return false;
     }
 }

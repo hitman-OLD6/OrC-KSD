@@ -35,7 +35,13 @@ public class SecurityTests
             "以下工具未登记座位作用域（新工具必须显式登记到四类或专门分支）：" + string.Join(", ", unregistered));
     }
 
-    /// <summary>守卫 2：分类表里不得有过期/拼错的工具名（否则"默认拒绝"会被死条目掩盖）。</summary>
+    /// <summary>
+    /// 守卫 2：分类表里不得有过期/拼错的工具名（否则"默认拒绝"会被死条目掩盖）。
+    /// <para>
+    /// 输入集＝**当前进程模式下已注册的工具全集**（S3）：sandbox 专属条目在 play 下本就不注册，
+    /// 用固定全集会把"当前模式不暴露"误判成死条目。
+    /// </para>
+    /// </summary>
     [Fact]
     public async Task SeatScopeRegistry_HasNoDeadEntries()
     {
@@ -43,8 +49,12 @@ public class SecurityTests
         await using var host = await StartHostAsync(temp.Path);
         await using var client = await TestSupport.ConnectAsync(host.Port);
 
+        var registered = host.Service.Tools.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
         var advertised = (await client.ListToolsAsync()).Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
-        var dead = ServerHost.RegisteredToolNames.Where(name => !advertised.Contains(name)).ToArray();
+
+        var dead = ServerHost.RegisteredToolNames
+            .Where(name => registered.Contains(name) && !advertised.Contains(name))
+            .ToArray();
 
         Assert.True(dead.Length == 0, "分类表含未宣告的工具名（死条目）：" + string.Join(", ", dead));
     }
@@ -317,7 +327,10 @@ public class SecurityTests
         Assert.NotNull(view.Details!["view"]!["selfHand"]);
     }
 
-    /// <summary>未绑定会话读视图仍允许（单机诊断），但**不得**因此绑定座位。</summary>
+    /// <summary>
+    /// 未绑定会话读视图：**play 下拒绝**（S3 收敛，原"单机诊断放行"是遗留）。
+    /// <para>不得因此绑定座位；sandbox 下的全知放行见 <c>ModeTests.ObserveViewUnboundSandboxOmniscient</c>。</para>
+    /// </summary>
     [Fact]
     public async Task ObserveView_UnboundSession_IsAllowed_AndKeepsUnbound()
     {
@@ -326,8 +339,8 @@ public class SecurityTests
         await using var bystander = await TestSupport.ConnectAsync(table.Host.Port);
 
         var view = await bystander.CallAsync("observe.view", new JsonObject { ["seat"] = 1 });
-        Assert.True(view.Ok, view.Message);
-        Assert.Equal(1, view.Details!["seat"]!.GetValue<int>());
+        Assert.False(view.Ok);
+        Assert.Equal(ResultCodes.Unauthorized, view.Code);
 
         // 若 observe.view 误绑，这里会变成 not-ready。
         var action = await bystander.CallAsync("match.end_turn");

@@ -825,6 +825,8 @@ public sealed partial class EffectRuntime
                 {
                     // S6：选靶归属＝观察者的归属玩家（与 TargeterManager 的取用同源）。
                     Owner = OwnerOf(viewer),
+                    // R8：卡效果发起的选靶一律 effect（不按效果种类细分——那是效果侧语义，不是选靶动作语义）。
+                    Action = SelectorActions.Effect,
                 });
 
             while (step.IsFailed && step.Failure == SelectorFailureReason.InvalidSelection)

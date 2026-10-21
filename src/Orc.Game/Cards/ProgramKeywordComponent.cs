@@ -378,7 +378,8 @@ public sealed class ProgramKeywordComponent : KeywordComponent
                 string? selectedDefinition=null;
                 var developResult=await picker.RunAsync(async flow=>
                 {
-                    var step=await flow.Step(SelectorTemplates.CardPickerList,new IdentifierSetParameter(offers,1,1));
+                    // R2/R8：开发选牌同样是本组件的选靶——归属＝组件归属、类别＝effect。
+                    var step=await flow.Step(SelectorTemplates.CardPickerList,new IdentifierSetParameter(offers,1,1){Owner=Owner,Action=SelectorActions.Effect});
                     while(step.IsFailed&&step.Failure==SelectorFailureReason.InvalidSelection)step=await flow.Retry<IReadOnlyList<string>>();
                     if(step.IsCancelled)return TargeterResult.Cancelled();if(step.IsFailed)return TargeterResult.FromSelectorFailure(step.Failure);
                     selectedDefinition=step.Value?.SingleOrDefault();return selectedDefinition is null?TargeterResult.Failed(TargeterFailureReason.InvalidSelection):TargeterResult.Ok();
@@ -392,7 +393,7 @@ public sealed class ProgramKeywordComponent : KeywordComponent
             Card? selected=null;
             var result=await targeter.RunAsync(async flow=>
             {
-                var step=await flow.Step(SelectorTemplates.FieldUnit,new ReferenceSetParameter(candidates.Select(c=>c.Ref),1,1));
+                var step=await flow.Step(SelectorTemplates.FieldUnit,new ReferenceSetParameter(candidates.Select(c=>c.Ref),1,1){Owner=Owner,Action=SelectorActions.Effect});
                 while(step.IsFailed&&step.Failure==SelectorFailureReason.InvalidSelection)step=await flow.Retry<Ref<Entity>>();
                 if(step.IsCancelled)return TargeterResult.Cancelled();if(step.IsFailed)return TargeterResult.FromSelectorFailure(step.Failure);
                 selected=step.Value?.Value as Card;return selected is null?TargeterResult.Failed(TargeterFailureReason.InvalidSelection):TargeterResult.Ok();

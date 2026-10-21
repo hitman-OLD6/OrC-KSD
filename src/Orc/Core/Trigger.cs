@@ -40,6 +40,7 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
     private readonly object? _registrant;
     private long _seq;
     private long _wrapperSeq;
+    private bool _sealed;
     private JudicatorBinding? _validationBinding;
     private Func<IReadOnlyList<Ref<Entity>>, Ref<Entity>?>? _validationSubjectProvider;
     private Func<IReadOnlyList<Ref<Entity>>, int?>? _validationPlayerProvider;
@@ -147,6 +148,28 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
     /// <summary>触发器名称（可选；用于事件流 source 与调试；未命名时 source 以视图类型名退化标识）。</summary>
     public string? Name { get; }
 
+    /// <summary>
+    /// 是否已封闭（加性；一次性、不可逆）：封闭后一切注册面（事件注册／保留槽／包装器）一律抛
+    /// <see cref="InvalidOperationException"/>，handler 集固定。默认不封闭——既有触发器语义与性能不变。
+    /// 用途＝「构造期装配齐内置 handler 后立即封闭」的宿主保留触发器（封闭性由内核承载，内核不带业务语义）。
+    /// </summary>
+    public bool IsSealed => _sealed;
+
+    /// <summary>
+    /// 封闭本触发器（加性；一次性、幂等）：此后注册面全部拒绝。调用时点由作者负责（惯例＝构造返回前）。
+    /// </summary>
+    public void Seal() => _sealed = true;
+
+    /// <summary>封闭态守卫（注册面首行）：已封闭＝明确拒绝，异常文本含触发器展示名。</summary>
+    private void ThrowIfSealed()
+    {
+        if (_sealed)
+        {
+            throw new InvalidOperationException(
+                $"触发器 '{DisplayName}' 已封闭（handler 集固定、不可再注册）——注册被拒绝。");
+        }
+    }
+
     /// <summary>触发器种类（运行期可读；S3 起与「挂载条件」关联——仅 Passive 且 hooks 非空可挂载）。</summary>
     public TriggerKind Kind { get; }
 
@@ -202,6 +225,7 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
     /// <param name="registrant">注册者（R9 加性；可选；卡/效果注入共享触发器时声明——审计面 <see cref="TriggerEventInfo.SourceCard"/> 的来源）。</param>
     public TriggerRegistration Register(string name, Func<TView, Context, CancellationToken, Task> handler, int priority = 0, IEnumerable<string>? downstream = null, IEnumerable<string>? seams = null, object? registrant = null)
     {
+        ThrowIfSealed();
         var entry = AddEvent(name, handler, band: null, priority, downstream, seams, registrant: registrant);
         return new TriggerRegistration(this, entry.Seq, name);
     }
@@ -214,6 +238,7 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
     /// <param name="registrant">注册者（R9 加性；可选；卡/效果注入共享触发器时声明）。</param>
     public TriggerRegistration Register(string name, Func<TView, Context, CancellationToken, Task> handler, Enum band, int priority = 0, IEnumerable<string>? downstream = null, IEnumerable<string>? seams = null, object? registrant = null)
     {
+        ThrowIfSealed();
         ArgumentNullException.ThrowIfNull(band);
         var entry = AddEvent(name, handler, band, priority, downstream, seams, registrant: registrant);
         return new TriggerRegistration(this, entry.Seq, name);
@@ -236,6 +261,7 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
         IEnumerable<string>? downstream = null, IEnumerable<string>? seams = null,
         object? registrant = null)
     {
+        ThrowIfSealed();
         var entry = AddEvent(name, handler, band: null, priority, downstream, isDisposalSlot: true, registrant: registrant);
         return new TriggerRegistration(this, entry.Seq, name);
     }
@@ -306,6 +332,7 @@ public class Trigger<TView> : ITriggerMetadata where TView : class
         TriggerRegistration target, WrapperPhase phase, string? seam,
         Func<TView, Context, CancellationToken, Task> wrapper)
     {
+        ThrowIfSealed();
         ArgumentNullException.ThrowIfNull(target);
         ArgumentNullException.ThrowIfNull(wrapper);
 

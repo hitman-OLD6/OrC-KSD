@@ -36,6 +36,11 @@ internal enum CounterUseRejection
 /// </para>
 /// 使用反制不执行 targeter 交互、不发任何游戏更新；位置语义＝不做激活区——激活/取消＝状态翻转＋费用
 /// （卡保持手牌位置不变）；可重复激活（激活↔取消可反复、无次数上限，费用各恰一次；仅限己方回合；消耗后不可再激活）。
+/// <para>
+/// **武装窗口**（R1）：激活 ⇒ 只覆盖对手的整个回合；己方下个回合开始时自动解除（<c>turn.start</c> → 注销 handler、
+/// 置未激活、清实扣额，**不退点、不消耗、卡留手牌**）并发 <see cref="GameUpdates.CounterDisarmed"/>。
+/// 窗口内只对**敌方指令**生效——己方指令既不命中也不消耗（回合门禁 + 归属过滤，见 <see cref="CreateCounterHandler"/>）。
+/// </para>
 /// 加载模板与其余装配沿用基类（<see cref="CardBase"/>）。
 /// </summary>
 public class CounterCard : CardBase
@@ -48,6 +53,12 @@ public class CounterCard : CardBase
 
     /// <summary>一次性消耗守卫（S14 第 7 条）：同一张卡只消耗一次；后续包装器见之直接跳过。</summary>
     private bool _consumed;
+
+    /// <summary>销毁守卫（R2 末条）：卡已销毁 ⇒ 不可再激活（激活中的销毁清理见 <see cref="OnCardDestroyed"/>）。</summary>
+    private bool _destroyed;
+
+    /// <summary>卡销毁信号订阅（构造期建立；销毁清理时撤销——每张反制卡至多一条）。</summary>
+    private IDisposable? _destroyedSubscription;
 
     /// <summary>创建反制卡（激活状态组件＋触发器与默认链事件在构造期装配；
     /// 使用反制触发器按名绑定反制使用检查判定器——解析器缺省＝内置默认〔独立构造即可用〕）。</summary>
@@ -68,6 +79,10 @@ public class CounterCard : CardBase
         UseCounterTrigger = new CounterUseTrigger(this, validationJudicatorResolver);
         // R9：内置链 handler 归因于本卡（registrant: this）——链内发信号以本卡为 Source。
         UseCounterTrigger.Register("使用反制", HandleUseCounterAsync, registrant: this);
+
+        // R2 末条：卡销毁清理（激活中被销毁——注销 Counter 段 handler、置未激活、清实扣额、不退费）。
+        // R1.3 加性：同一订阅同时承载「己方回合开始自动解除」分支（每卡至多一条订阅，不新增第二条）。
+        _destroyedSubscription = engine.Subscribe(HandleUpdateAsync);
     }
 
     /// <summary>使用反制的触发器（唯一；单入口状态翻转：未激活⇒激活流程、已激活⇒取消流程）。</summary>
@@ -80,8 +95,19 @@ public class CounterCard : CardBase
     public IReadOnlyList<string> RegisteredEffectHandlerNames
         => _activeRegistrations.Select(registration => registration.Name).ToArray();
 
+    /// <summary>
+    /// 已装配的效果 handler 名称（装配序；装载完成即固定——激活与否不影响本面、不进 <see cref="_activeRegistrations"/>）。
+    /// 与 <see cref="RegisteredEffectHandlerNames"/> 同源同构：未激活＝已装配未注册（本面非空、后者空），
+    /// 激活后两者逐项相等，取消后后者复归为空而本面不变。
+    /// </summary>
+    public IReadOnlyList<string> AssembledEffectHandlerNames
+        => _effectHandlers.Select(handler => handler.Name).ToArray();
+
     /// <summary>是否已被反制命中消耗（一次性；消耗后不可再激活）。</summary>
     public bool IsConsumed => _consumed;
+
+    /// <summary>是否已销毁（激活中被销毁／爆牌等；销毁后不可再激活——入口据此返回 <c>CounterUnavailable</c>）。</summary>
+    public bool IsDestroyed => _destroyed;
 
     /// <summary>
     /// 效果 handler 集装配入口（装配/加载阶段注册；登记序保留）：
@@ -129,9 +155,11 @@ public class CounterCard : CardBase
             return;
         }
 
-        if (card._consumed)
+        if (card._consumed || card._destroyed)
         {
-            ctx.Stop(); // 已消耗（一次性）：不可再激活/取消——本级余下事件不执行
+            // 入口（PlayManager.UseCounterAsync）已按 CounterUnavailable 拦截；本分支仅为**触发器被直接驱动**
+            // （绕过玩家动作入口）时的内部防御：状态不翻转、本级余下事件不执行。
+            ctx.Stop();
             return;
         }
 
@@ -181,8 +209,40 @@ public class CounterCard : CardBase
     }
 
     /// <summary>
+    /// 回合门禁判定（R1.2）：当前行动方是否即反制归属。
+    /// 回合上下文不可达时一律返回 false（＝门禁放行）——未接对局（<see cref="CardBase.TurnPlayerProvider"/> 缺席）
+    /// 与「回合尚未开始」（<see cref="Managers.TurnManager.CurrentPlayer"/> 抛 <see cref="InvalidOperationException"/>）
+    /// 同属不可达：此时语义退回归属过滤单门（R1.4 的裸卡/脱局路径不回归）。
+    /// </summary>
+    private bool IsOwnersTurn()
+    {
+        if (TurnPlayerProvider is not { } provider || Owner is not { } owner)
+        {
+            return false;
+        }
+
+        Player? current;
+        try
+        {
+            current = provider();
+        }
+        catch (InvalidOperationException)
+        {
+            return false; // 回合尚未开始：上下文不可达
+        }
+
+        return current is not null && ReferenceEquals(current, owner);
+    }
+
+    /// <summary>
     /// 构造 Counter 段包装器（S14 第 2/7 条）：把 <see cref="OrderFlowView"/> 适配为 <see cref="CardTriggerView"/> 后调用原 handler；
     /// handler 调用 <c>Stop</c>/<c>Interrupt</c>（＝命中）后执行一次性消耗。
+    /// <para>
+    /// R1 两道门禁（均在调用 handler 之前、任一不放行即直接返回——不碰 <c>ctx</c>、不消耗、不改激活态）：
+    /// ① 回合门禁（R1.2）＝当前行动方是反制归属时不生效；
+    /// ② 归属过滤（R1.1）＝指令归属与反制归属同一玩家时不生效（不自伤）。
+    /// 两道门互为双保险：门禁依赖回合上下文，过滤依赖卡归属；任一通道未知即由另一道兜底。
+    /// </para>
     /// </summary>
     private Func<OrderFlowView, Context, CancellationToken, Task> CreateCounterHandler(CounterEffectHandler effect)
         => async (view, ctx, ct) =>
@@ -195,6 +255,19 @@ public class CounterCard : CardBase
             if (Owner is not { } player)
             {
                 return; // 未加载归属：结构不可用（零副作用）
+            }
+
+            // R1.2 回合门禁：反制武装窗口只覆盖对手回合——己方回合内一律不生效（与下方归属过滤互为双保险）。
+            if (IsOwnersTurn())
+            {
+                return;
+            }
+
+            // R1.1 归属过滤：反制归属＝指令归属 ⇒ 己方反制拦己方指令（自伤），指令须照常结算。
+            // 裸 Card 无 Owner（归属未知）⇒ 不过滤——R1.4 保持既有跨方判定行为。
+            if ((view.Source as CardBase)?.Owner is { } orderOwner && ReferenceEquals(orderOwner, player))
+            {
+                return;
             }
 
             var counterView = new CardTriggerView
@@ -260,6 +333,92 @@ public class CounterCard : CardBase
         }
 
         player.Points += delta;
+    }
+
+    /// <summary>
+    /// 卡销毁清理（R2 末条；<c>card.destroyed</c> 驱动）：注销该卡在 Counter 段的全部 handler → 置未激活 →
+    /// 清实扣额记录 → **不退费**（与一次性消耗同口径）→ 撤销本订阅。销毁后 <see cref="HandleUseCounterAsync"/>
+    /// 直接停止（不可再激活）。幂等（重复销毁＝空转）。
+    /// </summary>
+    private void OnCardDestroyed()
+    {
+        if (_destroyed)
+        {
+            return;
+        }
+
+        _destroyed = true;
+
+        foreach (var registration in _activeRegistrations)
+        {
+            Engine.OrderFlow.Trigger.Unregister(registration);
+        }
+
+        _activeRegistrations.Clear();
+        GetData<CounterActivationData>().IsActive = false;
+        _chargedCost = null; // 不退费：不调 ChangePointsAsync
+
+        var subscription = _destroyedSubscription;
+        _destroyedSubscription = null;
+        subscription?.Dispose();
+    }
+
+    /// <summary>
+    /// 更新订阅回调（只认本卡的两类更新：<c>card.destroyed</c>＝销毁清理、<c>turn.start</c>＝武装窗口自动解除；
+    /// 其余更新零处理）。
+    /// </summary>
+    private Task HandleUpdateAsync(
+        string updateType, IReadOnlyDictionary<string, object?>? payload, CancellationToken ct)
+    {
+        if (_destroyed || payload is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (string.Equals(updateType, Updates.CardDestroyed, StringComparison.Ordinal))
+        {
+            if (payload.TryGetValue(PayloadKeys.Card, out var card) && ReferenceEquals(card, this))
+            {
+                OnCardDestroyed();
+            }
+
+            return Task.CompletedTask;
+        }
+
+        if (string.Equals(updateType, GameUpdates.TurnStart, StringComparison.Ordinal))
+        {
+            return HandleTurnStartAsync(payload, ct);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 回合开始处理（R1.3：反制武装窗口的边界）：回合切换到本卡归属玩家时，处于激活态的反制自动解除——
+    /// 注销 Counter 段 handler → 置未激活 → 清实扣额记录；**不返还指挥点、不消耗、卡留手牌**。
+    /// 不退点的理由：窗口已完整覆盖对手回合，费用属「已用掉的窗口租金」——与玩家在窗口内主动取消（退点）语义不同。
+    /// 解除后发 <c>counter.disarmed</c>（先落定、后发射）；未激活/他人回合＝零处理（不误发、幂等）。
+    /// </summary>
+    private async Task HandleTurnStartAsync(IReadOnlyDictionary<string, object?> payload, CancellationToken ct)
+    {
+        if (Owner is not { } owner
+            || !payload.TryGetValue(GameUpdates.PayloadPlayer, out var player)
+            || !ReferenceEquals(player, owner)
+            || !GetData<CounterActivationData>().IsActive)
+        {
+            return;
+        }
+
+        foreach (var registration in _activeRegistrations)
+        {
+            Engine.OrderFlow.Trigger.Unregister(registration);
+        }
+
+        _activeRegistrations.Clear();
+        GetData<CounterActivationData>().IsActive = false;
+        _chargedCost = null; // 不退费：不调 ChangePointsAsync（窗口到期，费用不返还）
+
+        await GameUpdates.EmitCounterDisarmed(Engine, this, owner, "turn-start", ct, this).ConfigureAwait(false);
     }
 
     private sealed record CounterEffectHandler(

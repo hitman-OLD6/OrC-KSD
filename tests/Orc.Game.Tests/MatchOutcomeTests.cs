@@ -185,19 +185,23 @@ public class MatchOutcomeTests
         await match.Initialize();
         var playerA = match.Players[0];
 
-        // 终局前：备两张反制；一张先激活（覆盖「取消」入口的终局拒绝）。
+        // 终局前：备两张反制；推两个回合（回合 3＝A 行动、2 点）。
+        // R1.3：反制武装窗口只覆盖对手回合——己方回合开始即自动解除，故激活必须落在「终局前的最后一个己方回合」内；
+        // 原写法在回合 1 激活后跨回合推进，会让窗口在回合 3 开局到期，与本用例「终局后两入口都被拒」的原意无关。
         var activeCounter = (CounterCard)match.CardLibrary.Instantiate(CommandTestKit.CounterCardId);
         await activeCounter.LoadAsync(playerA);
         playerA.Hand.Add(activeCounter);
         var idleCounter = (CounterCard)match.CardLibrary.Instantiate(CommandTestKit.CounterCardId);
         await idleCounter.LoadAsync(playerA);
         playerA.Hand.Add(idleCounter);
-        var activated = await match.PlayManager.UseCounterAsync(activeCounter); // 回合 1＝己方回合（1 点）
+
+        await match.EndTurn();
+        await match.EndTurn();
+
+        // 一张先激活（覆盖「取消」入口的终局拒绝）：回合 3＝A 的己方回合（2 点、反制费 1）。
+        var activated = await match.PlayManager.UseCounterAsync(activeCounter);
         Assert.Equal(PlayResultStatus.Success, activated.Status);
 
-        // 推两个回合（回合 3＝A 行动、2 点）后打 HQ 终局；已激活的反制保持激活。
-        await match.EndTurn();
-        await match.EndTurn();
         var striker = await PrepareHqStrikerAsync(match);
         await StrikeHqAsync(match, bridge, striker);
         var pointsAtEnd = playerA.Points;

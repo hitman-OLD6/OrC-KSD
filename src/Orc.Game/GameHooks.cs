@@ -93,7 +93,7 @@ public sealed record GameHookPendingTrigger(
 /// </summary>
 public static class GameHooks
 {
-    // ---------- 对外信号（31 条；转发引用 GameUpdates） ----------
+    // ---------- 对外信号（35 条；转发引用 GameUpdates） ----------
 
     /// <summary>回合开始前（<c>turn.start.before</c>）。</summary>
     public const string TurnStartBefore = GameUpdates.TurnStartBefore;
@@ -194,10 +194,13 @@ public static class GameHooks
     /// <summary>反制触发（<c>counter.triggered</c>；E1-53）。</summary>
     public const string CounterTriggered = GameUpdates.CounterTriggered;
 
+    /// <summary>反制解除（<c>counter.disarmed</c>；R1.3——与 counter.triggered 同一生命周期两端）。</summary>
+    public const string CounterDisarmed = GameUpdates.CounterDisarmed;
+
     /// <summary>词条临时增益到期相位（<c>keyword.attack.finished</c>）。</summary>
     public const string KeywordAttackFinished = GameUpdates.KeywordAttackFinished;
 
-    /// <summary>对外信号全量（34 条；稳定序＝定义序）。</summary>
+    /// <summary>对外信号全量（35 条；稳定序＝定义序）。</summary>
     public static IReadOnlyList<string> Signals { get; } = new[]
     {
         TurnStartBefore, TurnStart, TurnStartAfter, TurnEndBefore, TurnEnd,
@@ -207,7 +210,7 @@ public static class GameHooks
         DeckShuffled, UnitTypesChanged,
         SlotGained, SlotLost, SlotChanged,
         PointGained, PointLost, PointChanged,
-        CardDamaged, UnitActed, UnitCombatSurvived, UnitDamageDealt, CounterTriggered,
+        CardDamaged, UnitActed, UnitCombatSurvived, UnitDamageDealt, CounterTriggered, CounterDisarmed,
         KeywordAttackFinished,
     };
 

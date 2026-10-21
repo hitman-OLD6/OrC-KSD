@@ -19,6 +19,9 @@ public sealed class McpMatchLauncher : IMatchLauncher
     private readonly IReadOnlyList<string> _packDirectories;
     private readonly Func<IReadOnlyList<string>>? _aiDeckFactory;
     private readonly bool _enforceDeckRules;
+    private readonly Orc.Game.Decks.DeckRuleTier _deckRuleTier;
+    private readonly int _requiredDeckSize;
+    private readonly int? _seed;
 
     public McpMatchLauncher(
         McpService service,
@@ -35,12 +38,18 @@ public sealed class McpMatchLauncher : IMatchLauncher
         Func<McpService> service,
         IReadOnlyList<string> packDirectories,
         Func<IReadOnlyList<string>>? aiDeckFactory = null,
-        bool enforceDeckRules = true)
+        bool enforceDeckRules = true,
+        Orc.Game.Decks.DeckRuleTier deckRuleTier = Orc.Game.Decks.DeckRuleTier.Strict,
+        int requiredDeckSize = Orc.Game.Decks.DeckRules.DefaultRequiredSize,
+        int? seed = null)
     {
         _service = service ?? throw new ArgumentNullException(nameof(service));
         _packDirectories = packDirectories ?? throw new ArgumentNullException(nameof(packDirectories));
         _aiDeckFactory = aiDeckFactory;
         _enforceDeckRules = enforceDeckRules;
+        _deckRuleTier = deckRuleTier;
+        _requiredDeckSize = requiredDeckSize;
+        _seed = seed;
     }
 
     /// <inheritdoc />
@@ -83,6 +92,10 @@ public sealed class McpMatchLauncher : IMatchLauncher
             SeatB = ToSeat(seats[1], decks[1]),
             // 生产＝true；端到端/示例卡包场景可关闭（与房间态校验开关同源）。
             EnforceDeckRules = _enforceDeckRules,
+            // 与房间态校验共用同一档位与张数口径（S2b）：禁止各算一套。
+            DeckRuleTier = _deckRuleTier,
+            RequiredDeckSize = _requiredDeckSize,
+            Seed = _seed,
         };
 
         var outcome = await _service().CreateMatchAsync(options, ct).ConfigureAwait(false);

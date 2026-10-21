@@ -169,6 +169,16 @@ public static class GameUpdates
     public const string CounterTriggered = "counter.triggered";
 
     /// <summary>
+    /// **反制解除**（"counter.disarmed"；载荷＝{ Card, Player, Reason }——被解除的反制卡＋归属玩家＋解除原因
+    /// 〔本次固定 <c>"turn-start"</c>〕）。
+    /// 语义＝「己方回合开始，反制武装窗口到期、自动解除」——与 <see cref="CounterTriggered"/> 是同一生命周期两端，
+    /// 故成对登记为对外信号（只登记一端会迫使卡牌作者轮询补洞）。
+    /// 与玩家主动取消不同：主动取消按实扣额退点且**不发**信号（退点撤销不属解除事实）；本信号只报「未命中且窗口到期」。
+    /// 次序＝解除**之后**发射（注销 → 置未激活 → 清实扣额 → 本信号）：读者在信号时点即读到 <c>IsActive == false</c>；恰一次。
+    /// </summary>
+    public const string CounterDisarmed = "counter.disarmed";
+
+    /// <summary>
     /// 交战并存活（"unit.combat.survived"；载荷＝{ Unit }——幸存单位）。
     /// 语义＝「一次单位对战结算结束后，**参战且未阵亡**的单位各发射一次」（每单位各自恰一次；观察序＝被攻击者在前、攻击者在后）。
     /// 调用点＝<c>CommandManager.HandleDefaultAttackDamageAsync</c> 结算收尾（含伏击改写路径——被攻击者不受伤即视为存活）。
@@ -572,6 +582,31 @@ public static class GameUpdates
             {
                 [PayloadCard] = card,
                 [PayloadPlayer] = player,
+                [PayloadSource] = source,
+            },
+            ct);
+    }
+
+    /// <summary>
+    /// 发射 counter.disarmed（R1.3；载荷＝{ 反制卡, 归属玩家, Reason }——解除落定后调用、恰一次）。
+    /// 与 <see cref="EmitCounterTriggered"/> 对称：Source 口径一致（＝反制卡自身）。
+    /// </summary>
+    /// <exception cref="ArgumentNullException">engine / card / player / reason 为 null。</exception>
+    public static Task EmitCounterDisarmed(
+        LogicEngine engine, Card card, Player player, string reason, CancellationToken ct = default, Card? source = null)
+    {
+        ArgumentNullException.ThrowIfNull(engine);
+        ArgumentNullException.ThrowIfNull(card);
+        ArgumentNullException.ThrowIfNull(player);
+        ArgumentNullException.ThrowIfNull(reason);
+        return engine.Emit(
+            CounterDisarmed,
+            new Dictionary<string, object?>
+            {
+                [PayloadCard] = card,
+                [PayloadPlayer] = player,
+                // 键名对齐既有 card.leaving（"Reason"）——载荷键族一律 PascalCase。
+                ["Reason"] = reason,
                 [PayloadSource] = source,
             },
             ct);

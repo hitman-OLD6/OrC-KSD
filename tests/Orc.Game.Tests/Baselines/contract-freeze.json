@@ -1,6 +1,6 @@
 {
-  "commit": "a0334c22437d20ccbb6b8f1dc1eacf955a8c074d",
-  "generatedAt": "2026-10-20T16:04:47.7333595+08:00",
+  "commit": "a35e0b9076700a371043c8151c1f1df9edd45344",
+  "generatedAt": "2026-10-21T18:02:39.5921350+08:00",
   "gameUpdates": [
     {
       "name": "CardBurned",
@@ -45,6 +45,10 @@
     {
       "name": "CardStatChanged",
       "value": "card.stat.changed"
+    },
+    {
+      "name": "CounterDisarmed",
+      "value": "counter.disarmed"
     },
     {
       "name": "CounterTriggered",

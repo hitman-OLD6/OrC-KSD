@@ -85,7 +85,7 @@ public sealed partial class McpService
     /// <param name="inputSchema">输入 JSON Schema（手写常量）。</param>
     /// <param name="handler">执行器。</param>
     /// <param name="sandboxOnly">是否沙盒专属（非沙盒模式不暴露）。</param>
-    /// <param name="readOnly">是否只读（忙时仍可调用）。</param>
+    /// <param name="readOnly">是否只读（忙时仍可调用；写类默认不注册，见 <see cref="McpServiceOptions.AllowDebugWrites"/>）。</param>
     public void AddTool(
         string name,
         string group,
@@ -100,6 +100,12 @@ public sealed partial class McpService
 
         // R0a：沙盒专属工具在非沙盒模式下**不登记**（不暴露）——工具清单里根本不存在调试类能力。
         if (sandboxOnly && Options.Mode != McpServiceMode.Authoring)
+        {
+            return;
+        }
+
+        // S3：写类调试工具默认不注册（默认零写面）；显式开启后才登记，且仍只对编排连接可见。
+        if (sandboxOnly && !readOnly && !Options.AllowDebugWrites)
         {
             return;
         }
@@ -161,8 +167,14 @@ public sealed partial class McpService
                 $"工具 '{call.Name}' 只在沙盒模式（--mode authoring）下可用。");
         }
 
-        // 挂起期门禁（R2c）：待决期间只允许 target.* 与只读工具。
-        if (Executor.IsBusy && !entry.ReadOnly && !call.Name.StartsWith("target.", StringComparison.Ordinal))
+        // 挂起期门禁（R2c）：待决期间只允许 target.*、只读工具，以及「会话（重新）绑定」。
+        // room.resume 必须放行：否则「应答待决须先连上、连上须先过忙门禁」构成死锁——
+        // 桥一旦在待决期间断开（进程重启/网络抖动）就再也回不来（本局实测：room.resume 被 pending-targeting 拒）。
+        // 放行是安全的：绑定座位不改变对局状态；绑定后 BindSeat 会把该座位的待决请求重推一次。
+        if (Executor.IsBusy
+            && !entry.ReadOnly
+            && !call.Name.StartsWith("target.", StringComparison.Ordinal)
+            && !string.Equals(call.Name, "room.resume", StringComparison.Ordinal))
         {
             // 若"忙"来自选靶会话异常：先收束该动作并回 engine-rejected（不得永久 busy）。
             if (Executor.TryFailFaultedAction(out var faulted))
@@ -238,6 +250,7 @@ public sealed partial class McpService
             ["min"] = pending.Min,
             ["max"] = pending.Max,
             ["seat"] = pending.Seat,
+            ["action"] = pending.Action,
             ["candidates"] = candidates,
             ["identifiers"] = identifiers,
         };

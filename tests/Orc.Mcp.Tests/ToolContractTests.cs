@@ -97,6 +97,33 @@ public class ToolContractTests
     }
 
     [Fact]
+    public void AuthoringMode_ExposesSandboxPrimitiveTools()
+    {
+        using var fixture = new SandboxFixture();
+
+        var names = fixture.Service.Tools.Select(tool => tool.Name).ToArray();
+
+        // 六原语（R5）：每个原语一个工具，缺一即验收不成立。
+        foreach (var primitive in new[]
+                 {
+                     "sandbox.instantiate", "sandbox.unitize", "sandbox.move",
+                     "sandbox.remove", "sandbox.points", "sandbox.draw",
+                 })
+        {
+            Assert.Contains(primitive, names);
+        }
+
+        // 旧五件套必须仍在（并存、不合并）。
+        foreach (var legacy in new[]
+                 {
+                     "sandbox.spawn", "sandbox.kill", "sandbox.damage", "sandbox.set_points", "sandbox.emit",
+                 })
+        {
+            Assert.Contains(legacy, names);
+        }
+    }
+
+    [Fact]
     public void ToolDescriptors_HaveStableOrderAndSchemas()
     {
         using var first = new SandboxFixture();

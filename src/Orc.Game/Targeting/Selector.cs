@@ -14,6 +14,15 @@ public abstract class SelectorParameter
     /// <para><c>null</c>＝未指定（宿主侧回落"当前动作发起者"并记录诊断，不静默路由错）。</para>
     /// </summary>
     public Orc.Game.Players.Player? Owner { get; init; }
+
+    /// <summary>
+    /// 本次选靶所属的动作类别（R8 的 <c>pending.action</c>；取值见 <see cref="SelectorActions"/>）。
+    /// <para>
+    /// 由**构造方**声明——类别描述「这一步在选择什么」，只有发起动作的一端知道；助手内不按候选推断
+    /// （并集/异常候选会失真、且会引入第二套规则）。缺省 <c>null</c>＝未声明，对外呈现为 <see cref="SelectorActions.Unknown"/>。
+    /// </para>
+    /// </summary>
+    public string? Action { get; init; }
 }
 
 /// <summary>

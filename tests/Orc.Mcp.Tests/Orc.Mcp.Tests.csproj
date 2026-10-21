@@ -26,6 +26,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Orc.Mcp\Orc.Mcp.csproj" />
+    <!-- S5/S8：桥用例直接引用桥工程，不为测试复制逻辑。 -->
+    <ProjectReference Include="..\..\src\Orc.Mcp.Bridge\Orc.Mcp.Bridge.csproj" />
   </ItemGroup>
 
 </Project>

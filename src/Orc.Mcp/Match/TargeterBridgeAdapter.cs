@@ -32,6 +32,10 @@ public sealed record PendingCandidate(
 /// 选靶归属座位（多人支持 S6；<c>null</c>＝引擎未提供归属）。
 /// 应答者由该座位的控制器决定，不再依靠先到先服务的认领。
 /// </param>
+/// <param name="Action">
+/// 动作类别（R8 的 <c>pending.action</c>；取值 <see cref="Orc.Game.Targeting.SelectorActions"/>）。
+/// 缺省 <c>"unknown"</c>——发布时无法确定类别就如实标注，不猜。
+/// </param>
 public sealed record PendingSelection(
     string SessionId,
     string SelectorName,
@@ -40,7 +44,8 @@ public sealed record PendingSelection(
     int Max,
     IReadOnlyList<PendingCandidate> Candidates,
     IReadOnlyList<string> Identifiers,
-    int? Seat = null);
+    int? Seat = null,
+    string Action = Orc.Game.Targeting.SelectorActions.Unknown);
 
 /// <summary>
 /// 目标选择桥接适配器（<see cref="ITargeterBridge"/> 实现）。
@@ -439,7 +444,8 @@ public sealed class TargeterBridgeAdapter : ITargeterBridge
             presentation.Max,
             candidates,
             presentation.Identifiers ?? Array.Empty<string>(),
-            seat);
+            seat,
+            presentation.Action);
     }
 
     /// <summary>候选类别归类（呈现用；不影响引擎判定）。</summary>

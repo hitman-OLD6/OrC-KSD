@@ -68,4 +68,11 @@ public sealed class McpServiceOptions
     /// 缺省＝null＝未指定（player 模式下的观察面将拒绝并提示需配置座位）。
     /// </summary>
     public int? AgentSeat { get; init; }
+
+    /// <summary>
+    /// 是否注册**写类**调试工具（无头沙盒 S3）。缺省 <c>true</c>＝保留服务层既有调用方行为；
+    /// 服务端 <c>sandbox</c> 模式显式传入（缺省 <c>false</c>）以实现"默认零写面"。
+    /// <para>开启后写类仍只对"回环 ＋ 未绑定座位"的编排连接可见可用；已绑定座位的会话不可见。</para>
+    /// </summary>
+    public bool AllowDebugWrites { get; init; } = true;
 }

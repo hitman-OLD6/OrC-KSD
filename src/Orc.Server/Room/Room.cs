@@ -291,6 +291,126 @@ public sealed class Room
         }
     }
 
+    /// <summary>
+    /// 以**系统身份**开局（无头编排专用旁路）：复用 <see cref="StartAsync"/> 的房间态与"座位已满"检查，
+    /// **跳过**房主席位与座位令牌两道校验。
+    /// <para>
+    /// 系统身份只存在于调用栈上——不进入房间状态、不是座席、不改变 <see cref="Snapshot"/> 的形状，
+    /// 外部连接因此仍然无法开局/处置座位（协议面零变更）。
+    /// </para>
+    /// </summary>
+    /// <param name="ct">取消令牌。</param>
+    public async Task<McpToolResult> StartBySystemAsync(CancellationToken ct = default)
+    {
+        RoomStartRequest request;
+        lock (_sync)
+        {
+            if (_state != RoomState.Lobby)
+            {
+                return Fail(McpCodes.RoomStarted, "房间已开局。");
+            }
+
+            if (Array.Exists(_seats, slot => slot is null))
+            {
+                return Fail(McpCodes.RoomNotReady, "仍有空座，无法开局。");
+            }
+
+            if (_launcher is null)
+            {
+                return Fail(McpCodes.NotSupported, "宿主未提供对局装配面（无法开局）。");
+            }
+
+            _state = RoomState.Starting;
+            request = new RoomStartRequest(
+                RoomId,
+                _seats.Select(slot => new RoomSeatStart(
+                    slot!.Seat,
+                    slot.DisplayName,
+                    slot.Deck,
+                    slot.DeckConfig,
+                    slot.Kind)).ToArray(),
+                PackFingerprint);
+        }
+
+        try
+        {
+            var result = await _launcher.StartAsync(request, ct).ConfigureAwait(false);
+
+            lock (_sync)
+            {
+                _state = result.Ok ? RoomState.InMatch : RoomState.Lobby;
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            lock (_sync)
+            {
+                _state = RoomState.Lobby;
+            }
+
+            return Fail(McpCodes.Internal, $"开局失败：{ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 预置座位（无头编排专用）：**不经过 <see cref="Claim"/>**，只做"空座 + 房间态"检查后直接落座，
+    /// 并返回强类型令牌（服务端据此写 <c>agent.token</c>）。
+    /// <para>
+    /// <c>Claim</c>/<c>AddAi</c>/<c>Resume</c> 的既有行为一律不动（非无头路径零变更）。
+    /// 令牌生成与 <see cref="Claim"/> 同源（只在进程内存在，随进程退出失效）。
+    /// </para>
+    /// </summary>
+    /// <param name="seat">座位号。</param>
+    /// <param name="controllerKind">控制器类型（<c>ai</c>/<c>remote</c>）。</param>
+    /// <param name="displayName">展示名。</param>
+    /// <param name="deck">卡组（由服务端预先生成，不再校验）。</param>
+    /// <param name="deckConfig">构筑配置（可空）。</param>
+    /// <param name="connected">是否标记为已连接（AI＝true；等待外部连接的 agent 座位＝false）。</param>
+    public PresetSeatOutcome PresetSeat(
+        int seat,
+        string controllerKind,
+        string displayName,
+        IReadOnlyList<string> deck,
+        RoomDeckConfig? deckConfig = null,
+        bool connected = false)
+    {
+        ArgumentNullException.ThrowIfNull(deck);
+
+        lock (_sync)
+        {
+            if (_state != RoomState.Lobby)
+            {
+                return new PresetSeatOutcome(false, null, "房间已开局，不能预置座位。");
+            }
+
+            if (!InRange(seat))
+            {
+                return new PresetSeatOutcome(false, null, $"座位号 {seat} 越界（0..{_seats.Length - 1}）。");
+            }
+
+            if (_seats[seat] is not null)
+            {
+                return new PresetSeatOutcome(false, null, $"座位 {seat} 已被占用。");
+            }
+
+            var slot = new SeatSlot
+            {
+                Seat = seat,
+                Kind = NormalizeKind(controllerKind),
+                DisplayName = string.IsNullOrWhiteSpace(displayName) ? $"座位{seat}" : displayName,
+                Deck = deck,
+                DeckConfig = deckConfig,
+                SeatToken = Guid.NewGuid().ToString("N"),
+                Connected = connected,
+            };
+
+            _seats[seat] = slot;
+            return new PresetSeatOutcome(true, slot.SeatToken, null);
+        }
+    }
+
     /// <summary>强制释放座位（房主）。</summary>
     public McpToolResult Kick(int seat, string? seatToken)
     {

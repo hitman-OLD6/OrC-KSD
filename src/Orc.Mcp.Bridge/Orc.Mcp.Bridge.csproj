@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Orc.Mcp.Bridge</AssemblyName>
+    <RootNamespace>Orc.Mcp.Bridge</RootNamespace>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <!--
+    stdio MCP 桥（无头沙盒 S5）：对外讲 MCP（tools/list、tools/call），对内用 Orc.Client 连服务端 TCP。
+    **零引擎依赖、零第三方依赖**；stdout 只承载 JSON-RPC 帧，诊断一律 stderr。
+    启动形态固定为 `dotnet <绝对路径>/Orc.Mcp.Bridge.dll`（禁止 `dotnet run`：构建噪声会污染 stdout）。
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Orc.Client\Orc.Client.csproj" />
+    <ProjectReference Include="..\Orc.Protocol\Orc.Protocol.csproj" />
+  </ItemGroup>
+
+</Project>

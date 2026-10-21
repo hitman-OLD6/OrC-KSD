@@ -33,6 +33,14 @@ public interface IMatchLauncher
 }
 
 /// <summary>
+/// 预置座位结果（无头编排）：成功时携带该座位的令牌（仅进程内使用，随进程退出失效）。
+/// </summary>
+/// <param name="Ok">是否成功落座。</param>
+/// <param name="SeatToken">座位令牌（成功时非空）。</param>
+/// <param name="Message">失败原因（成功时为 <c>null</c>）。</param>
+public sealed record PresetSeatOutcome(bool Ok, string? SeatToken, string? Message);
+
+/// <summary>
 /// 卡组合法性校验面（S7 由 `Orc.Game.Decks.DeckRules` 实现）。
 /// 返回 <c>null</c>＝通过；否则为失败结果（错误码 + 可定位信息）。
 /// </summary>

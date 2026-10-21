@@ -1,8 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
 using Orc.Game.Cards;
+using Orc.Game.Decks;
 using Orc.Mcp;
 using Orc.Packages.Loading;
+using Orc.Server.Headless;
 using Orc.Server.Rooms;
 using Orc.Server.Transport;
 
@@ -13,6 +15,10 @@ namespace Orc.Server;
 /// <para>
 /// 顺序要点：房间需要 launcher，而 launcher 需要服务层，服务层又需要房间控制面——
 /// 用 lambda 延迟取服务实例打破这个构造环。
+/// </para>
+/// <para>
+/// 无头沙盒（S1/S2）：<see cref="ServerOptions.Headless"/> 为真时，在任何外部连接之前预置两座位并落盘令牌；
+/// 就绪回调之后才开始自动开局判定（<c>ai+ai</c> 立即开局，否则等待 agent 绑定）。
 /// </para>
 /// </summary>
 public static class ServerBootstrap
@@ -27,6 +33,23 @@ public static class ServerBootstrap
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(options);
+
+        // 两个开关语义不混：既有关闭开关（EnforceDeckRules=false）映射到 none，不得与三档同时给出。
+        if (!options.EnforceDeckRules && options.DeckRules != DeckRuleTier.Strict)
+        {
+            throw new ArgumentException(
+                "EnforceDeckRules=false 与 DeckRules 三档不能同时给出（前者映射到 none）。",
+                nameof(options));
+        }
+
+        if (options.AllowDebugWrites && options.Mode != ServerMode.Sandbox)
+        {
+            throw new ArgumentException("AllowDebugWrites 只在 ServerMode.Sandbox 下有效。", nameof(options));
+        }
+
+        var tier = options.EnforceDeckRules ? options.DeckRules : DeckRuleTier.None;
+        // lenient 放宽张数＝RequiredDeckSize 0（分项放宽的"张数"这一项）；strict 保持生产口径。
+        var requiredDeckSize = tier == DeckRuleTier.Lenient ? 0 : options.RequiredDeckSize;
 
         IReadOnlyDictionary<string, CardDefinition> pool =
             new Dictionary<string, CardDefinition>(StringComparer.Ordinal);
@@ -43,38 +66,56 @@ public static class ServerBootstrap
         var listenerPort = 0;
         McpService? service = null;
 
-        var generator = new AiDeckGenerator(pool);
+        // S2b：同一种子驱动卡组生成与建局，保证"同卡包 ＋ 同种子 ＋ 同参数"可复现。
+        var generator = new AiDeckGenerator(pool, options.Seed is { } seed ? new Random(seed) : null);
         var launcher = new McpMatchLauncher(
             () => service ?? throw new InvalidOperationException("服务层尚未就绪。"),
             options.PackDirectories,
-            () => generator.Generate(options.RequiredDeckSize),
-            options.EnforceDeckRules);
+            () => generator.Generate(requiredDeckSize, bestEffort: tier == DeckRuleTier.Lenient),
+            options.EnforceDeckRules,
+            tier,
+            requiredDeckSize,
+            options.Seed);
 
         var room = new Room(
             Guid.NewGuid().ToString("N")[..8],
             options.SeatCount,
-            deckValidator: new DeckRulesValidator(() => pool, options.EnforceDeckRules, options.RequiredDeckSize),
+            deckValidator: new DeckRulesValidator(() => pool, options.EnforceDeckRules, requiredDeckSize, tier),
             launcher: launcher,
             addresses: () => LocalAddresses.Collect(listenerPort),
             packFingerprint: options.PackFingerprint ?? ComputePackFingerprint(options.PackDirectories));
 
+        // S2：预置座位与令牌必须在任何外部连接之前完成（否则首个 resume 可能找不到 token）。
+        var headless = options.Headless ? new HeadlessContext(options) : null;
+        headless?.Prepare(generator, room);
+
         service = new McpService(
             new McpServiceOptions
             {
-                Mode = McpServiceMode.Player,
+                Mode = options.Mode == ServerMode.Sandbox ? McpServiceMode.Authoring : McpServiceMode.Player,
                 SandboxRoot = options.SandboxRoot,
                 MatchId = room.RoomId,
                 TargetSelectionTimeout = options.TargetSelectionTimeout,
+                Seed = options.Seed,
+                AgentSeat = headless?.AgentSeat,
+                // S3：服务端 sandbox 默认零写面；显式 --allow-debug-writes 才注册写类。
+                AllowDebugWrites = options.Mode == ServerMode.Sandbox && options.AllowDebugWrites,
             },
             new RoomControl(room));
 
-        var host = await new ServerHost(service, options, queue: null, room: room).StartAsync(ct).ConfigureAwait(false);
+        var host = await new ServerHost(service, options, queue: null, room: room, headless: headless)
+            .StartAsync(ct)
+            .ConfigureAwait(false);
         listenerPort = host.Port;
+        headless?.Attach(host);
 
         // 父进程兜底：客户端崩溃（无 FIN、无正常退出）时本进程随之退出。
         _ = ParentWatchdog.Start(options.ParentProcessId, ct: ct);
 
         onReady?.Invoke(host.Port);
+
+        // 监听就绪后启动编排：ai+ai 立即开局；有 agent 座位则开始等待计时。
+        headless?.Arm();
         return host;
     }
 

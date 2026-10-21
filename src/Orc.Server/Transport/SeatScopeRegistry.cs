@@ -22,6 +22,12 @@ internal enum SeatScope
 
     /// <summary>房间/诊断/只读：不看座位，且严禁绑定座位（鉴权靠工具自身令牌）。</summary>
     Agnostic,
+
+    /// <summary>
+    /// 调试写类：只对"回环来源 ＋ 未绑定座位"的编排连接可见可用（无头沙盒 S3）。
+    /// <para>**明示不设防**：只防误触，不阻止同机进程另开连接绕过；隔离靠 OS 用户/容器，不在本需求范围。</para>
+    /// </summary>
+    OrchestratorOnly,
 }
 
 /// <summary>
@@ -35,8 +41,11 @@ internal enum SeatScope
 internal static class SeatScopeRegistry
 {
     /// <summary>四类归属表（未列出＝默认拒绝）。</summary>
-    public static readonly FrozenDictionary<string, SeatScope> ToolScopes =
-        new Dictionary<string, SeatScope>(StringComparer.Ordinal)
+    public static readonly FrozenDictionary<string, SeatScope> ToolScopes = BuildScopes();
+
+    private static FrozenDictionary<string, SeatScope> BuildScopes()
+    {
+        var scopes = new Dictionary<string, SeatScope>(StringComparer.Ordinal)
         {
             // ---- Bind：session.Seat 的唯一写入点 ----
             ["room.claim"] = SeatScope.Bind,
@@ -72,7 +81,22 @@ internal static class SeatScopeRegistry
             ["docs.read"] = SeatScope.Agnostic,
             ["play.can_play"] = SeatScope.Agnostic,
             ["command.availability"] = SeatScope.Agnostic,
-        }.ToFrozenDictionary(StringComparer.Ordinal);
+        };
+
+        // S3：调试类清单只有一个来源（Orc.Mcp.Tools.DebugToolCatalog）。
+        // 读类＝Agnostic（所有连接可见）；写类＝OrchestratorOnly（回环 ＋ 未绑定）。
+        foreach (var name in Orc.Mcp.Tools.DebugToolCatalog.ReadToolNames)
+        {
+            scopes[name] = SeatScope.Agnostic;
+        }
+
+        foreach (var name in Orc.Mcp.Tools.DebugToolCatalog.WriteToolNames)
+        {
+            scopes[name] = SeatScope.OrchestratorOnly;
+        }
+
+        return scopes.ToFrozenDictionary(StringComparer.Ordinal);
+    }
 
     /// <summary>语义无法用四类表达的专门分支（仍算"已登记"）。</summary>
     public static readonly FrozenSet<string> SpecialCasedTools =
@@ -90,6 +114,11 @@ internal static class SeatScopeRegistry
     public static SeatScope? ScopeOf(string name)
         => ToolScopes.TryGetValue(name, out var scope) ? scope : null;
 
+    /// <summary>
+    /// 已绑定座位的会话是否应看到该工具（S3：写类对 agent 不列出；不可见 ≠ 不可调，调用侧仍有第二道拒绝）。
+    /// </summary>
+    public static bool IsVisibleToBoundSession(string name) => ScopeOf(name) != SeatScope.OrchestratorOnly;
+
     /// <summary>作用域的可读名（诊断/测试用；未登记＝null，专门分支＝<c>"special"</c>）。</summary>
     public static string? ScopeName(string name)
         => ToolScopes.TryGetValue(name, out var scope)
@@ -98,6 +127,7 @@ internal static class SeatScopeRegistry
                 SeatScope.Bind => "bind",
                 SeatScope.OwnerScoped => "owner-scoped",
                 SeatScope.SeatRequired => "seat-required",
+                SeatScope.OrchestratorOnly => "orchestrator-only",
                 _ => "agnostic",
             }
             : SpecialCasedTools.Contains(name) ? "special" : null;

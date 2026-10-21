@@ -167,6 +167,8 @@ public sealed class PlayManager
                 {
                     // S6：部署选位归属＝卡牌拥有者。
                     Owner = card.Owner,
+                    // R8：部署空隙的选择＝deploy（部署过程中由卡效果再发起的选牌/选单位属 effect）。
+                    Action = SelectorActions.Deploy,
                 });
 
             // 非法选择＝同一选择器重入（Q8a）。
@@ -615,6 +617,15 @@ public sealed class PlayManager
         {
             throw new InvalidOperationException(
                 "反制使用需要回合上下文（当前行动方），本管理器未装配回合管理器（独立构造场景不支持反制使用）。");
+        }
+
+        // 已消耗/已销毁＝不可再激活或取消：入口明确失败（CounterUnavailable），**零副作用**
+        // （不扣点、不翻转、不发信号）；必须早于 BeginAction——否则会在动作作用域里留下空段。
+        // 也早于验证段：验证侧对「引用须为存活卡」是 fail-fast（ArgumentException），那是装配性错误口径，
+        // 不该由「玩家点了一张已经没了的卡」触发。
+        if (card.IsConsumed || card.IsDestroyed)
+        {
+            return PlayResult.Failure(PlayFailureReason.CounterUnavailable);
         }
 
         // 动作作用域（UI 消费桥接）：本动作产生的事件聚合为一段。

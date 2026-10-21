@@ -191,8 +191,9 @@ public class GameHooksTests
         var payloadKeys = constants.Where(c => c.Name.StartsWith("Payload", StringComparison.Ordinal))
             .Select(c => c.Value).ToList();
 
-        // 34 = 原 31 + card.dying（卸载前宿主结算）+ card.leaving（离场前）+ keyword.attack.finished（临时增益到期）。
-        Assert.Equal(34, signals.Count);
+        // 35 = 原 31 + card.dying（卸载前宿主结算）+ card.leaving（离场前）+ keyword.attack.finished（临时增益到期）
+        // + counter.disarmed（反制武装窗口到期自动解除——与 counter.triggered 成对，R1.3）。
+        Assert.Equal(35, signals.Count);
         // 18 = 原 17 + Source（R9：事件引发者，恒写、可空）。
         Assert.Equal(18, payloadKeys.Count);
         Assert.Equal(signals.OrderBy(v => v, StringComparer.Ordinal),
@@ -260,6 +261,7 @@ public class GameHooksTests
             [GameHooks.UnitCombatSurvived] = "EmitUnitCombatSurvived",
             [GameHooks.UnitDamageDealt] = "EmitUnitDamageDealt",
             [GameHooks.CounterTriggered] = "EmitCounterTriggered",
+            [GameHooks.CounterDisarmed] = "EmitCounterDisarmed",
         };
         var turnSignals = new[]
         {
@@ -267,8 +269,8 @@ public class GameHooksTests
             GameHooks.TurnEndBefore, GameHooks.TurnEnd,
         };
 
-        // 29 = 原 27 + card.leaving + keyword.attack.finished。
-        Assert.Equal(29, helpers.Count);
+        // 30 = 原 27 + card.leaving + keyword.attack.finished + counter.disarmed。
+        Assert.Equal(30, helpers.Count);
         foreach (var (signal, method) in helpers)
         {
             Assert.Contains(signal, GameHooks.Signals);
@@ -362,7 +364,8 @@ public class GameHooksTests
         using var document = JsonDocument.Parse(GameHooksJson.Serialize(indented: true));
         var root = document.RootElement;
 
-        Assert.Equal(31, root.GetProperty("signals").GetArrayLength()); // S1 受控适配（29 → 30）：新增 unit.upgraded；S2 受控适配（30 → 31）：新增 unit.revealed
+        // S1 受控适配（29 → 30）：unit.upgraded；S2（30 → 31）：unit.revealed；R1.3（31 → 32）：counter.disarmed。
+        Assert.Equal(32, root.GetProperty("signals").GetArrayLength());
         Assert.Equal(23, root.GetProperty("judicators").GetArrayLength());
         Assert.Equal(GameHooks.TriggerLayers.Count, root.GetProperty("triggerLayers").GetArrayLength());
         Assert.Equal(27, root.GetProperty("pending").GetArrayLength());

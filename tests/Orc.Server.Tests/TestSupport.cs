@@ -76,6 +76,23 @@ internal static class TestSupport
         return result.Details!["seatToken"]!.GetValue<string>();
     }
 
+    /// <summary>
+    /// 读取仍在写入中的日志文件（<c>FileShare.ReadWrite</c>）：无头日志由运行中的服务端持有写句柄，
+    /// 默认的 <see cref="File.ReadAllLines(string)"/> 会因共享冲突失败。
+    /// </summary>
+    public static string[] ReadAllLinesShared(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        var lines = new List<string>();
+        while (reader.ReadLine() is { } line)
+        {
+            lines.Add(line);
+        }
+
+        return lines.ToArray();
+    }
+
     /// <summary>等待条件成立（轮询）；超时返回最后值（由用例决定是否断言失败）。</summary>
     public static async Task<T> WaitUntilAsync<T>(
         Func<Task<T>> probe,

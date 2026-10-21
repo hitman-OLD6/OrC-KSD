@@ -323,11 +323,20 @@ public abstract class Effect
         }
     }
 
-    /// <summary>装载链：挂 disposing → 挂业务主触发器 → 执行 OnMount。异常不拦截（由调用方记录并回滚）。</summary>
-    internal void ExecuteMount(Bus bus)
+    /// <summary>
+    /// 装载链：挂 disposing → 挂业务主触发器 → 执行 OnMount。异常不拦截（由调用方记录并回滚）。
+    /// <paramref name="mountMainTriggers"/>＝false 时**只跳过 <see cref="MountMainTrigger"/> 这一行**（主触发器/otherTriggers
+    /// 不上总线），其余（disposing 挂载、IsMounted、OnMount、装载完成动作）照常——供「宿主自己承载调用」的装载方使用
+    /// （反制卡效果装配）；默认 true＝既有行为。
+    /// </summary>
+    internal void ExecuteMount(Bus bus, bool mountMainTriggers = true)
     {
         MountDisposal(bus);
-        MountMainTrigger(bus);
+        if (mountMainTriggers)
+        {
+            MountMainTrigger(bus);
+        }
+
         IsMounted = true;
         _disposalState = DisposalState.Mounted;
         _loading = true;

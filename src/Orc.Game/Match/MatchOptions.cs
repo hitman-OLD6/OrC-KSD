@@ -35,4 +35,14 @@ public sealed class MatchOptions
     /// （开关仅贡献"第 1 回合不抽"这一唯一例外的有无）。
     /// </summary>
     public bool AllowFirstTurnDraw { get; init; }
+
+    // ---------- 沙盒调试原语（授权事实） ----------
+
+    /// <summary>
+    /// 沙盒授权（缺省 <c>false</c＝未授权）：由**装配方在构造期决定**。
+    /// 未授权时引擎保留触发器族（<see cref="Sandbox.SandboxPrimitives"/>）的全部原语一律明确拒绝、零状态变更；
+    /// 授权只在沙盒装配路径开启（<c>Orc.Server --mode sandbox</c> / McpService Authoring / 测试夹具显式声明），
+    /// <c>play</c> 路径不开启。
+    /// </summary>
+    public bool SandboxAuthorized { get; init; }
 }

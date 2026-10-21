@@ -1,6 +1,7 @@
 ﻿using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Board;
+using Orc.Game.Triggers;
 
 namespace Orc.Game.Cards;
 
@@ -191,6 +192,9 @@ internal static class CardEffectLoader
             return; // 独立构造（脱离对局——无对局装载语境）：整链跳过（不抛错——沿用词条先例；功能不可用）
         }
 
+        // 宿主判据（S1）：只看宿主类——反制卡效果不挂主触发器/otherTriggers，改装配进 CounterCard 的效果 handler 集。
+        var isCounterHost = card is CounterCard;
+
         var declarations = context.Declarations;
         if (declarations.Count > 0)
         {
@@ -237,9 +241,10 @@ internal static class CardEffectLoader
             }
 
             // ③ 登记入容器（Effects 列表序＝声明序——装载顺序的来源）。
+            //     反制卡宿主：即时装载不挂主触发器（CounterCard 自己承载调用面——无双触发；见 ④b 装配）。
             foreach (var effect in constructed)
             {
-                card.AddEffect(effect);
+                card.AddEffect(effect, mountMainTriggers: !isCounterHost);
             }
         }
 
@@ -263,7 +268,7 @@ internal static class CardEffectLoader
             }
 
             var instantiatedEffect = instantiation.Effect!;
-            card.AddEffect(instantiatedEffect); // Add 即装载（被动：挂载动态触发器；主动：列表进出）
+            card.AddEffect(instantiatedEffect, mountMainTriggers: !isCounterHost); // Add 即装载（被动：挂载动态触发器；主动：列表进出）
             if (snapshot is not null)
             {
                 ApplyFrameworkDeclarations(card, engine, snapshot, instantiatedEffect); // injects ＋ judicatorWrappers
@@ -271,7 +276,14 @@ internal static class CardEffectLoader
         }
 
         // ④ 装载兜底（幂等——Add 即装载后多为跳过；对装载失败回滚者＝重试装载；失败＝回滚为未生效、记录、不阻断）。
-        card.MountPassiveEffects();
+        //    反制卡宿主只挂 disposing（跳过主触发器）——IsMounted/OnMount/装载完成动作照常（完整销毁链的前提）。
+        card.MountPassiveEffects(mountMainTriggers: !isCounterHost);
+
+        // ④b 反制效果装配（S1/S2）：把动态效果折叠为 CounterCard 的效果 handler 集（激活时进 Counter 段）。
+        if (card is CounterCard counterCard)
+        {
+            AssembleCounterEffectHandlers(counterCard, engine);
+        }
 
         // ⑤ 装载失败残留清理（幂等兜底）——托管登记自 W3-A3 起随「通用装载路径」自动完成（任何装载入口含复装均登记），
         //    本链不再手动登记；此处仅对仍未装载（失败回滚）者清理可能的中途残留。
@@ -289,6 +301,146 @@ internal static class CardEffectLoader
             }
         }
     }
+
+    /// <summary>
+    /// 反制效果装配（S2/S4/S5）：把反制卡宿主的动态效果折叠为 <see cref="CounterCard"/> 的效果 handler 集——
+    /// 一条效果恰产出一个 handler（内部按列表序**串行**其主触发器的普通事件、共用**同一个外层 ctx**），
+    /// 装配期一次性 <c>ResolveHandler</c>（目标视图恒为 <see cref="CardTriggerView"/>）并做强转校验，
+    /// 运行期只 <c>await</c> 已解析条目（禁止 DynamicInvoke 兜底）。
+    /// 分级：不支持形态／求值失败／签名不符＝<see cref="LogLevel.Error"/> 单条隔离；无可调用事件（空效果）＝
+    /// <see cref="LogLevel.Warning"/> 不产 handler；装配成功＝<see cref="LogLevel.Info"/>。均不抛、不阻断加载。
+    /// </summary>
+    private static void AssembleCounterEffectHandlers(CounterCard card, LogicEngine engine)
+    {
+        foreach (var effect in card.Effects.ToArray()) // 列表序＝声明序（遍历中可能清理，取快照）
+        {
+            var snapshot = TryGetSnapshot(effect);
+            if (snapshot is null)
+            {
+                WriteCounterAssembly(
+                    engine, LogLevel.Warning, "warn", effect.Name, "-",
+                    $"反制卡 '{card.Name}' 的效果 '{effect.Name}' 无效果快照（非动态形态）——不产 handler（该效果不承担拦截职责）。");
+                continue;
+            }
+
+            var root = snapshot.Root;
+            if (root.OtherTriggers.Count > 0)
+            {
+                WriteCounterAssembly(
+                    engine, LogLevel.Error, "unsupported-other-triggers", effect.Name, root.Id,
+                    $"反制卡 '{card.Name}' 的效果 '{effect.Name}'（预制体 '{root.Id}'）声明了 otherTriggers——"
+                    + "不装配（反制效果只承认 handler 面；otherTriggers 须由宿主自己承载）。");
+                continue;
+            }
+
+            if (root.Wrappers.Count > 0)
+            {
+                WriteCounterAssembly(
+                    engine, LogLevel.Error, "unsupported-wrappers", effect.Name, root.Id,
+                    $"反制卡 '{card.Name}' 的效果 '{effect.Name}'（预制体 '{root.Id}'）声明了 wrappers——"
+                    + "不装配（wrapper 施加在触发器注册项上，不进入 Counter 段即失效）。");
+                continue;
+            }
+
+            // 统一按 CardTriggerView 求值（反制要读被反制指令卡／施放目标／数值——只有 CardTriggerView 有）。
+            if (!IsCardTriggerViewDeclaration(root.MainTrigger.ViewTypeName))
+            {
+                WriteCounterAssembly(
+                    engine, LogLevel.Error, "viewType", effect.Name, root.Id,
+                    $"反制卡 '{card.Name}' 的效果 '{effect.Name}'（预制体 '{root.Id}'）声明视图类型 "
+                    + $"'{root.MainTrigger.ViewTypeName}'——反制效果只承认 '{typeof(CardTriggerView).FullName}'，该条隔离。");
+                continue;
+            }
+
+            // 普通事件＝主触发器 Events 中 band ≠ disposing 者（disposing 只保兜底挂载、不进 handler）。
+            var callableEvents = root.MainTrigger.Events
+                .Where(ev => !string.Equals(ev.Band, DisposingBand, StringComparison.Ordinal))
+                .ToArray();
+
+            if (callableEvents.Length == 0)
+            {
+                WriteCounterAssembly(
+                    engine, LogLevel.Warning, "warn", effect.Name, root.Id,
+                    $"反制卡 '{card.Name}' 的效果 '{effect.Name}'（预制体 '{root.Id}'）无普通事件"
+                    + "（仅 disposing／events 为空）——不产 handler（该效果不承担拦截职责）。");
+                continue;
+            }
+
+            var folded = new List<(string EventId, Func<CardTriggerView, Context, CancellationToken, Task> Handler)>();
+            foreach (var eventPrefab in callableEvents)
+            {
+                var resolution = engine.Prefabs.ResolveHandler(eventPrefab, typeof(CardTriggerView));
+                if (!resolution.Success)
+                {
+                    WriteCounterAssembly(
+                        engine, LogLevel.Error, resolution.ErrorCategory ?? "resolve", effect.Name, root.Id,
+                        $"反制卡 '{card.Name}' 的效果 '{effect.Name}'（预制体 '{root.Id}'）事件 '{eventPrefab.Id}' 解析失败——"
+                        + $"[{resolution.ErrorCategory}] {resolution.Error}（该事件缺席，其余事件照常）。");
+                    continue;
+                }
+
+                if (resolution.Handler is not Func<CardTriggerView, Context, CancellationToken, Task> typed)
+                {
+                    WriteCounterAssembly(
+                        engine, LogLevel.Error, "signature", effect.Name, root.Id,
+                        $"反制卡 '{card.Name}' 的效果 '{effect.Name}'（预制体 '{root.Id}'）事件 '{eventPrefab.Id}' 的处理器签名"
+                        + $"与 '{typeof(CardTriggerView).FullName}' 不符——该事件缺席，其余事件照常。");
+                    continue;
+                }
+
+                folded.Add((eventPrefab.Id, typed));
+            }
+
+            if (folded.Count == 0)
+            {
+                continue; // 全部事件解析失败：该条缺席（失败已逐条记 Error）
+            }
+
+            var entries = folded.ToArray();
+            card.AddEffectHandler(effect.Name, async (view, ctx, ct) =>
+            {
+                foreach (var (_, handler) in entries)
+                {
+                    if (ctx.Stopped || ctx.Interrupted)
+                    {
+                        return; // 已命中：本级余下事件不再执行（与引擎「Stop 停本级剩余事件」同义）
+                    }
+
+                    await handler(view, ctx, ct).ConfigureAwait(false);
+                }
+            });
+
+            WriteCounterAssembly(
+                engine, LogLevel.Info, "assembled", effect.Name, root.Id,
+                $"反制卡 '{card.Name}' 的效果 '{effect.Name}' 已装配（预制体 '{root.Id}'，折叠 {entries.Length} 个事件："
+                + $"{string.Join("、", entries.Select(entry => entry.EventId))}）。");
+        }
+    }
+
+    /// <summary>事件预制体的 disposing 区段名（保留槽；不进反制 handler）。</summary>
+    private const string DisposingBand = "disposing";
+
+    /// <summary>取效果快照（动态被动/主动两种形态；非动态形态＝null——不承担 handler 装载）。</summary>
+    private static EffectSnapshot? TryGetSnapshot(Effect effect) => effect switch
+    {
+        DynamicPassiveEffect passive => passive.Snapshot,
+        DynamicActiveEffect active => active.Snapshot,
+        _ => null,
+    };
+
+    /// <summary>声明的视图类型是否为 <see cref="CardTriggerView"/>（全名或短名；大小写敏感 ordinal）。</summary>
+    private static bool IsCardTriggerViewDeclaration(string viewTypeName)
+        => string.Equals(viewTypeName, nameof(CardTriggerView), StringComparison.Ordinal)
+           || string.Equals(viewTypeName, typeof(CardTriggerView).FullName, StringComparison.Ordinal);
+
+    /// <summary>反制装配留痕（三档不混：Error＝声明不支持/求值失败、Warn＝空效果、Info＝成功装配一条）。</summary>
+    private static void WriteCounterAssembly(
+        LogicEngine engine, LogLevel level, string category, string effectName, string prefabId, string message)
+        => engine.RootStream.WriteLog(
+            "反制效果装配",
+            message,
+            level,
+            new[] { "effect", "counter", category, effectName, prefabId });
 
     /// <summary>
     /// 框架侧注入（S5；P7＝a）：把效果预制体声明的 <c>injects</c> 落地——按名在宿主卡上解析目标触发器、

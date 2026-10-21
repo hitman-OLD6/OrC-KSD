@@ -119,6 +119,8 @@ internal sealed class TargeterFlow : ITargeterFlow
         var instance = selector.CreateInstance(parameter);
         // S6：归属座位随选择器实例走（单点注入——不侵入各 CreateInstance 重载）。
         instance.Presentation.OwnerSeat = parameter.Owner?.Index;
+        // R8：动作类别与归属座位同点写入（缺省＝unknown，不伪造类别）。
+        instance.Presentation.Action = parameter.Action ?? SelectorActions.Unknown;
         _current = instance;
         _session.Enqueue(instance);
         return instance.Completion;

@@ -121,7 +121,8 @@ internal static class CardLoadout
     /// 回滚装载（撤销注入、卸载主触发器、清除卸载清理登记残留——效果视为未生效、「不登记残留」）、不阻断其它效果与宿主。
     /// </summary>
     /// <returns>true＝本次完成装载；false＝跳过（已装载）或失败（已记录并回滚）。</returns>
-    internal static bool MountEffect(Card card, Effect effect)
+    /// <param name="mountMainTriggers">false＝只挂 disposing、跳过主触发器（宿主自持调用面——反制卡效果装配）；默认 true。</param>
+    internal static bool MountEffect(Card card, Effect effect, bool mountMainTriggers = true)
     {
         effect.ValidateForUse();
         effect.MountDisposal(card.Engine.Bus); // 主动/被动统一：disposing 触发器先挂（幂等）
@@ -133,7 +134,7 @@ internal static class CardLoadout
 
         try
         {
-            effect.ExecuteMount(card.Engine.Bus);
+            effect.ExecuteMount(card.Engine.Bus, mountMainTriggers);
         }
         catch (Exception ex)
         {

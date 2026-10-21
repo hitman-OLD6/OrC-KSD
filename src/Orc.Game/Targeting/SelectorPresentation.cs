@@ -44,6 +44,12 @@ public sealed class SelectorPresentation
     /// </summary>
     public int? OwnerSeat { get; internal set; }
 
+    /// <summary>
+    /// 本次选靶所属的动作类别（R8 的 <c>pending.action</c>；取值见 <see cref="SelectorActions"/>；
+    /// 缺省＝<see cref="SelectorActions.Unknown"/>）。由 <see cref="SelectorParameter.Action"/> 注入。
+    /// </summary>
+    public string Action { get; internal set; } = SelectorActions.Unknown;
+
     /// <summary>选择器类型名（专门选择器的稳定标识；前端据以选择视觉实现）。</summary>
     public string SelectorName { get; }
 

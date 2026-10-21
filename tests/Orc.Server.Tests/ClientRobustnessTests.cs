@@ -15,6 +15,42 @@ namespace Orc.Server.Tests;
 /// </summary>
 public class ClientRobustnessTests
 {
+    /// <summary>
+    /// 调用方传入的 <c>arguments</c> 已挂在另一棵树上时不得抛“node already has a parent”。
+    /// <para>
+    /// 真实命中路径：stdio 桥把 stdin 帧里的 <c>params.arguments</c> 节点直接转给 <see cref="OrcClient.CallAsync"/>；
+    /// 修复前该节点换父失败，导致**所有经桥转发的工具调用**都返回 <c>not-connected</c>。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Call_WithArgumentsAlreadyParented_DoesNotThrow()
+    {
+        using var temp = new TestSupport.TempDirectory("orc-client");
+        await using var host = await ServerBootstrap.StartAsync(new ServerOptions
+        {
+            PackDirectories = [],
+            SandboxRoot = temp.Path,
+            Port = 0,
+            EnforceDeckRules = false,
+        });
+
+        await using var client = await OrcClient.ConnectAsync(new ClientOptions
+        {
+            Host = "127.0.0.1",
+            Port = host.Port,
+        });
+
+        await client.InitializeAsync(new InitializeParams { ClientName = "parented-args" });
+
+        // 模拟桥：arguments 从请求树里取出，已带父节点。
+        var frame = JsonNode.Parse("""{"params":{"arguments":{}}}""")!;
+        var parented = (JsonObject)frame["params"]!["arguments"]!;
+
+        var result = await client.CallAsync("service.info", parented);
+
+        Assert.True(result.Ok, result.Message);
+    }
+
     /// <summary>一个订阅者抛异常：连接仍可用，其余订阅者仍被调用（F9）。</summary>
     [Fact]
     public async Task NotificationHandlerThrows_DoesNotKillReadLoop()

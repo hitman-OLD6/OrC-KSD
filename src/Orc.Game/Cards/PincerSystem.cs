@@ -154,7 +154,12 @@ public static class PincerRules
         {
             var step = await flow.Step(
                 SelectorTemplates.TargetPoint,
-                new ReferenceSetParameter(candidates.Select(unit => unit.Ref), 1, 1));
+                // R2/R8：归属＝发起钳击的部署单位归属（此前未填 → 请求被广播给所有会话）；类别＝effect（卡效果选靶）。
+                new ReferenceSetParameter(candidates.Select(unit => unit.Ref), 1, 1)
+                {
+                    Owner = self.Owner,
+                    Action = SelectorActions.Effect,
+                });
 
             // 非法选择＝同一选择器重入（Q8a）。
             while (step.IsFailed && step.Failure == SelectorFailureReason.InvalidSelection)

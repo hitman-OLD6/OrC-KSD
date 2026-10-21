@@ -58,6 +58,8 @@ public sealed class Match
     private GameEnvironment? _environment; // W3-1 G4：游戏环境（对局装配期创建；多对局相互独立）
     private MatchCardService? _cardService; // S9：对局卡牌服务（服务面——卡牌工厂＋放置面；对局装配期创建）
     private MatchHistoryService? _historyService; // S10：对局历史读取服务（最小历史读取面；对局装配期创建）
+    private Sandbox.SandboxPrimitives? _sandbox; // 沙盒调试原语族（引擎保留触发器；授权时装配）
+    private readonly bool _sandboxAuthorized; // 沙盒授权事实（装配方构造期决定；缺省未授权）
     private EffectRuntime? _effectRuntime; // E1：效果运行时门面（csx 唯一游戏层受控入口；对局装配期创建）
     private AssetServiceRegistry? _assetServices; // 资产化 S12c：资产服务注册表（对局级；与判定器注册表并列）
     private readonly Orc.Game.Plugins.IMatchPackageActivator? _packageActivator; // 资产化 S12c：对局包激活器（快照 → 对局级注册面；null＝空目录）
@@ -168,6 +170,7 @@ public sealed class Match
         _judicatorAssembly = judicatorAssembly;
         _packageActivator = packageActivator;
         _cardLoader = cardLoader;
+        _sandboxAuthorized = resolvedOptions.SandboxAuthorized;
         Engine = new LogicEngine();
     }
 
@@ -354,6 +357,23 @@ public sealed class Match
     /// </summary>
     /// <exception cref="InvalidOperationException">对局尚未进入"进行"态。</exception>
     public MatchHistoryService HistoryService => RequireReady(_historyService);
+
+    // ---------- 沙盒调试原语（引擎保留触发器族） ----------
+
+    /// <summary>
+    /// 沙盒调试原语族（授权门禁承载）：管理器群建齐后装配——六原语各恰一个内置 handler、**构造完成即封闭**。
+    /// 未授权实例下全部原语返回 <c>sandbox-not-authorized</c> 且零状态变更；授权只在沙盒装配路径开启
+    /// （<see cref="MatchOptions.SandboxAuthorized"/>）。
+    /// 主防线＝不可达：本属性只暴露原语入口方法，不暴露任何触发器实例、亦不进入按名解析面与预制体 <c>injects</c>。
+    /// </summary>
+    /// <exception cref="InvalidOperationException">对局尚未进入"进行"态（须先成功完成 Initialize）。</exception>
+    public Sandbox.SandboxPrimitives Sandbox => RequireReady(_sandbox);
+
+    /// <summary>
+    /// 诊断面（只读）：保留触发器导出（名／封闭态／授权／内置 handler 名）；未装配＝<c>[]</c>。
+    /// 可观测、不可写——不构成任何注册或触发入口。
+    /// </summary>
+    public string ExportReservedTriggersJson() => _sandbox?.ExportReservedTriggersJson() ?? "[]";
 
     // ---------- 对局受控动作面（W4-1 G14 收尾） ----------
 
@@ -798,6 +818,10 @@ public sealed class Match
             _lifecycle,
             CanAcceptInput,
             player => CombatJudicatorInvoker.InvokeBool(turnOwnerEntry, player.Index, new object[] { player }));
+
+        // 沙盒调试原语族（引擎保留触发器）：管理器群建齐后装配——六原语各注册唯一内置 handler、立即封闭；
+        // 授权事实来自构造期（MatchOptions.SandboxAuthorized，缺省未授权）。未授权时原语入口一律拒绝、零状态变更。
+        _sandbox = new Sandbox.SandboxPrimitives(this, _sandboxAuthorized);
 
         // A1 加性：换牌管理器（开局换牌相位承载——特制槽位交互＋换牌执行；双方确认＝执行先手第 1 回合＋置"进行"）
         var turnManager = _turnManager!;

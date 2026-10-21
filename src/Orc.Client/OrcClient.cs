@@ -126,7 +126,9 @@ public sealed class OrcClient : IAsyncDisposable
         var parameters = new JsonObject
         {
             ["name"] = tool,
-            ["arguments"] = arguments ?? new JsonObject(),
+            // 调用方传入的 arguments 可能已挂在另一棵树上（例如桥从 stdin 帧里直接取出的节点）；
+            // JsonObject.SetItem 会给它换父并抛 “The node already has a parent”，因此必须深拷贝。
+            ["arguments"] = arguments?.DeepClone() ?? new JsonObject(),
         };
 
         var response = await CallRawAsync(ProtocolMethods.ToolsCall, parameters, ct).ConfigureAwait(false);

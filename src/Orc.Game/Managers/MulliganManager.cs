@@ -173,7 +173,12 @@ public sealed class MulliganManager
                     min: 0,
                     max: hand.Length,
                     domainValidator: reference => player.Hand.Any(card => ReferenceEquals(card, reference.Value)),
-                    tag: player));
+                    tag: player)
+                {
+                    // R8：换牌类别（此前仅靠 tag: player 由宿主兜底归属，类别仍缺）。
+                    Owner = player,
+                    Action = SelectorActions.Mulligan,
+                });
 
             // 非法选择＝同一选择器重入（Q8a）。
             while (step.IsFailed && step.Failure == SelectorFailureReason.InvalidSelection)

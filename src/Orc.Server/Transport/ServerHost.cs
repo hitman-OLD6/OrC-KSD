@@ -26,6 +26,7 @@ public sealed class ServerHost : IAsyncDisposable
     private readonly ServerOptions _options;
     private readonly SerialWorkQueue _queue;
     private readonly Orc.Server.Rooms.Room? _room;
+    private readonly Orc.Server.Headless.HeadlessContext? _headless;
     private readonly bool _ownsQueue;
     private readonly Dictionary<int, Task> _aiDrivers = new();
     private readonly ConcurrentDictionary<int, DateTimeOffset> _disconnectedSeats = new();
@@ -33,6 +34,7 @@ public sealed class ServerHost : IAsyncDisposable
     /// <summary>宽限判负的在途去重（同一座位在途期间不重复入队）。</summary>
     private readonly ConcurrentDictionary<int, byte> _graceInFlight = new();
     private CancellationTokenSource? _aiCts;
+    private bool _matchEnded;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly ConcurrentDictionary<string, ClientSession> _sessions = new(StringComparer.Ordinal);
     private readonly IDisposable _targetingSubscription;
@@ -50,12 +52,14 @@ public sealed class ServerHost : IAsyncDisposable
         McpService service,
         ServerOptions options,
         SerialWorkQueue? queue = null,
-        Orc.Server.Rooms.Room? room = null)
+        Orc.Server.Rooms.Room? room = null,
+        Orc.Server.Headless.HeadlessContext? headless = null)
     {
         _service = service ?? throw new ArgumentNullException(nameof(service));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _queue = queue ?? new SerialWorkQueue();
         _room = room;
+        _headless = headless;
         _ownsQueue = queue is null;
 
         // 段由本宿主取用（服务层不再自行取段），取到后按座位脱敏分发。
@@ -78,6 +82,32 @@ public sealed class ServerHost : IAsyncDisposable
 
     /// <summary>服务层门面（诊断/测试/宿主工具用）。</summary>
     public McpService Service => _service;
+
+    /// <summary>无头编排上下文（未开启无头＝<c>null</c>）。</summary>
+    public Orc.Server.Headless.HeadlessContext? Headless => _headless;
+
+    /// <summary>房间状态机（无头编排与测试用；未注入＝<c>null</c>）。</summary>
+    public Orc.Server.Rooms.Room? Room => _room;
+
+    /// <summary>串行执行队列（无头编排据此入队自动开局；唯一写者语义不变）。</summary>
+    public SerialWorkQueue Queue => _queue;
+
+    /// <summary>宿主关闭令牌（入队工作项用）。</summary>
+    public CancellationToken ShutdownToken => _shutdown.Token;
+
+    /// <summary>某座位当前是否有绑定会话（自动开局判据的唯一事实来源；<c>Connected</c> 只用于展示）。</summary>
+    public bool HasBoundSession(int seat)
+    {
+        foreach (var session in _sessions.Values)
+        {
+            if (session.Seat == seat)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>启动监听。</summary>
     public Task<ServerHost> StartAsync(CancellationToken ct = default)
@@ -246,7 +276,7 @@ public sealed class ServerHost : IAsyncDisposable
         {
             ProtocolMethods.Initialize => HandleInitialize(request),
             ProtocolMethods.Ping => RpcResponse.Success(request.Id, new JsonObject { ["pong"] = true }),
-            ProtocolMethods.ToolsList => HandleToolsList(request),
+            ProtocolMethods.ToolsList => HandleToolsList(request, session),
             ProtocolMethods.ToolsCall => await HandleToolsCallAsync(request, session, ct).ConfigureAwait(false),
             _ => RpcResponse.Failure(request.Id, RpcErrorCodes.MethodNotFound, $"未知方法 '{request.Method}'。"),
         };
@@ -283,9 +313,16 @@ public sealed class ServerHost : IAsyncDisposable
         return RpcResponse.Success(request.Id, Serialize(result));
     }
 
-    private RpcResponse HandleToolsList(RpcRequest request)
+    /// <summary>
+    /// 工具清单（S3：**按会话过滤**）。已绑定座位的会话不列出调试写类工具（含 agent 桥）；
+    /// 可见性与门禁共用 <see cref="SeatScopeRegistry.IsVisibleToBoundSession"/>，避免两处判定漂移。
+    /// </summary>
+    private RpcResponse HandleToolsList(RpcRequest request, ClientSession session)
     {
+        var bound = session.Seat is not null;
+
         var tools = _service.Tools
+            .Where(tool => !bound || SeatScopeRegistry.IsVisibleToBoundSession(tool.Name))
             .Select(tool => new ToolDescriptorPayload(tool.Name, tool.Group, tool.Description, tool.InputSchema))
             .ToArray();
 
@@ -303,9 +340,22 @@ public sealed class ServerHost : IAsyncDisposable
         var arguments = ToElement(request.Params?["arguments"]);
 
         // 门禁顺序固定（不可调换）：分类 → 座位校验 → 入队。
-        // 被拒绝的请求**不入队、不碰引擎**，也绝不改绑座位。
+        // 被拒绝的请求**不入队、不碰引擎**，也绝不改绑座位；但**要**记入 calls.jsonl（谁试图做什么被拒）。
         if (Gate(session, name, ref arguments) is { } denial)
         {
+            _headless?.LogCall(
+                session.Id,
+                session.Seat,
+                session.RemoteAddress?.ToString(),
+                name,
+                ok: false,
+                code: ResultCodes.Unauthorized,
+                durationMs: 0,
+                queueMs: 0,
+                segmentsFrom: null,
+                segmentsTo: null,
+                phase: "gate");
+
             return RpcResponse.Success(
                 request.Id,
                 Serialize(ToolResultPayload.Failure(ResultCodes.Unauthorized, denial)));
@@ -316,19 +366,38 @@ public sealed class ServerHost : IAsyncDisposable
             ? WorkPriority.Interactive
             : WorkPriority.Command;
 
+        var startedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+        var enqueuedAt = startedAt;
+        long queueMs = 0;
+        (long? From, long? To) range = (null, null);
+
         McpToolResult result;
+        JsonObject? callExtra = null;
         try
         {
             result = await _queue.EnqueueAsync(
                 priority,
                 async token =>
                 {
+                    queueMs = ElapsedMs(enqueuedAt);
+
+                    // R6：应答型动作的归因必须在 InvokeAsync **之前**采集——提交成功后 Bridge 立即清空待决，
+                    // 事后只剩「已应答」这一事实，再也说不出应答的是哪个动作、选了哪个候选。
+                    var answer = CaptureAnswerTarget(name, arguments);
+
                     var outcome = await _service.InvokeAsync(name, arguments, token).ConfigureAwait(false);
+                    callExtra = BuildCallExtra(name, arguments, outcome, answer);
+
+                    // S4：drain 固定在 work item 尾部，与动作成败无关（失败动作/静置期也能落盘）。
+                    range = DrainSegments();
+                    DetectMatchEnd();
+
                     if (outcome.Ok && IsMatchAction(name))
                     {
                         await PushViewsAsync(token).ConfigureAwait(false);
                     }
 
+                    await MaybeFinalizeAsync(token).ConfigureAwait(false);
                     return outcome;
                 },
                 ct).ConfigureAwait(false);
@@ -345,8 +414,126 @@ public sealed class ServerHost : IAsyncDisposable
             BroadcastRoom();
         }
 
+        _headless?.LogCall(
+            session.Id,
+            session.Seat,
+            session.RemoteAddress?.ToString(),
+            name,
+            result.Ok,
+            result.Code,
+            ElapsedMs(startedAt),
+            queueMs,
+            range.From,
+            range.To,
+            phase: "exec",
+            extra: callExtra);
+
         return RpcResponse.Success(request.Id, Serialize(Map(result)));
     }
+
+    /// <summary>
+    /// 应答型动作的归因快照（R6）：被应答的待决请求身份。
+    /// 仅当待决 sessionId 与本次调用的 <c>sessionId</c> 参数一致时采纳——否则是**陈旧**待决，
+    /// 把它认成本次应答会让 calls.jsonl 指错动作（比没有归因更糟）。
+    /// </summary>
+    private sealed record AnswerTarget(string SessionId, string Action, IReadOnlyList<PendingCandidate> Candidates);
+
+    /// <summary>在调用进入引擎之前抓取待决请求（仅 <c>target.submit</c> / <c>target.cancel</c>；其他工具＝null）。</summary>
+    private AnswerTarget? CaptureAnswerTarget(string tool, JsonElement arguments)
+    {
+        if (tool is not ("target.submit" or "target.cancel"))
+        {
+            return null;
+        }
+
+        if (arguments.ValueKind != JsonValueKind.Object
+            || !arguments.TryGetProperty("sessionId", out var sessionNode)
+            || sessionNode.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        var sessionId = sessionNode.GetString();
+        if (string.IsNullOrWhiteSpace(sessionId) || _service.Bridge.CurrentPending is not { } pending)
+        {
+            return null;
+        }
+
+        return string.Equals(pending.SessionId, sessionId, StringComparison.Ordinal)
+            ? new AnswerTarget(pending.SessionId, pending.Action, pending.Candidates)
+            : null;
+    }
+
+    /// <summary>
+    /// 构造调用记录的归因字段（R6）：
+    /// 发起记录带 <c>pendingSessionId</c>；应答记录带 <c>answers</c>/<c>action</c>/<c>picks</c>/<c>pickedRefs</c>。
+    /// 段区间仍留在记录顶层（段由本次调用真实产生）——不做回填，避免延迟写破坏按 id/at 顺序读的消费者。
+    /// </summary>
+    private static JsonObject? BuildCallExtra(
+        string tool, JsonElement arguments, McpToolResult outcome, AnswerTarget? answer)
+    {
+        if (answer is not null)
+        {
+            var picks = new JsonArray();
+            var refs = new JsonArray();
+            var resolvable = true;
+
+            if (arguments.TryGetProperty("picks", out var picksNode) && picksNode.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in picksNode.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.Number || !item.TryGetInt32(out var index))
+                    {
+                        resolvable = false;
+                        continue;
+                    }
+
+                    picks.Add(index);
+                    if (index < 1 || index > answer.Candidates.Count)
+                    {
+                        // 越界序号由引擎判 InvalidSelection —— 记录原样保留 picks，但映射不出引用。
+                        resolvable = false;
+                        continue;
+                    }
+
+                    refs.Add(answer.Candidates[index - 1].ReferenceKey);
+                }
+            }
+
+            var extra = new JsonObject
+            {
+                ["answers"] = answer.SessionId,
+                ["action"] = answer.Action,
+                ["picks"] = picks,
+            };
+
+            if (resolvable && tool == "target.submit")
+            {
+                extra["pickedRefs"] = refs;
+            }
+
+            return extra;
+        }
+
+        // 发起记录：动作类调用若停在 targeting，记下待决号，供与后续应答记录配对。
+        try
+        {
+            if (outcome.Details?["pending"]?["sessionId"]?.GetValue<string>() is { } pendingSessionId
+                && !string.IsNullOrWhiteSpace(pendingSessionId))
+            {
+                return new JsonObject { ["pendingSessionId"] = pendingSessionId };
+            }
+        }
+        catch (Exception)
+        {
+            // 载荷形状异常＝无归因字段（宁可少报，不可误报）。
+        }
+
+        return null;
+    }
+
+    private static long ElapsedMs(long sinceTimestamp)
+        => (long)System.Diagnostics.Stopwatch.GetElapsedTime(sinceTimestamp).TotalMilliseconds;
 
     /// <summary>房间态会变化的工具（成功即广播 <c>notify/room</c>）。</summary>
     private static bool IsRoomMutation(string tool)
@@ -433,6 +620,17 @@ public sealed class ServerHost : IAsyncDisposable
                     ? "会话未绑定座位（请先 room.claim / room.resume）。"
                     : null;
 
+            case SeatScope.OrchestratorOnly:
+                // 写类调试工具：只对"回环 ＋ 未绑定座位"的编排连接可见可用（明示不设防，只防误触）。
+                if (session.Seat is { } boundSeat)
+                {
+                    return $"工具 '{name}' 是调试写类，已绑定座位 {boundSeat} 的会话不可用。";
+                }
+
+                return SeatScopePolicy.IsTrustedLocal(session.RemoteAddress)
+                    ? null
+                    : $"工具 '{name}' 只接受回环来源的编排连接（当前 {session.RemoteAddress}）。";
+
             default:
                 return $"工具 '{name}' 的作用域未知（默认拒绝）。";
         }
@@ -474,7 +672,14 @@ public sealed class ServerHost : IAsyncDisposable
             {
                 if (session.Seat is not { } seat)
                 {
-                    return null; // 未绑定：允许（单机诊断沙盒），且**不**写座位。
+                    // S3：分流依据是运行模式，不是"有没有绑定座位"。
+                    // play＝无第三方只读连接（隐藏信息）；sandbox＝未绑定会话放行且**全知**（不强制 seat）。
+                    if (_options.Mode == ServerMode.Play)
+                    {
+                        return "会话未绑定座位（play 模式的观察面只对已入座玩家开放）。";
+                    }
+
+                    return null;
                 }
 
                 if (TryReadInt(arguments, "seat", out var requested) && requested != seat)
@@ -614,6 +819,9 @@ public sealed class ServerHost : IAsyncDisposable
                 Params = McpService.PendingJson(pending),
             }));
         }
+
+        // S2：自动开局触发点（会话线程，不在消费者上下文）——编排侧负责入队，不在此直接开局。
+        _headless?.OnSeatBound(seat);
     }
 
     /// <summary>座位消失：把绑到该座位的一切会话置空。</summary>
@@ -632,12 +840,23 @@ public sealed class ServerHost : IAsyncDisposable
     private void UnbindSeatOf(ClientSession session) => session.Seat = null;
 
     /// <summary>座位断线：房间态立即释放（含解绑），对局态保留并记录宽限起点。</summary>
+    /// <para>
+    /// S2 不变量：**无头模式下房间态断线不释放座位**（座位生命周期＝进程生命周期，
+    /// 令牌始终有效，桥可反复重试 <c>room.resume</c>）；非无头模式保持既有房主开房语义。
+    /// </para>
     private void MarkSeatDisconnected(int seat)
     {
         if (_room is { } room)
         {
             if (room.State == Orc.Server.Rooms.RoomState.Lobby)
             {
+                if (_headless is not null)
+                {
+                    room.MarkDisconnected(seat);
+                    BroadcastRoom();
+                    return;
+                }
+
                 room.DropSeat(seat);
                 UnbindSeat(seat); // ④ 断线释放座位后，其它绑到该座位的会话一并解绑
                 BroadcastRoom();
@@ -696,7 +915,10 @@ public sealed class ServerHost : IAsyncDisposable
                             }
 
                             _disconnectedSeats.TryRemove(seat, out _); // 真正认输成功后才移除
+                            DrainSegments();
+                            DetectMatchEnd();
                             await PushViewsAsync(token).ConfigureAwait(false); // 客户端才看得到 phase:"over"
+                            await MaybeFinalizeAsync(token).ConfigureAwait(false);
                             return true;
                         }
                         catch (Exception)
@@ -743,7 +965,10 @@ public sealed class ServerHost : IAsyncDisposable
                 WorkPriority.Command,
                 async token =>
                 {
+                    DrainSegments();
+                    DetectMatchEnd();
                     await PushViewsAsync(token).ConfigureAwait(false);
+                    await MaybeFinalizeAsync(token).ConfigureAwait(false);
                     return true;
                 },
                 _shutdown.Token);
@@ -760,8 +985,6 @@ public sealed class ServerHost : IAsyncDisposable
 
     private async Task PushViewsAsync(CancellationToken ct)
     {
-        PushSegments();
-
         foreach (var session in _sessions.Values)
         {
             if (session.Seat is not { } seat)
@@ -784,21 +1007,26 @@ public sealed class ServerHost : IAsyncDisposable
     }
 
     /// <summary>
-    /// 取新增段并按座位脱敏分发（同一批段只取一次，再为每个座位各导出一份——
-    /// 引擎的段取用是单消费者语义，不能各取各的）。
+    /// 取新增段并落盘/分发（S4：**段队列的唯一取用者**）。返回本批段序号区间（无段＝<c>(null,null)</c>）。
+    /// <para>
+    /// 顺序固定：全知落盘 → 脱敏落盘 → 喂回观察面缓存 → 按座位脱敏分发 <c>notify/segment</c>。
+    /// 无活跃对局或空队列时**零成本短路**（不构造可见性对象、不碰磁盘）。
+    /// </para>
     /// </summary>
-    private void PushSegments()
+    private (long? From, long? To) DrainSegments()
     {
         if (_service.Executor.Match is not { } match)
         {
-            return;
+            return (null, null);
         }
 
         var segments = match.Engine.TakeSegments();
         if (segments.Count == 0)
         {
-            return;
+            return (null, null);
         }
+
+        var range = _headless?.LogSegments(segments) ?? (null, null);
 
         // 宿主是取用者：喂回服务层缓存，保持观察面语义不变。
         _service.IngestSegments(segments);
@@ -829,6 +1057,19 @@ public sealed class ServerHost : IAsyncDisposable
                 },
             }));
         }
+
+        return range;
+    }
+
+    /// <summary>终局收尾（S4/S6）：写摘要 → fsync → （默认）请求停止。幂等。</summary>
+    private async Task MaybeFinalizeAsync(CancellationToken token)
+    {
+        if (_headless is null)
+        {
+            return;
+        }
+
+        await _headless.MaybeFinalizeAsync(token).ConfigureAwait(false);
     }
 
     private void OnMatchChanged(object? sender, Orc.Mcp.Hosting.MatchLifecycleEventArgs args)
@@ -838,18 +1079,52 @@ public sealed class ServerHost : IAsyncDisposable
         if (created)
         {
             StartAiDrivers(args.Match);
+            BroadcastNotification(ProtocolMethods.NotifyMatchStarted);
+            return;
         }
-        else
+
+        // 销毁路径：同样按终局收尾（幂等）。
+        HandleMatchEnded();
+    }
+
+    /// <summary>对局终局（S4/S6）：只置标志 ＋ 停 AI ＋ 推 <c>notify/match.ended</c>，不做任何写盘与退出。</summary>
+    /// <remarks>
+    /// 引擎不在终局时抛事件（<c>MatchChanged</c> 只在 attach/dispose 时触发），因此终局由 work item 尾部
+    /// <see cref="DetectMatchEnd"/> 读 <c>match.State</c> 发现——仍在消费者上下文内，不新增写路径。
+    /// </remarks>
+    private void HandleMatchEnded()
+    {
+        if (_matchEnded)
         {
-            StopAiDrivers();
+            return;
         }
 
-        var method = created ? ProtocolMethods.NotifyMatchStarted : ProtocolMethods.NotifyMatchEnded;
+        _matchEnded = true;
+        StopAiDrivers();
 
+        // S6：把房间推进到 ended——MarkEnded() 此前全仓无调用者，keep-alive 会停在 InMatch。
+        _room?.MarkEnded();
+        _headless?.OnMatchEnded();
+
+        BroadcastNotification(ProtocolMethods.NotifyMatchEnded);
+    }
+
+    /// <summary>向所有会话广播一条空载荷通知（对局开始/结束）。</summary>
+    private void BroadcastNotification(string method)
+    {
         var notification = Serialize(new RpcNotification { Method = method, Params = new JsonObject() });
         foreach (var session in _sessions.Values)
         {
             session.Send(notification);
+        }
+    }
+
+    /// <summary>在 work item 尾部读对局状态（消费者上下文；无活跃对局＝零成本）。</summary>
+    private void DetectMatchEnd()
+    {
+        if (!_matchEnded && _service.Executor.Match is { State: Orc.Game.MatchState.Ended })
+        {
+            HandleMatchEnded();
         }
     }
 
@@ -905,16 +1180,27 @@ public sealed class ServerHost : IAsyncDisposable
                         WorkPriority.Command,
                         async token =>
                         {
-                            var step = await pilot.StepAsync(token).ConfigureAwait(false);
-
-                            // S5①：推送必须包在 AI 步自身的 work item 内（投影依赖只读执行面＝消费者上下文）。
-                            // 未行动（Performed==false）不推——否则 AI 空转会挤掉真实 view。
-                            if (step.Performed)
+                            try
                             {
-                                await PushViewsAsync(token).ConfigureAwait(false);
-                            }
+                                var step = await pilot.StepAsync(token).ConfigureAwait(false);
 
-                            return step;
+                                // 未行动（Performed==false）不推——否则 AI 空转会挤掉真实 view。
+                                if (step.Performed)
+                                {
+                                    // S5①：推送必须包在 AI 步自身的 work item 内（投影依赖只读执行面＝消费者上下文）。
+                                    await PushViewsAsync(token).ConfigureAwait(false);
+                                }
+
+                                return step;
+                            }
+                            finally
+                            {
+                                // S4：drain 与收尾固定在 work item 尾部、与动作成败无关——
+                                // 静置期推进的段不会滞留，终局（含 AI 步抛异常）也不会漏写摘要与退出。
+                                DrainSegments();
+                                DetectMatchEnd();
+                                await MaybeFinalizeAsync(token).ConfigureAwait(false);
+                            }
                         },
                         ct)
                     .ConfigureAwait(false);
@@ -928,9 +1214,11 @@ public sealed class ServerHost : IAsyncDisposable
                 await Task.Delay(TimeSpan.FromMilliseconds(200), ct).ConfigureAwait(false);
                 continue;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // 单步异常不让驱动循环整体退出（下一步仍可能推进）。
+                // 单步异常不让驱动循环整体退出（下一步仍可能推进）；但必须留痕——
+                // 静默吞异常会让"终局已发生却没写摘要"这类缺陷无从定位。
+                Console.Error.WriteLine($"[headless] AI 座位 {pilot.Seat} 单步异常：{ex.GetType().Name}: {ex.Message}");
                 await Task.Delay(TimeSpan.FromMilliseconds(300), ct).ConfigureAwait(false);
                 continue;
             }
@@ -1042,8 +1330,17 @@ public sealed class ServerHost : IAsyncDisposable
 
     // ---------------------------------------------------------------- 工具方法
 
+    /// <summary>
+    /// 序列化为 JsonNode（出站统一出口）。
+    /// <para>
+    /// **不得**用 <c>JsonSerializer.SerializeToNode</c>：载荷里的 <c>Details</c>/<c>Params</c> 常是
+    /// 已挂在父节点上的 <see cref="JsonNode"/>（例如投影产出的 <c>observe.view</c>），
+    /// <c>SerializeToNode</c> 会把它原样 attach 到新节点并抛 “The node already has a parent”。
+    /// 走一轮字符串再解析＝强制深拷贝，是跨 JsonNode 边界唯一稳定的做法。
+    /// </para>
+    /// </summary>
     private static JsonNode? Serialize<T>(T value)
-        => JsonSerializer.SerializeToNode(value, ProtocolJson.Options);
+        => JsonNode.Parse(JsonSerializer.Serialize(value, ProtocolJson.Options));
 
     private static ToolResultPayload Map(McpToolResult result) => new()
     {
@@ -1115,6 +1412,7 @@ public sealed class ServerHost : IAsyncDisposable
             await _queue.DisposeAsync().ConfigureAwait(false);
         }
 
+        _headless?.Dispose();
         _shutdown.Dispose();
     }
 

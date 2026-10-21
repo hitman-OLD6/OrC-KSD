@@ -60,6 +60,19 @@ public enum PlayFailureReason
     NonOwnerTurn,
     CardNotInHand,
     FormationGapUnavailable,
+
+    /// <summary>
+    /// 反制不可用：卡已消耗（一次性命中后）或已销毁——**不可重试**。
+    /// <para>
+    /// 不复用 <see cref="CounterRejected"/>：后者的语义是「验证未通过、未提供可辨识类别」的**降级缺省**，
+    /// 让一个已知且可命名的条件复用它会使降级语义失效；且 agent 需要区分「不可重试的缺席」
+    /// 与「可换条件重试的拒绝」（点数不足／非己方回合）。
+    /// </para>
+    /// <para>
+    /// 只覆盖 consumed/destroyed，**不覆盖** <c>counter.disarmed</c>（自动解除后卡完好，可再次激活）。
+    /// </para>
+    /// </summary>
+    CounterUnavailable,
 }
 
 /// <summary>

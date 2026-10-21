@@ -89,8 +89,8 @@ public sealed partial class McpService
             var violations = new List<Orc.Game.Decks.DeckViolation>();
             foreach (var (seat, deck) in new[] { (options.SeatA, deckA), (options.SeatB, deckB) })
             {
-                violations.AddRange(Orc.Game.Decks.DeckRules.Validate(deck, pool, options.RequiredDeckSize));
-                if (Orc.Game.Decks.DeckRules.ValidateFaction(seat.DeckConfiguration) is { } factionViolation)
+                violations.AddRange(Orc.Game.Decks.DeckRules.Validate(deck, pool, options.RequiredDeckSize, options.DeckRuleTier));
+                if (Orc.Game.Decks.DeckRules.ValidateFaction(seat.DeckConfiguration, options.DeckRuleTier) is { } factionViolation)
                 {
                     violations.Add(factionViolation);
                 }
@@ -131,6 +131,8 @@ public sealed partial class McpService
                     SkipMulligan = options.SkipMulligan,
                     OpeningHandSizeFirstPlayer = options.OpeningHandSizeFirstPlayer,
                     OpeningHandSizeSecondPlayer = options.OpeningHandSizeSecondPlayer,
+                    // 沙盒授权（R2）：仅 Authoring（沙盒）装配路径开启；play 路径不开启。
+                    SandboxAuthorized = Options.Mode == McpServiceMode.Authoring,
                 },
                 targeterBridge: Bridge,
                 effectRegistry: effectRegistry,
