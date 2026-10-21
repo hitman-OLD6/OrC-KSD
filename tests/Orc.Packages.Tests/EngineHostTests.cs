@@ -87,7 +87,7 @@ public sealed class EngineHostTests : IDisposable
     public void 版本锁定_为id加内容指纹_审计记录()
     {
         // 包版本＝内容指纹：VersionLocks 记录 id@指纹（不含时间戳、不参与择版）。
-        var fingerprint = PackageVersion.Compute("p1", new[] { "a.json" });
+        var fingerprint = PackageVersion.ComputeLayout("p1", new[] { "a.json" });
         WritePlugin("p1", fingerprint.ToString(), ("json", "a", "a.json"));
 
         var host = EngineHost.Start(_root);

@@ -76,7 +76,7 @@ public sealed class AssetMigrationToolTests : IDisposable
         Assert.Equal(
             new[] { "cards/rifle.card.json.meta.json", "effects/rally.prefab.json.meta.json" },
             manifest.MetadataList);
-        Assert.Equal(PackageVersion.Compute(PackId, manifest.MetadataList), manifest.Version);
+        Assert.Equal(AssetLoadTestKit.RecomputeContent(PackRoot, PackId), manifest.Version);
 
         // ③ 两 lock：域各自独立、内容与 sidecar 声明一致。
         var formal = AssetLockJson.ReadPackage(PackRoot, AssetDomain.Formal);
@@ -340,6 +340,41 @@ public sealed class AssetMigrationToolTests : IDisposable
                 formal!.Assets.Select(entry => entry.AssetGuid).OrderBy(guid => guid));
             Assert.Equal(formal.Assets, test!.Assets);
         }
+    }
+
+    [Fact]
+    public void dry_run的manifest版本与apply后读盘重算一致()
+    {
+        WriteLegacyPackage();
+
+        var plan = AssetMigrationTool.Plan(PackRoot);
+        var planned = PackageManifest.Parse(plan.Manifest.Content!); // 计划内容＝apply 后将落盘的文本
+
+        AssetMigrationTool.Apply(plan);
+
+        var written = PackageManifest.Parse(File.ReadAllText(Path.Combine(PackRoot, "manifest.json")));
+        Assert.Equal(planned.Version, written.Version);
+        Assert.Equal(AssetLoadTestKit.RecomputeContent(PackRoot, PackId), written.Version);
+    }
+
+    [Fact]
+    public void 迁移_既有sidecar内容变化会改变manifest版本()
+    {
+        WriteLegacyPackage();
+        AssetMigrationTool.Apply(AssetMigrationTool.Plan(PackRoot));
+        var before = PackageManifest.Parse(File.ReadAllText(Path.Combine(PackRoot, "manifest.json")));
+
+        // 同路径改 sidecar 内资产版本（幂等迁移 Skip 不重算版本，故直接改盘）
+        var sidecarPath = Path.Combine(PackRoot, "cards", "rifle.card.json") + AssetSidecarJson.SidecarExtension;
+        var sidecar = AssetSidecarJson.ReadFile(sidecarPath);
+        AssetSidecarJson.WriteFile(
+            sidecarPath,
+            sidecar with { Assets = [sidecar.Assets[0] with { Version = AssetVersion.Parse("1.0.1") }] });
+
+        var after = AssetMigrationTool.Plan(PackRoot);
+
+        Assert.Equal(MigrationAction.Overwrite, after.Manifest.Action);
+        Assert.NotEqual(before.Version, PackageManifest.Parse(after.Manifest.Content!).Version);
     }
 
     // ─────────────────────────────────────────────────── 夹具

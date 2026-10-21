@@ -42,6 +42,12 @@ public enum AssetLoadIssueCode
 
     /// <summary>元数据声明的冲突双方同处本次加载集合（R16/D52：双向硬冲突 ⇒ 结构性失败）。</summary>
     DeclaredConflict = 10,
+
+    /// <summary>
+    /// lock 对同一资产 GUID 重复声明（自相矛盾，无法判断哪条为真）——结构性失败（F12/I16）。
+    /// 保留 merge 稳定序的首条，其余每条各报一条。
+    /// </summary>
+    DuplicateLockEntry = 11,
 }
 
 /// <summary>加载计算期的一条问题（结构化；<see cref="Path"/> 仅环依赖使用）。</summary>
@@ -60,7 +66,8 @@ public sealed record AssetLoadIssue(
     /// <summary>是否为结构性失败（整次计算不产出可加载列表）。</summary>
     public bool IsFatal => Code is AssetLoadIssueCode.LockConflict
         or AssetLoadIssueCode.Cycle
-        or AssetLoadIssueCode.DeclaredConflict;
+        or AssetLoadIssueCode.DeclaredConflict
+        or AssetLoadIssueCode.DuplicateLockEntry;
 
     /// <inheritdoc />
     public override string ToString() => $"[{AssetDomainTokens.Token(Domain)}] {Code}：{Message}";
@@ -139,32 +146,6 @@ public static class LoadListPlanner
             .ThenBy(asset => asset.Kind)
             .ThenBy(asset => asset.AppId, StringComparer.Ordinal)
             .ToArray();
-
-        // ── 声明冲突（R16/D52）：**域内双向硬冲突** ⇒ 结构性失败（本次计算不产出列表） ──
-        // 声明语义＝「我不能与它共存」，单向声明即成立（不要求对方也声明）；
-        // 判定集合＝本域 lock 合并后实际参与加载的资产（内含资产不参与、测试不污染正式）。
-        var conflictIndex = IndexByKey(nodes);
-        foreach (var node in ordered)
-        {
-            foreach (var declared in node.Metadata.ConflictsWith)
-            {
-                var conflictAppId = NormalizeReference(node.PackageId, declared.AppId);
-                if (!conflictIndex.TryGetValue(new AssetKey(declared.Kind, conflictAppId), out var target)
-                    || target.AssetGuid == node.AssetGuid
-                    || !declared.IsSatisfiedBy(target.Version))
-                {
-                    continue;
-                }
-
-                issues.Add(new AssetLoadIssue(
-                    AssetLoadIssueCode.DeclaredConflict,
-                    domain,
-                    node.AppId,
-                    $"资产 {node.AssetName} 声明与 {target.AssetName} 冲突"
-                    + "（双向硬冲突：两者同处本次加载集合）——本次计算不产出列表。",
-                    []));
-            }
-        }
 
         // ── 依赖检测（一次计算内完成）：资产级非法 ⇒ 剔除并报告，不整段失败（R15/D23） ──
         var excluded = new HashSet<Guid>();
@@ -246,6 +227,34 @@ public static class LoadListPlanner
             }
         }
 
+        // ── 声明冲突（R16/D52）：**域内双向硬冲突** ⇒ 结构性失败（本次计算不产出列表） ──
+        // 声明语义＝「我不能与它共存」，单向声明即成立（不要求对方也声明）；
+        // 判定集合＝**依赖检测与传播之后仍在列表中的资产**（F5：本会被剔除的资产不参与冲突判定；
+        // 内含资产不参与、测试不污染正式）。
+        var active = ordered.Where(node => !excluded.Contains(node.AssetGuid)).ToArray();
+        var conflictIndex = IndexByKey(active);
+        foreach (var node in active)
+        {
+            foreach (var declared in node.Metadata.ConflictsWith)
+            {
+                var conflictAppId = NormalizeReference(node.PackageId, declared.AppId);
+                if (!conflictIndex.TryGetValue(new AssetKey(declared.Kind, conflictAppId), out var target)
+                    || target.AssetGuid == node.AssetGuid
+                    || !declared.IsSatisfiedBy(target.Version))
+                {
+                    continue;
+                }
+
+                issues.Add(new AssetLoadIssue(
+                    AssetLoadIssueCode.DeclaredConflict,
+                    domain,
+                    node.AppId,
+                    $"资产 {node.AssetName} 声明与 {target.AssetName} 冲突"
+                    + "（双向硬冲突：两者同处本次加载集合）——本次计算不产出列表。",
+                    []));
+            }
+        }
+
         return Layer(domain, ordered, edges, excluded, hostOfEmbedded, embedded, issues);
     }
 
@@ -259,9 +268,27 @@ public static class LoadListPlanner
     {
         var nodes = new List<AssetRegistration>();
         var embedded = new List<AssetRegistration>();
+        var seenGuids = new Dictionary<Guid, AssetLockEntry>();
 
         foreach (var entry in merge.Entries)
         {
+            if (seenGuids.TryGetValue(entry.AssetGuid, out var kept))
+            {
+                // F12/I16：同一 GUID 多条＝lock 自相矛盾 ⇒ 结构化问题（不抛、不静默去重）。
+                // 保留 merge 稳定序（kind → appId → version）的首条，每个被丢弃的额外条目各报一条。
+                issues.Add(new AssetLoadIssue(
+                    AssetLoadIssueCode.DuplicateLockEntry,
+                    domain,
+                    entry.AppId,
+                    $"lock 对同一资产 GUID '{entry.AssetGuid}' 重复声明："
+                    + $"保留 {kept.AppId}#{kept.Version}，丢弃 {entry.AppId}#{entry.Version}"
+                    + "——结构性非法（本次计算不产出列表）。",
+                    []));
+                continue;
+            }
+
+            seenGuids.Add(entry.AssetGuid, entry);
+
             var registration = registry.Find(entry.AssetGuid);
             if (registration is null)
             {

@@ -51,6 +51,34 @@ public static class EditorVersionRules
         return version;
     }
 
+    /// <summary>
+    /// 手写版本校验（**组粒度**）：必须可解析且**严格大于**组内最大版本；
+    /// 失败消息指名最大版本的来源条目（F2：同 sidecar 的宿主与内含资产版本必须一致）。
+    /// </summary>
+    /// <param name="text">手写版本原文。</param>
+    /// <param name="current">组内最大版本。</param>
+    /// <param name="currentOwner">最大版本来源条目（<c>{kind}：{id}</c>）。</param>
+    /// <exception cref="AssetEditorException">格式非法或未严格递增。</exception>
+    public static AssetVersion ParseIncreasing(string text, AssetVersion current, string currentOwner)
+    {
+        if (!AssetVersion.TryParse(text, out var version))
+        {
+            throw new AssetEditorException(
+                AssetEditorErrorCode.InvalidVersion,
+                $"版本 '{text}' 非法（期望 1..{AssetVersion.MaxSegments} 段纯数字，以 . 分隔）。");
+        }
+
+        if (!version.IsUpgradeOver(current))
+        {
+            throw new AssetEditorException(
+                AssetEditorErrorCode.VersionNotIncreasing,
+                $"版本 '{version}' 未严格大于组内最大 '{current}'（来自 {currentOwner}）"
+                + "——请使用 ≥ 其严格递增值（同 sidecar 的宿主与内含资产版本必须一致）。");
+        }
+
+        return version;
+    }
+
     /// <summary>要求严格递增（降级与补 0 后相等皆拒绝）。</summary>
     /// <param name="candidate">候选版本。</param>
     /// <param name="current">当前（旧）版本。</param>

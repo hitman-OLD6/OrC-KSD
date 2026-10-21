@@ -94,6 +94,7 @@ public sealed class AssetRegistry
 {
     private readonly Dictionary<Guid, AssetRegistration> _byGuid = new();
     private readonly Dictionary<AssetKey, List<Guid>> _index = new();
+    private readonly Dictionary<PackageGuidAssetKey, List<Guid>> _indexByPackageGuid = new();
     private readonly Dictionary<string, RuntimeCardRegistration> _runtimeCards = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -143,6 +144,20 @@ public sealed class AssetRegistry
         }
 
         versions.Add(registration.AssetGuid);
+
+        // F8：包 GUID 精确索引（空 GUID＝无包身份，不入索引——避免把无身份注册合成一个假桶）。
+        if (registration.PackageGuid != Guid.Empty)
+        {
+            var guidKey = new PackageGuidAssetKey(registration.PackageGuid, registration.Kind, registration.LocalId);
+            if (!_indexByPackageGuid.TryGetValue(guidKey, out var byGuidVersions))
+            {
+                byGuidVersions = new List<Guid>();
+                _indexByPackageGuid.Add(guidKey, byGuidVersions);
+            }
+
+            byGuidVersions.Add(registration.AssetGuid);
+        }
+
         failure = null;
         return true;
     }
@@ -161,6 +176,33 @@ public sealed class AssetRegistry
         ArgumentNullException.ThrowIfNull(localId);
 
         if (!_index.TryGetValue(new AssetKey(packageId, kind, localId), out var guids))
+        {
+            return Array.Empty<AssetRegistration>();
+        }
+
+        return guids
+            .Select(guid => _byGuid[guid])
+            .OrderBy(registration => registration.Version)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// 某资产（**包 GUID** ＋ 种类 ＋ 局部 ID）的全部已注册版本（版本升序；F8/D31）。
+    /// <para>
+    /// 同 ID 不同 GUID 的双包并存时，本查询只返回**本包**的版本；按包 ID 查询
+    /// （<see cref="VersionsOf(string, AssetKind, string)"/>）保持既有语义（可能跨包合并）。
+    /// </para>
+    /// <para>
+    /// <see cref="Guid.Empty"/>＝无包身份（无 <c>manifest.guid</c> 的注册），**不参与**精确查询且恒返回空集；
+    /// 这类注册请改用 <see cref="VersionsOf(string, AssetKind, string)"/> 或 <see cref="ByPackage"/>。
+    /// </para>
+    /// </summary>
+    /// <exception cref="ArgumentNullException">localId 为 null。</exception>
+    public IReadOnlyList<AssetRegistration> VersionsOf(Guid packageGuid, AssetKind kind, string localId)
+    {
+        ArgumentNullException.ThrowIfNull(localId);
+        if (packageGuid == Guid.Empty
+            || !_indexByPackageGuid.TryGetValue(new PackageGuidAssetKey(packageGuid, kind, localId), out var guids))
         {
             return Array.Empty<AssetRegistration>();
         }
@@ -222,4 +264,6 @@ public sealed class AssetRegistry
     }
 
     private readonly record struct AssetKey(string PackageId, AssetKind Kind, string LocalId);
+
+    private readonly record struct PackageGuidAssetKey(Guid PackageGuid, AssetKind Kind, string LocalId);
 }

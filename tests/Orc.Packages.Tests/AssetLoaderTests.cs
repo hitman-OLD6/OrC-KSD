@@ -12,6 +12,28 @@ namespace Orc.Packages.Tests;
 public class AssetLoaderTests
 {
     [Fact]
+    public void 畸形lock判Invalid且不改变已缓存列表()
+    {
+        var registry = new AssetRegistry();
+        var a = Register(registry, "p", "a");
+        var loader = new AssetLoader(registry);
+        loader.Load([FormalLock("p", a)]);
+        var cached = loader.Current;
+
+        var malformed = AssetLock.Create("p", AssetDomain.Formal,
+        [
+            Entry(a),
+            new AssetLockEntry(a.AssetGuid, AssetKind.Card, "pack/p/a-shadow", AssetVersion.Parse("2.0.0")),
+        ]);
+
+        var result = loader.Load([malformed]);
+
+        Assert.Equal(AssetLoadStatus.Invalid, result.Status);
+        Assert.Contains(result.Issues, issue => issue.Code == AssetLoadIssueCode.DuplicateLockEntry);
+        Assert.Same(cached, loader.Current); // 结构化拒绝不污染缓存
+    }
+
+    [Fact]
     public void 首次装载全量落地并缓存列表()
     {
         var registry = new AssetRegistry();

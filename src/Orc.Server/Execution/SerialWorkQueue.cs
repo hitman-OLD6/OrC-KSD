@@ -141,13 +141,37 @@ public sealed class SerialWorkQueue : IAsyncDisposable
             // 预期：关闭时取消。
         }
 
+        // drain：消费者已退出，排队项永远不会被执行——必须以异常收束，否则调用方永久挂起。
+        DrainQueued();
+
         _signal.Dispose();
         _shutdown.Dispose();
+    }
+
+    /// <summary>把仍在队列里的工作项逐一以 <see cref="ObjectDisposedException"/> 完成。</summary>
+    private void DrainQueued()
+    {
+        while (true)
+        {
+            WorkItem? item;
+            lock (_sync)
+            {
+                if (!_queue.TryDequeue(out item, out _))
+                {
+                    return;
+                }
+            }
+
+            item.Fail(new ObjectDisposedException(nameof(SerialWorkQueue), "串行队列已关闭（排队中的请求未执行）。"));
+        }
     }
 
     private abstract class WorkItem
     {
         public abstract Task ExecuteAsync();
+
+        /// <summary>以异常收束该工作项（drain 用；必须在消费者上下文之外也安全）。</summary>
+        public abstract void Fail(Exception exception);
     }
 
     private sealed class WorkItem<T>(
@@ -170,5 +194,7 @@ public sealed class SerialWorkQueue : IAsyncDisposable
                 completion.TrySetException(ex);
             }
         }
+
+        public override void Fail(Exception exception) => completion.TrySetException(exception);
     }
 }

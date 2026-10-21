@@ -53,7 +53,18 @@ public class ServerProcessTests
                 await server.DisposeAsync();
             }
 
+            // 前置证据：就绪行解析出的端口有效（上面已断言 Port > 0）；
+            // 释放后必须真的不再服务（不能只信一个标志位）。
             Assert.True(server.HasExited);
+            await Assert.ThrowsAnyAsync<Exception>(async () =>
+            {
+                await using var probe = await OrcClient.ConnectAsync(new ClientOptions
+                {
+                    Host = "127.0.0.1",
+                    Port = server.Port,
+                    ConnectTimeout = TimeSpan.FromSeconds(2),
+                });
+            });
         }
         finally
         {

@@ -118,4 +118,34 @@ public class SerialWorkQueueTests
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             queue.EnqueueAsync<bool>(WorkPriority.Command, _ => throw new InvalidOperationException("boom")));
     }
+
+    /// <summary>关闭时排队项必须失败（ObjectDisposedException），而不是永远挂起（F8）。</summary>
+    [Fact]
+    public async Task Dispose_FailsQueuedItems_WithObjectDisposedException()
+    {
+        var queue = new SerialWorkQueue();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var blocking = queue.EnqueueAsync(WorkPriority.Command, async _ =>
+        {
+            started.TrySetResult();
+            await release.Task;
+            return 0;
+        });
+
+        await started.Task;
+
+        var queued1 = queue.EnqueueAsync(WorkPriority.Command, _ => Task.FromResult(1));
+        var queued2 = queue.EnqueueAsync(WorkPriority.Command, _ => Task.FromResult(2));
+
+        var dispose = queue.DisposeAsync().AsTask();
+        release.SetResult();
+        await dispose;
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => queued1);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => queued2);
+        Assert.Equal(0, queue.PendingCount);
+        Assert.Equal(0, await blocking);
+    }
 }

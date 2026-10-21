@@ -65,18 +65,30 @@ public class EndToEndTests
         Assert.True(start.Ok, start.Message);
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        var hostView = await hostClient.CallAsync("observe.view", new JsonObject { ["seat"] = 0 });
+        var hostView = await hostClient.CallAsync("observe.view");
         Assert.True(hostView.Ok, hostView.Message);
         Assert.NotNull(hostView.Details!["view"]!["selfHand"]);
 
-        var guestView = await guestClient.CallAsync("observe.view", new JsonObject { ["seat"] = 1 });
+        var guestView = await guestClient.CallAsync("observe.view");
         Assert.True(guestView.Ok, guestView.Message);
         Assert.Equal(1, guestView.Details!["seat"]!.GetValue<int>());
 
-        // 两个视角的座位不同 → 投影是分别生成的（不是广播同一份）。
-        Assert.NotEqual(
-            hostView.Details!["matchId"]!.GetValue<string>() + ":0",
-            guestView.Details!["matchId"]!.GetValue<string>() + ":1");
+        // 两个视角是分别生成的投影：手牌明细互不相交、显示名不同（不是同一份被广播）。
+        var hostHand = hostView.Details!["view"]!["selfHand"]!.AsArray()
+            .Select(card => card!["uid"]!.GetValue<string>())
+            .ToHashSet(StringComparer.Ordinal);
+        var guestHand = guestView.Details!["view"]!["selfHand"]!.AsArray()
+            .Select(card => card!["uid"]!.GetValue<string>())
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.NotEmpty(hostHand);
+        Assert.NotEmpty(guestHand);
+        Assert.Empty(hostHand.Intersect(guestHand, StringComparer.Ordinal));
+
+        // 交叉核对：一方的 selfHand 张数＝另一方看到的 enemyHandCount（同一局、不同座位视角）。
+        // 注：selfPlayerName 是**相对标签**（"我方"/"对方"），两侧相同，不能用来判"视角不同"。
+        Assert.Equal(hostHand.Count, guestView.Details!["view"]!["enemyHandCount"]!.GetValue<int>());
+        Assert.Equal(guestHand.Count, hostView.Details!["view"]!["enemyHandCount"]!.GetValue<int>());
     }
 
     [Fact]

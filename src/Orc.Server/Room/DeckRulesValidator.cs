@@ -13,11 +13,16 @@ public sealed class DeckRulesValidator : IDeckValidator
 {
     private readonly Func<IReadOnlyDictionary<string, CardDefinition>> _pool;
     private readonly bool _enforce;
+    private readonly int _requiredDeckSize;
 
-    public DeckRulesValidator(Func<IReadOnlyDictionary<string, CardDefinition>> pool, bool enforce = true)
+    public DeckRulesValidator(
+        Func<IReadOnlyDictionary<string, CardDefinition>> pool,
+        bool enforce = true,
+        int requiredDeckSize = DeckRules.DefaultRequiredSize)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
         _enforce = enforce;
+        _requiredDeckSize = requiredDeckSize;
     }
 
     /// <inheritdoc />
@@ -30,7 +35,8 @@ public sealed class DeckRulesValidator : IDeckValidator
                 : null;
         }
 
-        var violations = new List<DeckViolation>(DeckRules.Validate(deck, _pool()));
+        // 张数口径来自 ServerOptions.RequiredDeckSize（与 AI 卡组生成同源），不得写死 39。
+        var violations = new List<DeckViolation>(DeckRules.Validate(deck, _pool(), _requiredDeckSize));
 
         if (DeckRules.ValidateFaction(ToConfiguration(config)) is { } factionViolation)
         {

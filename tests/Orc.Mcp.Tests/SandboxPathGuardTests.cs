@@ -1,4 +1,5 @@
 using Orc.Mcp.Sandbox;
+using Orc.TestSupport;
 using Xunit;
 
 namespace Orc.Mcp.Tests;
@@ -90,26 +91,23 @@ public class SandboxPathGuardTests : IDisposable
         Assert.False(policy.TryApprove(Path.Combine(_root, "..", "escape.txt"), out _));
     }
 
-    [Fact]
+    [ReparsePointFact]
     public void Resolve_Symlink_Escape_Is_Rejected()
     {
         var outside = Path.Combine(Path.GetTempPath(), "orc-mcp-guard-out-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(outside);
         var link = Path.Combine(_root, "link");
+        Assert.True(ReparsePointProbe.TryCreate(link, outside, out var reason), reason);
+
         try
         {
-            Directory.CreateSymbolicLink(link, outside);
+            var exception = Assert.Throws<SandboxPathViolationException>(() => _guard.Resolve("link/evil.txt"));
+            Assert.Contains("越出沙盒根", exception.Message, StringComparison.Ordinal);
         }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+        finally
         {
             Directory.Delete(outside, recursive: true);
-            return; // 平台不允许建链：本机不适用
         }
-
-        var exception = Assert.Throws<SandboxPathViolationException>(() => _guard.Resolve("link/evil.txt"));
-        Assert.Contains("越出沙盒根", exception.Message, StringComparison.Ordinal);
-
-        Directory.Delete(outside, recursive: true);
     }
 
     public void Dispose()

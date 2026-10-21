@@ -107,6 +107,23 @@ public sealed class AssetEditor
                     continue;
                 }
 
+                // F9：读面判定＝「包目录落在授权根内」（不是写判定「直接父目录在根内」——
+                // 后者会在「授权根恰好就是某个包目录」时误拒该包）。必须在读 manifest 之前跳过（不泄露元信息）。
+                NormalizedPath packagePath;
+                try
+                {
+                    packagePath = PathNormalizer.Normalize(directory);
+                }
+                catch (PathViolationException)
+                {
+                    continue;
+                }
+
+                if (!IsUnderAuthorizedRoot(packagePath))
+                {
+                    continue;
+                }
+
                 var manifestPath = Path.Combine(directory, "manifest.json");
                 if (!File.Exists(manifestPath))
                 {
@@ -337,6 +354,21 @@ public sealed class AssetEditor
 
             return new EditorReloadResult(_options.Loader is not null, _loader.Load(locks));
         }
+    }
+
+    /// <summary>读面判定：包目录必须落在**任一**授权根内（根已在构造期归一）。</summary>
+    private bool IsUnderAuthorizedRoot(NormalizedPath packagePath)
+    {
+        foreach (var root in _policy.Roots)
+        {
+            if (PathNormalizer.TryNormalize(root, out var normalizedRoot, out _)
+                && packagePath.IsUnderOrEqual(normalizedRoot))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private AssetEditorSession RequireSession()

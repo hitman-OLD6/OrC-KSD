@@ -8,7 +8,8 @@ namespace Orc.Server.Rooms;
 /// <summary>
 /// 开局装配：把房间座位映射为 <see cref="MatchLaunchOptions"/> 并调用服务层建局入口。
 /// <para>
-/// 协议面**强制** <c>EnforceDeckRules = true</c>（卡组规则不可由远端关闭）。
+/// <c>EnforceDeckRules</c> 由 <see cref="Orc.Server.ServerOptions"/> 传入（生产链路默认 true；
+/// 端到端/示例卡包夹具可关闭）。**协议面不暴露该开关**，远端无法关闭卡组规则。
 /// AI 座位空卡组由注入的 <c>aiDeckFactory</c> 生成（S8 启动链路提供；未注入＝明确失败）。
 /// </para>
 /// </summary>

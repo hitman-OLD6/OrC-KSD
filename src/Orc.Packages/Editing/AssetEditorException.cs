@@ -41,6 +41,9 @@ public enum AssetEditorErrorCode
 
     /// <summary>新建包缺少期望依赖包 ID（R8 硬要求）。</summary>
     DependenciesRequired = 12,
+
+    /// <summary>转正落地失败（已回滚；临时包保留）——见消息内的失败项与回滚明细。</summary>
+    PromoteFailed = 13,
 }
 
 /// <summary>

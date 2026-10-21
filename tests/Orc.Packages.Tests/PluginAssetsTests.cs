@@ -199,6 +199,79 @@ public class PluginAssetsTests
         }
     }
 
+    [Fact]
+    public void 重复GUID的lock报duplicate_entry且不抛()
+    {
+        var root = NewTempDirectory();
+        try
+        {
+            var manifest = Manifest();
+            var result = PluginAssetRegistrar.Register(manifest, new Source("1.0.0"), new AssetRegistry());
+            var first = result.Registrations[0];
+            var entries = result.Registrations
+                .Select(item => new AssetLockEntry(item.AssetGuid, item.Kind, item.AppId, item.Version))
+                .Append(new AssetLockEntry(
+                    first.AssetGuid, first.Kind, first.AppId + "-dup", first.Version))
+                .ToArray();
+            AssetLockJson.WriteFile(
+                AssetLockJson.PathFor(root, AssetDomain.Formal),
+                AssetLock.Create(PackageId, AssetDomain.Formal, entries));
+
+            var verification = PluginAssetLockVerifier.Verify(manifest, result.Registrations, root);
+
+            Assert.False(verification.Ok);
+            var duplicate = Assert.Single(
+                verification.Issues, issue => issue.Code == PluginAssetLockVerifier.DuplicateEntry);
+            Assert.Contains(first.AssetGuid.ToString(), duplicate.Message, StringComparison.Ordinal);
+            Assert.Contains(first.AppId, duplicate.Message, StringComparison.Ordinal);
+            Assert.Contains(first.AppId + "-dup", duplicate.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("kind")]
+    [InlineData("appId")]
+    [InlineData("version")]
+    public void 四元组任一字段被篡改判stale_lock(string field)
+    {
+        var root = NewTempDirectory();
+        try
+        {
+            var manifest = Manifest();
+            var result = PluginAssetRegistrar.Register(manifest, new Source("1.0.0"), new AssetRegistry());
+            var first = result.Registrations[0];
+            var tampered = field switch
+            {
+                "kind" => new AssetLockEntry(first.AssetGuid, AssetKind.Effect, first.AppId, first.Version),
+                "appId" => new AssetLockEntry(first.AssetGuid, first.Kind, "pack/t.plugin/judicator.other", first.Version),
+                _ => new AssetLockEntry(first.AssetGuid, first.Kind, first.AppId, AssetVersion.Parse("9.9.9")),
+            };
+            var entries = result.Registrations
+                .Select(item => item.AssetGuid == first.AssetGuid
+                    ? tampered
+                    : new AssetLockEntry(item.AssetGuid, item.Kind, item.AppId, item.Version))
+                .ToArray();
+            AssetLockJson.WriteFile(
+                AssetLockJson.PathFor(root, AssetDomain.Formal),
+                AssetLock.Create(PackageId, AssetDomain.Formal, entries));
+
+            var verification = PluginAssetLockVerifier.Verify(manifest, result.Registrations, root);
+
+            Assert.False(verification.Ok);
+            Assert.Contains(verification.Issues, issue => issue.Code == PluginAssetLockVerifier.StaleLock);
+            Assert.DoesNotContain(
+                verification.Issues, issue => issue.Code == PluginAssetLockVerifier.DuplicateEntry);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static string NewTempDirectory()
     {
         var path = Path.Combine(Path.GetTempPath(), "orc-plugin-assets-" + Guid.NewGuid().ToString("N"));

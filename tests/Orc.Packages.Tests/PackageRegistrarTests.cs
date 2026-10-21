@@ -372,6 +372,173 @@ public sealed class PackageRegistrarTests : IDisposable
         Assert.Single(scan.CardFiles);
     }
 
+    [Fact]
+    public void 注册_未列入manifest的effects_sidecar仍可被发现()
+    {
+        WriteManifest();
+        WritePrefab("effects/x.prefab.json", "x");
+        WriteSidecar("effects/x.prefab.json", Meta(AssetKind.Effect, "x", "1.0.0"));
+
+        var result = PackageRegistrar.Register(PackRoot, Manifest(), _registry);
+
+        var asset = Assert.Single(result.Assets);
+        Assert.Equal(AssetKind.Effect, asset.Kind);
+        Assert.Equal("pack/sample.registry/x", asset.AppId);
+        Assert.Same(asset, _registry.Find(asset.AssetGuid));
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public void 注册_未列入manifest且源文件缺失_报SourceMissing()
+    {
+        WriteManifest();
+        WriteSidecar("effects/gone.prefab.json", Meta(AssetKind.Effect, "gone", "1.0.0"));
+
+        var result = PackageRegistrar.Register(PackRoot, Manifest(), _registry);
+
+        Assert.Empty(result.Assets);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(AssetDiagnosticCode.SourceMissing, diagnostic.Code);
+        Assert.Equal("pack/sample.registry/gone", diagnostic.AppId);
+    }
+
+    [Fact]
+    public void 注册_effects递归层的sidecar同样被发现()
+    {
+        WriteManifest();
+        WritePrefab("effects/sub/y.prefab.json", "y");
+        WriteSidecar("effects/sub/y.prefab.json", Meta(AssetKind.Effect, "y", "1.0.0"));
+
+        var result = PackageRegistrar.Register(PackRoot, Manifest(), _registry);
+
+        var asset = Assert.Single(result.Assets);
+        Assert.Equal("pack/sample.registry/y", asset.AppId);
+        Assert.Equal("effects/sub/y.prefab.json", asset.SourcePath is null ? null : Path.GetRelativePath(PackRoot, asset.SourcePath).Replace('\\', '/'));
+    }
+
+    [Fact]
+    public void 注册_manifest声明但文件缺失_仍整包结构性拒绝()
+    {
+        const string declared = "effects/missing.prefab.json.meta.json";
+        WriteManifest(declared);
+
+        Assert.Throws<InvalidDataException>(
+            () => PackageRegistrar.Register(PackRoot, Manifest(declared), _registry));
+        Assert.Equal(0, _registry.Count);
+    }
+
+    [Fact]
+    public void 注册_并集的sidecar仍受source与packageId一致性约束()
+    {
+        WriteManifest();
+        WritePrefab("effects/x.prefab.json", "x");
+        var sidecarPath = Path.Combine(PackRoot, "effects", "x.prefab.json") + AssetSidecarJson.SidecarExtension;
+        AssetSidecarJson.WriteFile(
+            sidecarPath,
+            new AssetSidecar(
+                AssetSidecarJson.CurrentSchemaVersion, PackId, "effects/other.prefab.json",
+                [Meta(AssetKind.Effect, "x", "1.0.0")]));
+
+        Assert.Throws<InvalidDataException>(() => PackageRegistrar.Register(PackRoot, Manifest(), _registry));
+
+        AssetSidecarJson.WriteFile(
+            sidecarPath,
+            new AssetSidecar(
+                AssetSidecarJson.CurrentSchemaVersion, "other.package", "effects/x.prefab.json",
+                [Meta(AssetKind.Effect, "x", "1.0.0")]));
+        Assert.Throws<InvalidDataException>(() => PackageRegistrar.Register(PackRoot, Manifest(), _registry));
+    }
+
+    [Fact]
+    public void 包扫描器_清单与发现面取并集且字段语义不合并()
+    {
+        WriteManifest("cards/rifle.card.json.meta.json");
+        WriteCard("cards", "rifle");
+        WriteSidecar("cards/rifle.card.json", Meta(AssetKind.Card, "rifle", "1.0.0"));
+        WritePrefab("effects/extra.prefab.json", "extra");
+        WriteSidecar("effects/extra.prefab.json", Meta(AssetKind.Effect, "extra", "1.0.0"));
+        WriteSidecar("effects/deep/nested.prefab.json", Meta(AssetKind.Effect, "nested", "1.0.0"));
+
+        // 插件清单镜像不是资产 sidecar：既不在发现面，也不该被读入。
+        AssetSidecarJson.WriteFile(
+            Path.Combine(PackRoot, PluginAssetRegistrar.ManifestFileName),
+            new AssetSidecar(AssetSidecarJson.CurrentSchemaVersion, PackId, "T.Assembly", []));
+
+        var scan = PackageScanner.Scan(PackRoot, Manifest("cards/rifle.card.json.meta.json"));
+
+        Assert.Equal(["cards/rifle.card.json.meta.json"], scan.ManifestSidecars);
+        Assert.Equal(
+            [
+                "cards/rifle.card.json.meta.json",
+                "effects/deep/nested.prefab.json.meta.json",
+                "effects/extra.prefab.json.meta.json",
+            ],
+            scan.SidecarFiles);
+    }
+
+    [Fact]
+    public void 注册_非约定目录的sidecar不产生资产()
+    {
+        WriteManifest();
+        WritePrefab("units/x.prefab.json", "x");
+        WriteSidecar("units/x.prefab.json", Meta(AssetKind.Effect, "x", "1.0.0"));
+
+        var result = PackageRegistrar.Register(PackRoot, Manifest(), _registry);
+
+        // 指纹＝包内容（含该 sidecar），注册＝约定目录内的资产（I14／B-7）。
+        Assert.Empty(result.Assets);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public void 样例包_注册面零结构性错误且加载计划无孤儿内含()
+    {
+        var samples = Path.Combine(FindRepoRoot(), "samples");
+        var packages = Directory.EnumerateDirectories(samples)
+            .Where(directory => File.Exists(Path.Combine(directory, "manifest.json")))
+            .OrderBy(directory => directory, StringComparer.Ordinal)
+            .ToArray();
+        Assert.NotEmpty(packages);
+
+        foreach (var packageRoot in packages)
+        {
+            var manifest = PackageManifest.Parse(File.ReadAllText(Path.Combine(packageRoot, "manifest.json")));
+            if (manifest.Kind != PackageKind.CardPack)
+            {
+                continue;
+            }
+
+            var registry = new AssetRegistry();
+            var registration = PackageRegistrar.Register(packageRoot, manifest, registry);
+
+            Assert.DoesNotContain(registration.Diagnostics, diagnostic =>
+                diagnostic.Code is AssetDiagnosticCode.SourceMissing
+                    or AssetDiagnosticCode.IdMismatch
+                    or AssetDiagnosticCode.GuidMismatch
+                    or AssetDiagnosticCode.VersionInvalid);
+
+            if (AssetLockJson.ReadPackage(packageRoot, AssetDomain.Formal) is not { } formal)
+            {
+                continue;
+            }
+
+            var plan = LoadListPlanner.Plan(registry, [formal]);
+            Assert.True(plan.IsValid);
+            Assert.DoesNotContain(plan.Issues, issue => issue.Code == AssetLoadIssueCode.OrphanEmbedded);
+        }
+    }
+
+    private static string FindRepoRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "OrcEngine.slnx")))
+        {
+            directory = directory.Parent;
+        }
+
+        return directory?.FullName ?? AppContext.BaseDirectory;
+    }
+
     // ─────────────────────────────────────────────────────────── 夹具
 
     private PackageManifest Manifest(params string[] metadata) => new(
@@ -450,6 +617,33 @@ public sealed class PackageRegistrarTests : IDisposable
         lines.Add(" ]");
         lines.Add("}");
         return string.Join("\n", lines) + "\n";
+    }
+
+    /// <summary>写一份最小可解析的效果预制体（宿主单条目）。</summary>
+    private void WritePrefab(string relativeSource, string id)
+    {
+        var path = Path.Combine(PackRoot, relativeSource);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, $$"""
+            {
+              "schemaVersion": 2,
+              "root": {
+                "id": "{{id}}",
+                "version": 1,
+                "mainTrigger": {
+                  "id": "t.main",
+                  "stableKey": "{{id}}",
+                  "kind": "passive",
+                  "hooks": [],
+                  "events": [],
+                  "version": 1
+                },
+                "otherTriggers": [],
+                "wrappers": [],
+                "injects": []
+              }
+            }
+            """);
     }
 
     private void WriteSidecar(string relativeSource, params AssetMetadata[] assets)

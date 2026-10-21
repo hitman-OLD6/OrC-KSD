@@ -32,7 +32,11 @@ public sealed record ScannedSourceFile(
 /// <param name="TextsFile">卡面文本文件（不存在＝null）。</param>
 /// <param name="KeywordsFile">词条声明文件（不存在＝null）。</param>
 /// <param name="CardFiles">卡源文件（含 sidecar 定位；稳定序）。</param>
-/// <param name="SidecarFiles">manifest 元数据列表指向的 sidecar（相对路径；原样）。</param>
+/// <param name="ManifestSidecars">`manifest.metadata` 原样（**声明**；B4 的「声明必须落地」契约来源）。</param>
+/// <param name="SidecarFiles">
+/// **完整清单**＝`ManifestSidecars` ∪ 发现面（`cards*` 顶层 ＋ `effects/` 递归的 `*.meta.json`，
+/// 排除插件清单镜像 `assets.meta.json`）；`/` 归一、去重、`Ordinal` 排序。
+/// </param>
 public sealed record PackageScan(
     string RootDirectory,
     PackageManifest Manifest,
@@ -41,6 +45,7 @@ public sealed record PackageScan(
     string? TextsFile,
     string? KeywordsFile,
     IReadOnlyList<ScannedSourceFile> CardFiles,
+    IReadOnlyList<string> ManifestSidecars,
     IReadOnlyList<string> SidecarFiles);
 
 /// <summary>
@@ -101,6 +106,14 @@ public static class PackageScanner
         var textsFile = Path.Combine(root, TextsFileName);
         var keywordsFile = Path.Combine(root, KeywordsFileName);
 
+        var manifestSidecars = manifest.MetadataList;
+        var sidecarFiles = manifestSidecars
+            .Concat(DiscoverSidecars(root, cardDirectories))
+            .Select(relative => relative.Replace('\\', '/'))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(relative => relative, StringComparer.Ordinal)
+            .ToArray();
+
         return new PackageScan(
             root,
             manifest,
@@ -109,8 +122,81 @@ public static class PackageScanner
             File.Exists(textsFile) ? textsFile : null,
             File.Exists(keywordsFile) ? keywordsFile : null,
             cardFiles,
-            manifest.MetadataList);
+            manifestSidecars,
+            sidecarFiles);
     }
+
+    /// <summary>
+    /// 发现面（F11）：`cards*` **顶层** ＋ `effects/` **递归**的 `*.meta.json`（相对包根、`/` 分隔）。
+    /// 排除插件清单镜像 <see cref="PluginAssetRegistrar.ManifestFileName"/>（常量复用，不另写字面量）；
+    /// 不含 `versions/**`（历史版本仍走卡源文件路径，见已知边界 B-1）。
+    /// </summary>
+    private static IReadOnlyList<string> DiscoverSidecars(string root, IReadOnlyList<string> cardDirectories)
+    {
+        var result = new SortedSet<string>(StringComparer.Ordinal);
+        var pattern = "*" + AssetSidecarJson.SidecarExtension;
+
+        foreach (var directory in cardDirectories)
+        {
+            Add(Directory.EnumerateFiles(directory, pattern, SearchOption.TopDirectoryOnly));
+        }
+
+        var effectsDirectory = Path.Combine(root, EffectsDirectoryName);
+        if (Directory.Exists(effectsDirectory))
+        {
+            Add(Directory.EnumerateFiles(effectsDirectory, pattern, SearchOption.AllDirectories));
+        }
+
+        return result.ToArray();
+
+        void Add(IEnumerable<string> files)
+        {
+            foreach (var file in files)
+            {
+                if (string.Equals(Path.GetFileName(file), PluginAssetRegistrar.ManifestFileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue; // 插件清单镜像不是资产 sidecar
+                }
+
+                result.Add(Path.GetRelativePath(root, file).Replace('\\', '/'));
+            }
+        }
+    }
+
+    /// <summary>
+    /// 枚举**当前版全部 sidecar**（F1 的内容指纹输入面；全仓唯一实现）：递归 `*.meta.json`，
+    /// 排除 <c>versions/**</c>（历史归档不参与当前版指纹）与插件清单镜像
+    /// <see cref="PluginAssetRegistrar.ManifestFileName"/>；相对路径 `/` 归一、<see cref="StringComparer.Ordinal"/> 排序。
+    /// <para>
+    /// 与注册发现面（<see cref="Scan"/> 的 <c>cards*</c> 顶层 ＋ <c>effects/</c> 递归）**口径不同**：
+    /// 指纹＝包内容，注册＝约定目录内的资产（已知边界 B-7）。
+    /// </para>
+    /// </summary>
+    /// <param name="packageRoot">包根目录（不存在＝空）。</param>
+    /// <exception cref="ArgumentException">packageRoot 为 null/空白。</exception>
+    public static IReadOnlyList<string> EnumerateCurrentSidecars(string packageRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageRoot);
+        var root = Path.GetFullPath(packageRoot);
+        if (!Directory.Exists(root))
+        {
+            return Array.Empty<string>();
+        }
+
+        return Directory
+            .EnumerateFiles(root, "*" + AssetSidecarJson.SidecarExtension, SearchOption.AllDirectories)
+            .Select(file => Path.GetRelativePath(root, file).Replace('\\', '/'))
+            .Where(relative => !IsExcludedFromCurrentSidecars(relative))
+            .OrderBy(relative => relative, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static bool IsExcludedFromCurrentSidecars(string relative)
+        => relative.StartsWith(VersionsDirectoryName + "/", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(
+               Path.GetFileName(relative),
+               PluginAssetRegistrar.ManifestFileName,
+               StringComparison.OrdinalIgnoreCase);
 
     /// <summary>发现卡目录（<c>cards</c>／<c>cards-*</c>；无 sidecar 的子目录不算）。</summary>
     /// <exception cref="ArgumentNullException">packageRoot 为 null。</exception>

@@ -28,12 +28,17 @@ public static class ControllerKinds
     public const string Ai = "ai";
 }
 
-/// <summary>座位快照（纯 DTO；不含任何引擎对象）。</summary>
+/// <summary>
+/// 座位快照（纯 DTO；不含任何引擎对象）。
+/// <para>
+/// **没有 <c>ready</c> 字段**：本协议不存在"座位就绪"语义（开局只要求座位被填满），
+/// 残留该字段会让客户端误以为有就绪流程。
+/// </para>
+/// </summary>
 public sealed record RoomSeatSnapshot(
     int Seat,
     string ControllerKind,
     string? DisplayName,
-    bool Ready,
     bool Connected);
 
 /// <summary>可连接地址（房主 UI 展示/复制；非回环 IPv4 ＋ 实际端口）。</summary>

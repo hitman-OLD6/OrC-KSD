@@ -1,4 +1,5 @@
 using Orc.Packages.Fs;
+using Orc.TestSupport;
 using Xunit;
 
 namespace Orc.Packages.Tests;
@@ -108,33 +109,17 @@ public class PathNormalizerTests : IDisposable
         Assert.Null(typeof(IEditableRootPolicy).GetMethod("AddRoot"));
     }
 
-    [Fact]
+    [ReparsePointFact]
     public void Symlink_Escape_Is_Normalized_Outside_And_Denied()
     {
         var link = Path.Combine(_root, "link");
-        if (!TryCreateDirectoryLink(link, _outside))
-        {
-            return; // 平台不允许建链（未启用开发者模式）：本机不适用
-        }
+        Assert.True(ReparsePointProbe.TryCreate(link, _outside, out var reason), reason);
 
         var target = Path.Combine(link, "a.card.json");
         Assert.False(PathNormalizer.Normalize(target).IsUnderOrEqual(PathNormalizer.Normalize(_root)));
 
         var policy = new EditableRootPolicy(_root);
         Assert.False(policy.Approve(target));
-    }
-
-    private static bool TryCreateDirectoryLink(string linkPath, string targetPath)
-    {
-        try
-        {
-            Directory.CreateSymbolicLink(linkPath, targetPath);
-            return true;
-        }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
-        {
-            return false;
-        }
     }
 
     public void Dispose()

@@ -67,6 +67,7 @@ public sealed class MatchExecutor
     private readonly SemaphoreSlim _gate = new(1, 1);
     private Orc.Game.Match? _match;
     private Task<ActionOutcome>? _active;
+    private int _handedOff;
 
     public MatchExecutor(TargeterBridgeAdapter bridge)
     {
@@ -76,6 +77,16 @@ public sealed class MatchExecutor
     /// <summary>目标选择桥接（装配进 <c>Match</c> 构造）。</summary>
     public TargeterBridgeAdapter Bridge { get; }
 
+    /// <summary>
+    /// 动作"交出去之后自行完结"的观测点（F4③）：调用方已拿到 <c>targeting</c> 返回，
+    /// 后续由选靶超时/取消把动作推进到完结——完成点不在任何客户端调用栈上，只能在这里挂推送。
+    /// <para>
+    /// 约束：订阅者只允许做 fire-and-forget 入队；此刻**不在**串行消费者上下文内（不能同步投影），
+    /// 且订阅者异常不得污染动作结果。
+    /// </para>
+    /// </summary>
+    public event Action<ActionOutcome>? Settled;
+
     /// <summary>当前活跃对局（无＝null）。</summary>
     public Orc.Game.Match? Match => _match;
 
@@ -84,6 +95,32 @@ public sealed class MatchExecutor
 
     /// <summary>是否存在未完成动作（待决中）。</summary>
     public bool IsBusy => _active is { IsCompleted: false };
+
+    /// <summary>
+    /// 若"忙"是因为选靶会话异常（桥已故障），清空活跃动作并以 <c>engine-rejected</c> 收束。
+    /// <para>
+    /// 供服务层门禁在"忙"分支之前调用：否则故障动作会把队列永久卡成 <c>busy</c>（F18 的直接症状）。
+    /// </para>
+    /// </summary>
+    /// <returns>确实清空并给出失败结局＝true。</returns>
+    public bool TryFailFaultedAction(out ActionOutcome? outcome)
+    {
+        outcome = null;
+
+        if (_active is not { IsCompleted: false } || Bridge.Fault is not { } fault)
+        {
+            return false;
+        }
+
+        _active = null;
+        outcome = Faulted(fault);
+        return true;
+    }
+
+    private static ActionOutcome Faulted(Exception fault)
+        => ActionOutcome.Failed(
+            McpCodes.EngineRejected,
+            $"选靶会话异常（{fault.GetType().Name}: {fault.Message}），动作已按失败收束。");
 
     /// <summary>装配活跃对局（唯一活跃对局约束：已有则拒绝）。</summary>
     public void Attach(Orc.Game.Match match)
@@ -129,6 +166,12 @@ public sealed class MatchExecutor
 
         if (IsBusy)
         {
+            // S13：上一轮动作的选靶会话已异常收束 → 先清空再回失败，避免队列被永久卡在 busy。
+            if (TryFailFaultedAction(out var faulted))
+            {
+                return faulted!;
+            }
+
             return ActionOutcome.Busy(Bridge.CurrentPending);
         }
 
@@ -143,11 +186,17 @@ public sealed class MatchExecutor
 
             if (IsBusy)
             {
+                if (TryFailFaultedAction(out var faulted))
+                {
+                    return faulted!;
+                }
+
                 return ActionOutcome.Busy(Bridge.CurrentPending);
             }
 
             Bridge.Reset();
-            var task = Guard(action, match, ct);
+            Volatile.Write(ref _handedOff, 0); // 上一轮 targeting 的残留标记不得误触发
+            var task = ObserveSettle(Guard(action, match, ct));
             _active = task;
 
             var outcome = await WaitAsync(task).ConfigureAwait(false);
@@ -161,6 +210,41 @@ public sealed class MatchExecutor
         finally
         {
             _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// 包装动作 Task：完结时若"动作曾被交出去（targeting 已返回给调用方）"，则触发一次 <see cref="Settled"/>。
+    /// </summary>
+    private async Task<ActionOutcome> ObserveSettle(Task<ActionOutcome> task)
+    {
+        try
+        {
+            var outcome = await task.ConfigureAwait(false);
+            if (Interlocked.Exchange(ref _handedOff, 0) == 1)
+            {
+                RaiseSettled(outcome);
+            }
+
+            return outcome;
+        }
+        catch (Exception ex)
+        {
+            Interlocked.Exchange(ref _handedOff, 0);
+            RaiseSettled(ActionOutcome.Failed(McpCodes.EngineRejected, ex.Message));
+            throw;
+        }
+    }
+
+    private void RaiseSettled(ActionOutcome outcome)
+    {
+        try
+        {
+            Settled?.Invoke(outcome);
+        }
+        catch (Exception)
+        {
+            // 订阅者异常不得污染动作结果。
         }
     }
 
@@ -192,6 +276,9 @@ public sealed class MatchExecutor
                     McpCodes.InvalidArguments,
                     "会话标识不符、已无待决请求，或该请求已被另一方认领（先到先服务）。");
             }
+
+            // 本调用方自己会等完结并推送 → 清位，避免 Settled 与调用方那次推送重复。
+            Volatile.Write(ref _handedOff, 0);
 
             var outcome = await WaitAsync(active).ConfigureAwait(false);
             if (!outcome.IsTargeting)
@@ -239,8 +326,17 @@ public sealed class MatchExecutor
                 return await task.ConfigureAwait(false);
             }
 
+            // S13：选靶会话异常 → 动作按失败收束并清空活跃动作（否则 IsBusy 恒真）。
+            if (Bridge.Fault is { } fault)
+            {
+                _active = null;
+                return Faulted(fault);
+            }
+
             if (Bridge.HasPending)
             {
+                // 动作交给调用方：后续若自行完结，由 Settled 补推（清位发生在调用方开始等待时）。
+                Volatile.Write(ref _handedOff, 1);
                 return ActionOutcome.Targeting(Bridge.CurrentPending!);
             }
 

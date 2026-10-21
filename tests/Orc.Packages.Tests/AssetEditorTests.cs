@@ -4,6 +4,7 @@ using Orc.Core;
 using Orc.Packages;
 using Orc.Packages.Editing;
 using Orc.Packages.Fs;
+using Orc.TestSupport;
 using Xunit;
 
 namespace Orc.Packages.Tests;
@@ -100,8 +101,70 @@ public class AssetEditorTests : IDisposable
     }
 
     [Fact]
-    public void Pack_List_Excludes_Temporary_Directories()
+    public void Pack_List_Only_Returns_Packages_Inside_Authorized_Roots()
     {
+        var outsideRoot = Path.Combine(Path.GetTempPath(), "orc-editor-outside-" + Guid.NewGuid().ToString("N"));
+        CopyDirectory(Path.Combine(FindRepoRoot(), "samples", "card-pack-demo"), Path.Combine(outsideRoot, "outside-pack"));
+        try
+        {
+            var editor = new AssetEditor(
+                _registry,
+                new EditableRootPolicy(_root),
+                new AssetEditorOptions { PackageRoots = [_packsRoot, outsideRoot] });
+
+            var packages = editor.ListPackages();
+            var package = Assert.Single(packages);
+
+            Assert.Equal("demo", package.PackageId);
+            Assert.DoesNotContain(
+                packages,
+                info => info.RootDirectory.StartsWith(outsideRoot, StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(outsideRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Pack_List_Accepts_Authorized_Root_That_Is_The_Package_Itself()
+    {
+        CopyDirectory(Path.Combine(FindRepoRoot(), "samples", "card-pack-demo"), Path.Combine(_packsRoot, "other"));
+
+        var editor = new AssetEditor(
+            _registry,
+            new EditableRootPolicy(_packageRoot),
+            new AssetEditorOptions { PackageRoots = [_packsRoot] });
+
+        var package = Assert.Single(editor.ListPackages());
+        Assert.Equal("demo", package.PackageId);
+        Assert.Equal(Path.GetFullPath(_packageRoot), package.RootDirectory);
+    }
+
+    [Fact]
+    public void Pack_List_Silently_Skips_Outside_Package_With_Unparsable_Manifest()
+    {
+        var outsideRoot = Path.Combine(Path.GetTempPath(), "orc-editor-outside-" + Guid.NewGuid().ToString("N"));
+        var bad = Path.Combine(outsideRoot, "bad-pack");
+        Directory.CreateDirectory(bad);
+        File.WriteAllText(Path.Combine(bad, "manifest.json"), "{ 这不是合法 manifest");
+        try
+        {
+            var editor = new AssetEditor(
+                _registry,
+                new EditableRootPolicy(_root),
+                new AssetEditorOptions { PackageRoots = [outsideRoot] });
+
+            Assert.Empty(editor.ListPackages()); // 不抛错、不泄露 manifest 内容
+        }
+        finally
+        {
+            Directory.Delete(outsideRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Pack_List_Excludes_Temporary_Directories()    {
         var before = Assert.Single(_editor.ListPackages());
         Assert.Equal("demo", before.PackageId);
         Assert.False(before.HasTemporaryPackage);
@@ -212,6 +275,187 @@ public class AssetEditorTests : IDisposable
         Assert.Equal(after.AssetGuid, _editor.GetAsset(AssetKind.Card, "demo.rifleman").AssetGuid);
     }
 
+    [Fact]
+    public void Version_Set_Synchronizes_Host_And_Embedded_Assets()
+    {
+        Begin();
+        WritePrefab(_packageRoot + ".tmp", "effects/demo.buff.prefab.json", "demo.buff",
+            (AssetKind.Effect, "demo.buff", null, "1.0.0"),
+            (AssetKind.Trigger, "demo.buff-onPlay", "onPlay", "1.0.0"));
+        _editor.Commit("effects/demo.buff.prefab.json");
+        var before = _editor.GetAsset(AssetKind.Trigger, "demo.buff-onPlay");
+
+        var host = _editor.SetVersion(AssetKind.Effect, "demo.buff", "1.1.0");
+        var embedded = _editor.GetAsset(AssetKind.Trigger, "demo.buff-onPlay");
+
+        Assert.Equal("1.1.0", host.Version.ToString());
+        Assert.Equal("1.1.0", embedded.Version.ToString());
+        Assert.NotEqual(before.AssetGuid, embedded.AssetGuid); // GUID 随版本重算
+        var sidecar = AssetSidecarJson.ReadFile(
+            Path.Combine(_packageRoot + ".tmp", "effects", "demo.buff.prefab.json") + AssetSidecarJson.SidecarExtension);
+        Assert.All(sidecar.Assets, asset => Assert.Equal("1.1.0", asset.Version.ToString()));
+    }
+
+    [Fact]
+    public void Version_Set_Synchronizes_All_Embedded_Entries_Of_A_Prefab()
+    {
+        Begin();
+        WritePrefab(_packageRoot + ".tmp", "effects/demo.pair.prefab.json", "demo.pair",
+            (AssetKind.Effect, "demo.pair", null, "1.0.0"),
+            (AssetKind.Trigger, "demo.pair-onPlay", "onPlay", "1.0.0"),
+            (AssetKind.Handler, "demo.pair-onPlay-effect", "onPlay.effect", "1.0.0"));
+        _editor.Commit("effects/demo.pair.prefab.json");
+
+        _editor.SetVersion(AssetKind.Effect, "demo.pair", "1.1.0");
+
+        var group = _editor.ListAssets(asset =>
+            string.Equals(asset.SidecarPath, "effects/demo.pair.prefab.json.meta.json", StringComparison.Ordinal));
+        Assert.Equal(3, group.Count);
+        Assert.All(group, asset => Assert.Equal("1.1.0", asset.Version.ToString()));
+    }
+
+    [Fact]
+    public void Version_Set_On_Embedded_Asset_Also_Synchronizes_Host()
+    {
+        Begin();
+        WritePrefab(_packageRoot + ".tmp", "effects/demo.buff.prefab.json", "demo.buff",
+            (AssetKind.Effect, "demo.buff", null, "1.0.0"),
+            (AssetKind.Trigger, "demo.buff-onPlay", "onPlay", "1.0.0"));
+        _editor.Commit("effects/demo.buff.prefab.json");
+
+        _editor.SetVersion(AssetKind.Trigger, "demo.buff-onPlay", "1.1.0");
+
+        Assert.Equal("1.1.0", _editor.GetAsset(AssetKind.Effect, "demo.buff").Version.ToString());
+        Assert.Equal("1.1.0", _editor.GetAsset(AssetKind.Trigger, "demo.buff-onPlay").Version.ToString());
+    }
+
+    [Fact]
+    public void Version_Set_Uses_Group_Maximum_And_Heals_Historical_Split()
+    {
+        // 历史分裂（宿主 1.0.0 ＋ 内含 1.2.0）在会话开始前就存在。
+        WritePrefab(_packageRoot, "effects/demo.split.prefab.json", "demo.split",
+            (AssetKind.Effect, "demo.split", null, "1.0.0"),
+            (AssetKind.Trigger, "demo.split-onPlay", "onPlay", "1.2.0"));
+        Begin();
+
+        var rejected = Assert.Throws<AssetEditorException>(
+            () => _editor.SetVersion(AssetKind.Effect, "demo.split", "1.0.1"));
+        Assert.Equal(AssetEditorErrorCode.VersionNotIncreasing, rejected.Code);
+        Assert.Contains("1.2.0", rejected.Message, StringComparison.Ordinal);
+        Assert.Contains("demo.split-onPlay", rejected.Message, StringComparison.Ordinal);
+
+        _editor.SetVersion(AssetKind.Effect, "demo.split", "1.3.0");
+        Assert.Equal("1.3.0", _editor.GetAsset(AssetKind.Effect, "demo.split").Version.ToString());
+        Assert.Equal("1.3.0", _editor.GetAsset(AssetKind.Trigger, "demo.split-onPlay").Version.ToString());
+    }
+
+    [Fact]
+    public void Promote_Heals_Historical_Split_Without_Changes()
+    {
+        WritePrefab(_packageRoot, "effects/demo.split.prefab.json", "demo.split",
+            (AssetKind.Effect, "demo.split", null, "1.0.0"),
+            (AssetKind.Trigger, "demo.split-onPlay", "onPlay", "1.2.0"));
+        Begin();
+
+        var result = _editor.Promote();
+
+        var host = Assert.Single(result.Assets,
+            asset => asset.Kind == AssetKind.Effect && asset.LocalId == "demo.split");
+        var embedded = Assert.Single(result.Assets,
+            asset => asset.Kind == AssetKind.Trigger && asset.LocalId == "demo.split-onPlay");
+        Assert.Equal(host.Version, embedded.Version);
+        Assert.Equal("1.2.0", host.Version.ToString()); // PromoteVersion(组内最大)
+
+        var formal = AssetLockJson.ReadPackage(_packageRoot, AssetDomain.Formal)!;
+        Assert.Equal("1.2.0", Assert.Single(
+            formal.Assets, entry => entry.AppId == "pack/demo/demo.split").Version.ToString());
+        Assert.Equal("1.2.0", Assert.Single(
+            formal.Assets, entry => entry.AppId == "pack/demo/demo.split-onPlay").Version.ToString());
+    }
+
+    [Fact]
+    public void Commit_After_Version_Set_Does_Not_Bump_Again_Group_Wide()
+    {
+        Begin();
+        WritePrefab(_packageRoot + ".tmp", "effects/demo.buff.prefab.json", "demo.buff",
+            (AssetKind.Effect, "demo.buff", null, "1.0.0"),
+            (AssetKind.Trigger, "demo.buff-onPlay", "onPlay", "1.0.0"));
+        _editor.Commit("effects/demo.buff.prefab.json");
+
+        _editor.SetVersion(AssetKind.Effect, "demo.buff", "1.1.0");
+        var committed = _editor.Commit("effects/demo.buff.prefab.json");
+
+        Assert.False(committed.VersionBumped);
+        Assert.Equal("1.1.0", committed.Asset.Version.ToString());
+        Assert.Equal("1.1.0", _editor.GetAsset(AssetKind.Trigger, "demo.buff-onPlay").Version.ToString());
+    }
+
+    [Fact]
+    public void Commit_After_Embedded_Version_Set_Does_Not_Outrun_Embedded()
+    {
+        Begin();
+        WritePrefab(_packageRoot + ".tmp", "effects/demo.buff.prefab.json", "demo.buff",
+            (AssetKind.Effect, "demo.buff", null, "1.0.0"),
+            (AssetKind.Trigger, "demo.buff-onPlay", "onPlay", "1.0.0"));
+        _editor.Commit("effects/demo.buff.prefab.json");
+
+        _editor.SetVersion(AssetKind.Trigger, "demo.buff-onPlay", "1.1.0");
+        var committed = _editor.Commit("effects/demo.buff.prefab.json");
+
+        Assert.False(committed.VersionBumped);
+        Assert.Equal(
+            _editor.GetAsset(AssetKind.Trigger, "demo.buff-onPlay").Version,
+            committed.Asset.Version);
+        Assert.Equal("1.1.0", committed.Asset.Version.ToString());
+    }
+
+    [Fact]
+    public void Consecutive_Commits_Keep_Bumping_Without_Pinned_Registration()
+    {
+        Begin();
+
+        var first = _editor.Commit("effects/demo.rally.prefab.json");
+        var second = _editor.Commit("effects/demo.rally.prefab.json");
+
+        Assert.True(first.VersionBumped);
+        Assert.Equal("1.0.0.1", first.Asset.Version.ToString());
+        Assert.True(second.VersionBumped);
+        Assert.Equal("1.0.0.2", second.Asset.Version.ToString());
+    }
+
+    [Fact]
+    public void Created_Asset_First_Commit_Stays_Then_Second_Bumps()
+    {
+        Begin();
+        _editor.CreateAsset(AssetKind.Card, "demo.newcard");
+
+        var first = _editor.Commit("cards/demo.newcard.card.json");
+        var second = _editor.Commit("cards/demo.newcard.card.json");
+
+        Assert.False(first.VersionBumped);
+        Assert.Equal("1.0.0", first.Asset.Version.ToString());
+        Assert.True(second.VersionBumped);
+        Assert.Equal("1.0.1", second.Asset.Version.ToString());
+    }
+
+    [Fact]
+    public void Version_Is_Consistent_Across_Preview_Test_Lock_And_Promoted_Lock()
+    {
+        Begin();
+        _editor.SetVersion(AssetKind.Effect, "demo.rally", "1.1.0");
+
+        var preview = _editor.PreviewLocks();
+        Assert.Equal("1.1.0", Assert.Single(
+            preview.Formal.Assets, entry => entry.AppId == "pack/demo/demo.rally").Version.ToString());
+        Assert.Equal("1.1.0", Assert.Single(
+            preview.Test.Assets, entry => entry.AppId == "pack/demo/demo.rally").Version.ToString());
+
+        _editor.Promote();
+        Assert.Equal("1.1.0", Assert.Single(
+            AssetLockJson.ReadPackage(_packageRoot, AssetDomain.Formal)!.Assets,
+            entry => entry.AppId == "pack/demo/demo.rally").Version.ToString());
+    }
+
     // ── 提交双通道 ──────────────────────────────────────────────────────────
 
     [Fact]
@@ -262,27 +506,269 @@ public class AssetEditorTests : IDisposable
         Assert.False(File.Exists(Path.Combine(_root, "outside.card.json")));
     }
 
-    [Fact]
+    [ReparsePointFact]
     public void Commit_Rejects_Symlink_Escape()
     {
         Begin();
         var outside = Path.Combine(Path.GetTempPath(), "orc-editor-out-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(outside);
         var link = Path.Combine(_packageRoot + ".tmp", "cards", "link");
-        if (!TryCreateDirectoryLink(link, outside))
+        Assert.True(ReparsePointProbe.TryCreate(link, outside, out var reason), reason);
+
+        try
+        {
+            var exception = Assert.Throws<AssetEditorException>(
+                () => _editor.Commit("cards/link/evil.card.json", "{}"));
+
+            Assert.Equal(AssetEditorErrorCode.PathDenied, exception.Code);
+            Assert.False(File.Exists(Path.Combine(outside, "evil.card.json")));
+        }
+        finally
         {
             Directory.Delete(outside, recursive: true);
-            return; // 平台不允许建链：本机不适用
         }
+    }
 
-        var exception = Assert.Throws<AssetEditorException>(() => _editor.Commit("cards/link/evil.card.json", "{}"));
+    [Fact]
+    public void Commit_Rejects_History_Version_Directory()
+    {
+        Begin();
+        const string relative = "versions/9.9.9/cards/x.card.json";
+
+        var exception = Assert.Throws<AssetEditorException>(() => _editor.Commit(relative, "{}"));
 
         Assert.Equal(AssetEditorErrorCode.PathDenied, exception.Code);
-        Assert.False(File.Exists(Path.Combine(outside, "evil.card.json")));
-        Directory.Delete(outside, recursive: true);
+        Assert.Contains(relative, exception.Message, StringComparison.Ordinal);
+        Assert.Contains("versions/", exception.Message, StringComparison.Ordinal);
+
+        // 拒绝发生在写入之前：临时包与正式包都不得出现该文件（连父目录都不创建）。
+        Assert.False(File.Exists(Path.Combine(_packageRoot + ".tmp", "versions", "9.9.9", "cards", "x.card.json")));
+        Assert.False(Directory.Exists(Path.Combine(_packageRoot + ".tmp", "versions", "9.9.9")));
+        Assert.False(File.Exists(Path.Combine(_packageRoot, "versions", "9.9.9", "cards", "x.card.json")));
+    }
+
+    [Fact]
+    public void CreateAsset_Rejects_History_Version_Directory_As_Source()
+    {
+        Begin();
+
+        var card = Assert.Throws<AssetEditorException>(() => _editor.CreateAsset(
+            AssetKind.Card, "demo.ghost", "versions/1.0.0/cards/demo.ghost.card.json"));
+        Assert.Equal(AssetEditorErrorCode.PathDenied, card.Code);
+
+        var effect = Assert.Throws<AssetEditorException>(() => _editor.CreateAsset(
+            AssetKind.Effect, "demo.ghost-fx", "versions/1.0.0/effects/demo.ghost-fx.prefab.json"));
+        Assert.Equal(AssetEditorErrorCode.PathDenied, effect.Code);
+
+        // 不建目录、不写 stub、不追加 sidecar 条目。
+        Assert.False(Directory.Exists(Path.Combine(_packageRoot + ".tmp", "versions", "1.0.0")));
+        Assert.Throws<AssetEditorException>(() => _editor.GetAsset(AssetKind.Card, "demo.ghost"));
+        Assert.Throws<AssetEditorException>(() => _editor.GetAsset(AssetKind.Effect, "demo.ghost-fx"));
+    }
+
+    [Fact]
+    public void Commit_Prefab_Without_Host_Is_Structured_Error()
+    {
+        Begin();
+        WritePrefab(_packageRoot + ".tmp", "effects/demo.orphan.prefab.json", "demo.orphan",
+            (AssetKind.Trigger, "demo.orphan-onPlay", "onPlay", "1.0.0"));
+        var sidecarPath = Path.Combine(_packageRoot + ".tmp", "effects", "demo.orphan.prefab.json")
+                          + AssetSidecarJson.SidecarExtension;
+        var before = File.ReadAllBytes(sidecarPath);
+
+        var exception = Assert.Throws<AssetEditorException>(
+            () => _editor.Commit("effects/demo.orphan.prefab.json"));
+
+        Assert.Equal(AssetEditorErrorCode.InvalidContent, exception.Code);
+        Assert.Contains("宿主", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllBytes(sidecarPath)); // 失败不落盘
+    }
+
+    [Fact]
+    public void CreateAsset_Rejects_Source_Id_Mismatch()
+    {
+        Begin();
+
+        var card = Assert.Throws<AssetEditorException>(
+            () => _editor.CreateAsset(AssetKind.Card, "demo.alias", RiflemanPath));
+        Assert.Equal(AssetEditorErrorCode.InvalidContent, card.Code);
+        Assert.Contains("demo.rifleman", card.Message, StringComparison.Ordinal);
+        Assert.Throws<AssetEditorException>(() => _editor.GetAsset(AssetKind.Card, "demo.alias"));
+
+        // sidecar 未追加条目
+        var sidecar = AssetSidecarJson.ReadFile(
+            Path.Combine(_packageRoot + ".tmp", RiflemanPath) + AssetSidecarJson.SidecarExtension);
+        Assert.Single(sidecar.Assets);
+
+        WritePrefab(_packageRoot + ".tmp", "effects/demo.rally2.prefab.json", "demo.rally2");
+        var effect = Assert.Throws<AssetEditorException>(
+            () => _editor.CreateAsset(AssetKind.Effect, "other", "effects/demo.rally2.prefab.json"));
+        Assert.Equal(AssetEditorErrorCode.InvalidContent, effect.Code);
+        Assert.Throws<AssetEditorException>(() => _editor.GetAsset(AssetKind.Effect, "other"));
+    }
+
+    [Fact]
+    public void Commit_Card_Validates_Against_Multi_Card_Sidecar()
+    {
+        Begin();
+        const string relative = "cards/demo.multi.card.json";
+        WriteCard(relative, "demo.multi");
+        WriteCardSidecar(relative, "demo.alt-a", "demo.alt-b");
+
+        var rejected = Assert.Throws<AssetEditorException>(() => _editor.Commit(relative));
+        Assert.Equal(AssetEditorErrorCode.InvalidContent, rejected.Code);
+        Assert.Contains("demo.alt-a", rejected.Message, StringComparison.Ordinal);
+
+        WriteCardSidecar(relative, "demo.multi", "demo.alt-b");
+        var committed = _editor.Commit(relative);
+        Assert.Equal("demo.multi", committed.Asset.LocalId);
     }
 
     // ── 转正 ────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Promote_Rejects_Conflicting_History_Without_Writing()
+    {
+        Begin();
+        _editor.Commit(RiflemanPath); // 1.0.0 → 1.0.0.1（转正将归档 versions/1.0.0）
+
+        var conflict = Path.Combine(_packageRoot, "versions", "1.0.0", "cards", "demo.rifleman.card.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(conflict)!);
+        File.WriteAllText(conflict, "{\"conflict\":true}");
+        var before = Snapshot(_packageRoot);
+
+        var exception = Assert.Throws<AssetEditorException>(() => _editor.Promote());
+
+        Assert.Equal(AssetEditorErrorCode.PromoteFailed, exception.Code);
+        Assert.Contains("versions/1.0.0/cards/demo.rifleman.card.json", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(before, Snapshot(_packageRoot)); // 正式包逐字节不变
+        Assert.True(Directory.Exists(_packageRoot + ".tmp")); // 临时包保留
+    }
+
+    [Fact]
+    public void Promote_Skips_Identical_History_Archive_But_Still_Reports_It()
+    {
+        Begin();
+        _editor.Commit(RiflemanPath);
+
+        var archived = Path.Combine(_packageRoot, "versions", "1.0.0", "cards", "demo.rifleman.card.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(archived)!);
+        File.Copy(Path.Combine(_packageRoot, RiflemanPath), archived);
+        var bytes = File.ReadAllBytes(archived);
+
+        var result = _editor.Promote();
+
+        Assert.Equal(bytes, File.ReadAllBytes(archived)); // 历史字节不被改写
+        Assert.Contains("versions/1.0.0", result.ArchivedVersions);
+    }
+
+    [Fact]
+    public void Promote_Rolls_Back_On_Io_Failure()
+    {
+        Begin();
+        var grenadier = "cards/demo.grenadier.card.json";
+        var content = File.ReadAllText(Path.Combine(_packageRoot, grenadier))
+            .Replace("\"name\": \"掷弹兵\"", "\"name\": \"掷弹兵（回滚验证）\"", StringComparison.Ordinal);
+        _editor.Commit(grenadier, content);
+        _editor.CreateAsset(AssetKind.Card, "demo.newcard");
+
+        // 让「新建文件」这一步必然失败：正式包同名位置预置一个目录。
+        var blocked = Path.Combine(_packageRoot, "cards", "demo.newcard.card.json");
+        Directory.CreateDirectory(blocked);
+        var before = Snapshot(_packageRoot);
+
+        try
+        {
+            var exception = Assert.Throws<AssetEditorException>(() => _editor.Promote());
+
+            Assert.Equal(AssetEditorErrorCode.PromoteFailed, exception.Code);
+            Assert.Contains("cards/demo.newcard.card.json", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("回滚完整", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("临时包已保留", exception.Message, StringComparison.Ordinal);
+
+            Assert.Equal(before, Snapshot(_packageRoot)); // 含「新增后又被删除」的归档文件与已改文件
+            Assert.False(Directory.Exists(Path.Combine(_packageRoot, "versions"))); // 无残留空目录
+            Assert.True(Directory.Exists(_packageRoot + ".tmp"));
+        }
+        finally
+        {
+            Directory.Delete(blocked, recursive: false);
+        }
+    }
+
+    [Fact]
+    public void Promote_Reports_Rollback_Failures_In_Single_Message()
+    {
+        Begin();
+        _editor.Commit(RiflemanPath);
+
+        // 只读目标：写入失败（UnauthorizedAccessException），且回滚写回同样被拒 ⇒ 回滚失败明细。
+        var locked = Path.Combine(_packageRoot, "cards-support", "demo.scout.card.json");
+        var attributes = File.GetAttributes(locked);
+        File.SetAttributes(locked, attributes | FileAttributes.ReadOnly);
+        try
+        {
+            var exception = Assert.Throws<AssetEditorException>(() => _editor.Promote());
+
+            Assert.Equal(AssetEditorErrorCode.PromoteFailed, exception.Code);
+            Assert.Contains("回滚失败 1 项", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("cards-support/demo.scout.card.json", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("临时包已保留", exception.Message, StringComparison.Ordinal);
+            Assert.True(Directory.Exists(_packageRoot + ".tmp"));
+        }
+        finally
+        {
+            File.SetAttributes(locked, attributes);
+        }
+    }
+
+    [Fact]
+    public void Promote_Leaves_Unchanged_Sidecar_Bytes_Intact()
+    {
+        Begin();
+        var untouched = Path.Combine(_packageRoot, "cards-support", "demo.scout.card.json")
+                        + AssetSidecarJson.SidecarExtension;
+        var hashBefore = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(untouched)));
+
+        _editor.Commit(RiflemanPath);
+        _editor.Promote();
+
+        Assert.Equal(hashBefore, Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(untouched))));
+    }
+
+    [Fact]
+    public void Promote_Keeps_Content_Fingerprint_Stable_Despite_Archive()
+    {
+        Begin();
+        _editor.Commit(RiflemanPath);
+        _editor.Promote();
+
+        var manifest = PackageManifest.Parse(File.ReadAllText(Path.Combine(_packageRoot, "manifest.json")));
+        Assert.True(Directory.Exists(Path.Combine(_packageRoot, "versions")));
+        Assert.Equal(AssetLoadTestKit.RecomputeContent(_packageRoot, "demo"), manifest.Version); // 归档不扰动指纹
+    }
+
+    [Fact]
+    public void Editor_Fingerprint_Covers_Empty_Sidecar_Outside_Conventions()
+    {
+        Begin();
+        var bare = Path.Combine(_packageRoot + ".tmp", "units", "x.prefab.json")
+                   + AssetSidecarJson.SidecarExtension;
+        Directory.CreateDirectory(Path.GetDirectoryName(bare)!);
+        var before = PackageManifest.Parse(
+            File.ReadAllText(Path.Combine(_packageRoot + ".tmp", "manifest.json"))).Version;
+
+        AssetSidecarJson.WriteFile(
+            bare,
+            new AssetSidecar(AssetSidecarJson.CurrentSchemaVersion, "demo", "units/x.prefab.json", []));
+
+        // 任何一次结构变更都会重算指纹；这里用 commit 触发。
+        _editor.Commit(RiflemanPath);
+        var after = PackageManifest.Parse(
+            File.ReadAllText(Path.Combine(_packageRoot + ".tmp", "manifest.json"))).Version;
+
+        Assert.NotEqual(before, after); // 空 sidecar ＋ 非约定目录同样属于包内容
+    }
 
     [Fact]
     public void Promote_Produces_New_Version_Two_Locks_And_History()
@@ -457,6 +943,88 @@ public class AssetEditorTests : IDisposable
             Path.Combine(_packageRoot, "versions", "1.0.0", "cards", "demo.rifleman.card.json")));
     }
 
+    [Fact]
+    public void Delete_Host_Cascades_To_Embedded_Assets()
+    {
+        Begin();
+        WritePrefab(_packageRoot + ".tmp", "effects/demo.buff.prefab.json", "demo.buff",
+            (AssetKind.Effect, "demo.buff", null, "1.0.0"),
+            (AssetKind.Trigger, "demo.buff-onPlay", "onPlay", "1.0.0"));
+        _editor.Commit("effects/demo.buff.prefab.json");
+
+        _editor.DeleteAsset(AssetKind.Effect, "demo.buff");
+
+        Assert.Throws<AssetEditorException>(() => _editor.GetAsset(AssetKind.Effect, "demo.buff"));
+        Assert.Throws<AssetEditorException>(() => _editor.GetAsset(AssetKind.Trigger, "demo.buff-onPlay"));
+
+        var test = _editor.PreviewLocks().Test;
+        Assert.DoesNotContain(test.Assets, entry => entry.AppId == "pack/demo/demo.buff");
+        Assert.DoesNotContain(test.Assets, entry => entry.AppId == "pack/demo/demo.buff-onPlay");
+    }
+
+    [Fact]
+    public void Delete_Host_Leaves_No_OrphanEmbedded_After_Promote()
+    {
+        WritePrefab(_packageRoot, "effects/demo.buff.prefab.json", "demo.buff",
+            (AssetKind.Effect, "demo.buff", null, "1.0.0"),
+            (AssetKind.Trigger, "demo.buff-onPlay", "onPlay", "1.0.0"));
+        Begin();
+
+        _editor.DeleteAsset(AssetKind.Effect, "demo.buff");
+        _editor.Promote();
+
+        var manifest = PackageManifest.Parse(File.ReadAllText(Path.Combine(_packageRoot, "manifest.json")));
+        var registry = new AssetRegistry();
+        PackageRegistrar.Register(_packageRoot, manifest, registry);
+
+        var formal = AssetLockJson.ReadPackage(_packageRoot, AssetDomain.Formal)!;
+        var plan = LoadListPlanner.Plan(registry, [formal]);
+
+        Assert.True(plan.IsValid);
+        Assert.DoesNotContain(plan.Issues, issue => issue.Code == AssetLoadIssueCode.OrphanEmbedded);
+        Assert.DoesNotContain(formal.Assets, entry => entry.AppId == "pack/demo/demo.buff-onPlay");
+    }
+
+    [Fact]
+    public void Delete_Embedded_Asset_Keeps_Host()
+    {
+        Begin();
+        WritePrefab(_packageRoot + ".tmp", "effects/demo.buff.prefab.json", "demo.buff",
+            (AssetKind.Effect, "demo.buff", null, "1.0.0"),
+            (AssetKind.Trigger, "demo.buff-onPlay", "onPlay", "1.0.0"));
+        _editor.Commit("effects/demo.buff.prefab.json");
+
+        _editor.DeleteAsset(AssetKind.Trigger, "demo.buff-onPlay");
+
+        Assert.Equal("demo.buff", _editor.GetAsset(AssetKind.Effect, "demo.buff").LocalId);
+        Assert.Throws<AssetEditorException>(() => _editor.GetAsset(AssetKind.Trigger, "demo.buff-onPlay"));
+        var sidecar = AssetSidecarJson.ReadFile(
+            Path.Combine(_packageRoot + ".tmp", "effects", "demo.buff.prefab.json") + AssetSidecarJson.SidecarExtension);
+        Assert.Single(sidecar.Assets);
+        Assert.Equal(AssetKind.Effect, sidecar.Assets[0].Kind);
+    }
+
+    [Fact]
+    public void Delete_Host_Removes_Source_And_Sidecar_Formally()
+    {
+        WritePrefab(_packageRoot, "effects/demo.buff.prefab.json", "demo.buff",
+            (AssetKind.Effect, "demo.buff", null, "1.0.0"),
+            (AssetKind.Trigger, "demo.buff-onPlay", "onPlay", "1.0.0"));
+        var formalSource = Path.Combine(_packageRoot, "effects", "demo.buff.prefab.json");
+        Begin();
+
+        _editor.DeleteAsset(AssetKind.Effect, "demo.buff");
+
+        Assert.False(File.Exists(Path.Combine(_packageRoot + ".tmp", "effects", "demo.buff.prefab.json")));
+        Assert.False(File.Exists(
+            Path.Combine(_packageRoot + ".tmp", "effects", "demo.buff.prefab.json") + AssetSidecarJson.SidecarExtension));
+
+        _editor.Promote();
+
+        Assert.False(File.Exists(formalSource));
+        Assert.False(File.Exists(formalSource + AssetSidecarJson.SidecarExtension));
+    }
+
     // ── 列举／依赖／预览 ────────────────────────────────────────────────────
 
     [Fact]
@@ -588,17 +1156,88 @@ public class AssetEditorTests : IDisposable
 
     private EditorSessionInfo Begin() => _editor.BeginSession(EditorSessionRequest.Edit(_packageRoot));
 
-    private static bool TryCreateDirectoryLink(string linkPath, string targetPath)
+    /// <summary>写一份「宿主 ＋ 内含」预制体与其 sidecar（<paramref name="packageRoot"/> 可为正式包或临时包）。</summary>
+    private static void WritePrefab(
+        string packageRoot,
+        string relative,
+        string hostId,
+        params (AssetKind Kind, string Id, string? Anchor, string Version)[] assets)
     {
-        try
+        var absolute = Path.Combine(packageRoot, relative.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
+        File.WriteAllText(absolute, $$"""
+            {
+              "schemaVersion": 2,
+              "root": {
+                "id": "{{hostId}}",
+                "version": 1,
+                "mainTrigger": {
+                  "id": "t.main",
+                  "stableKey": "{{hostId}}",
+                  "kind": "passive",
+                  "hooks": [],
+                  "events": [],
+                  "version": 1
+                },
+                "otherTriggers": [],
+                "wrappers": [],
+                "injects": []
+              }
+            }
+            """);
+
+        var packageGuid = PackageManifest.Parse(
+            File.ReadAllText(Path.Combine(packageRoot, "manifest.json"))).Guid;
+        var metadata = assets.Select(asset =>
         {
-            Directory.CreateSymbolicLink(linkPath, targetPath);
-            return true;
-        }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
-        {
-            return false;
-        }
+            var version = AssetVersion.Parse(asset.Version);
+            return new AssetMetadata(
+                AssetIdentity.DeriveAssetGuid(packageGuid, asset.Kind, asset.Id, version),
+                asset.Kind,
+                asset.Id,
+                version,
+                asset.Anchor,
+                Loader: null,
+                DependsOn: [],
+                ConflictsWith: []);
+        }).ToArray();
+
+        AssetSidecarJson.WriteFile(
+            absolute + AssetSidecarJson.SidecarExtension,
+            new AssetSidecar(AssetSidecarJson.CurrentSchemaVersion, "demo", relative, metadata));
+    }
+
+    /// <summary>在临时包内写一份卡源文件（以 demo.rifleman 为模板，仅替换 id／name）。</summary>
+    private void WriteCard(string relative, string id)
+    {
+        var absolute = Path.Combine(_packageRoot + ".tmp", relative.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
+        var text = File.ReadAllText(Path.Combine(_packageRoot, RiflemanPath))
+            .Replace("\"id\": \"demo.rifleman\"", $"\"id\": \"{id}\"", StringComparison.Ordinal)
+            .Replace("\"name\": \"步枪兵\"", $"\"name\": \"{id}\"", StringComparison.Ordinal);
+        File.WriteAllText(absolute, text);
+    }
+
+    /// <summary>在临时包内写一份声明多张卡的 sidecar。</summary>
+    private void WriteCardSidecar(string relative, params string[] ids)
+    {
+        var packageGuid = PackageManifest.Parse(
+            File.ReadAllText(Path.Combine(_packageRoot, "manifest.json"))).Guid;
+        var assets = ids.Select(id => new AssetMetadata(
+                AssetIdentity.DeriveAssetGuid(packageGuid, AssetKind.Card, id, EditorVersionRules.Initial),
+                AssetKind.Card,
+                id,
+                EditorVersionRules.Initial,
+                Anchor: null,
+                Loader: null,
+                DependsOn: [],
+                ConflictsWith: []))
+            .ToArray();
+
+        AssetSidecarJson.WriteFile(
+            Path.Combine(_packageRoot + ".tmp", relative.Replace('/', Path.DirectorySeparatorChar))
+            + AssetSidecarJson.SidecarExtension,
+            new AssetSidecar(AssetSidecarJson.CurrentSchemaVersion, "demo", relative, assets));
     }
 
     private static Dictionary<string, string> Snapshot(string root)

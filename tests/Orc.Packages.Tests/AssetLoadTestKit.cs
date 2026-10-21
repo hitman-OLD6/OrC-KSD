@@ -17,6 +17,19 @@ internal static class AssetLoadTestKit
         return new Guid(bytes.AsSpan(0, 16));
     }
 
+    /// <summary>按「磁盘当前版 sidecar」重算包内容指纹（F1 的验收口径：与编辑器／迁移工具同一 helper）。</summary>
+    internal static PackageVersion RecomputeContent(string packageRoot, string packageId)
+    {
+        var sidecars = PackageScanner.EnumerateCurrentSidecars(packageRoot)
+            .Select(relative => (
+                relative,
+                AssetSidecarJson.ReadFile(
+                    Path.Combine(packageRoot, relative.Replace('/', Path.DirectorySeparatorChar)))))
+            .ToArray();
+
+        return PackageVersion.ComputeContent(packageId, sidecars);
+    }
+
     /// <summary>注册一条资产并返回注册条目（GUID 由身份派生，可直接进 lock）。</summary>
     internal static AssetRegistration Register(
         AssetRegistry registry,

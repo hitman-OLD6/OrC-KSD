@@ -25,7 +25,7 @@ public sealed class BulwarkCardPackTests
 
         // 包版本＝内容指纹（S4/R17；S10a 迁移后不再是字面 "1.0.0"）：同内容恒得同一指纹、不含时间戳。
         Assert.Equal(PackageManifest.CurrentSchemaVersion, manifest.SchemaVersion);
-        Assert.Equal(PackageVersion.Compute(manifest.Id, manifest.MetadataList), manifest.Version);
+        Assert.Equal(AssetLoadTestKit.RecomputeContent(PackRoot, manifest.Id), manifest.Version);
         Assert.Empty(manifest.Dependencies);
 
         var content = PackageRegistrar.Register(PackRoot, manifest, new AssetRegistry()).Content;

@@ -164,6 +164,14 @@ public sealed partial class McpService
         // 挂起期门禁（R2c）：待决期间只允许 target.* 与只读工具。
         if (Executor.IsBusy && !entry.ReadOnly && !call.Name.StartsWith("target.", StringComparison.Ordinal))
         {
+            // 若"忙"来自选靶会话异常：先收束该动作并回 engine-rejected（不得永久 busy）。
+            if (Executor.TryFailFaultedAction(out var faulted))
+            {
+                return McpToolResult.Failure(
+                    faulted!.FailureCode ?? McpCodes.EngineRejected,
+                    faulted.FailureMessage ?? "动作失败（选靶会话异常）。");
+            }
+
             var pending = Bridge.CurrentPending;
             return McpToolResult.Failure(
                 McpCodes.PendingTargeting,

@@ -53,7 +53,7 @@ public static class ServerBootstrap
         var room = new Room(
             Guid.NewGuid().ToString("N")[..8],
             options.SeatCount,
-            deckValidator: new DeckRulesValidator(() => pool, options.EnforceDeckRules),
+            deckValidator: new DeckRulesValidator(() => pool, options.EnforceDeckRules, options.RequiredDeckSize),
             launcher: launcher,
             addresses: () => LocalAddresses.Collect(listenerPort),
             packFingerprint: options.PackFingerprint ?? ComputePackFingerprint(options.PackDirectories));

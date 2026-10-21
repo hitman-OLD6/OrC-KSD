@@ -125,6 +125,99 @@ public sealed class EditorToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task Promote_Conflict_Reports_PromoteFailed_As_ValidationFailed()
+    {
+        var packageRoot = Path.Combine(_fixture.Root, "demo");
+        CopyDirectory(Path.Combine(FindRepoRoot(), "samples", "card-pack-demo"), packageRoot);
+
+        var begun = await _fixture.InvokeAsync(
+            "editor.session_begin",
+            JsonSerializer.Serialize(new { mode = "edit", packageRoot }));
+        Assert.True(begun.Ok, begun.Message);
+        var committed = await _fixture.InvokeAsync(
+            "editor.asset_commit", """{ "path": "cards/demo.rifleman.card.json" }""");
+        Assert.True(committed.Ok, committed.Message);
+        Assert.True((bool)committed.Details!["versionBumped"]!);
+
+        var conflict = Path.Combine(packageRoot, "versions", "1.0.0", "cards", "demo.rifleman.card.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(conflict)!);
+        await File.WriteAllTextAsync(conflict, """{ "conflict": true }""");
+
+        var result = await _fixture.InvokeAsync("editor.promote");
+
+        Assert.False(result.Ok);
+        Assert.Equal(McpCodes.ValidationFailed, result.Code);
+        Assert.Equal("PromoteFailed", (string)result.Details!["editorCode"]!);
+        Assert.Contains("versions/1.0.0/cards/demo.rifleman.card.json", result.Message, StringComparison.Ordinal);
+        Assert.True(Directory.Exists(packageRoot + ".tmp")); // 临时包保留
+    }
+
+    [Fact]
+    public async Task Commit_On_Blocked_Parent_Maps_IoException_To_ValidationFailed()
+    {
+        _fixture.Service.Sandbox.EnsureScaffold();
+        Assert.True((await _fixture.InvokeAsync("editor.session_begin", """{ "mode": "edit" }""")).Ok);
+
+        var temporaryRoot = Path.Combine(_fixture.Root, "pack.tmp");
+        Directory.CreateDirectory(Path.Combine(temporaryRoot, "cards"));
+        File.WriteAllText(Path.Combine(temporaryRoot, "cards", "blocked"), "占用该名字的文件");
+
+        var result = await _fixture.InvokeAsync(
+            "editor.asset_commit",
+            """{ "path": "cards/blocked/x.card.json", "content": "{}" }""");
+
+        Assert.False(result.Ok);
+        Assert.Equal(McpCodes.ValidationFailed, result.Code);
+        Assert.Equal(nameof(IOException), (string)result.Details!["cause"]!);
+        Assert.NotNull(result.Details["error"]);
+        Assert.DoesNotContain("   at ", result.Message, StringComparison.Ordinal); // 不泄露堆栈
+    }
+
+    [Fact]
+    public async Task Commit_On_ReadOnly_File_Maps_UnauthorizedAccess_To_PathDenied()
+    {
+        _fixture.Service.Sandbox.EnsureScaffold();
+        Assert.True((await _fixture.InvokeAsync("editor.session_begin", """{ "mode": "edit" }""")).Ok);
+
+        var temporaryRoot = Path.Combine(_fixture.Root, "pack.tmp");
+        var target = Path.Combine(temporaryRoot, "cards", "readonly.card.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        File.WriteAllText(target, "{}");
+        File.SetAttributes(target, FileAttributes.ReadOnly);
+        try
+        {
+            var result = await _fixture.InvokeAsync(
+                "editor.asset_commit",
+                """{ "path": "cards/readonly.card.json", "content": "{}" }""");
+
+            Assert.False(result.Ok);
+            Assert.Equal(McpCodes.PathDenied, result.Code);
+            Assert.Equal(nameof(UnauthorizedAccessException), (string)result.Details!["cause"]!);
+        }
+        finally
+        {
+            File.SetAttributes(target, FileAttributes.Normal);
+        }
+    }
+
+    [Fact]
+    public void Guard_Maps_Only_Io_And_Unauthorized_And_Has_No_CatchAll()
+    {
+        var text = File.ReadAllText(
+            Path.Combine(FindRepoRoot(), "src", "Orc.Mcp", "Tools", "EditorTools.cs"));
+        var start = text.IndexOf("private static McpToolResult Guard", StringComparison.Ordinal);
+        var end = text.IndexOf("private static string MapCode", StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+
+        var guard = text[start..end];
+        Assert.Contains("catch (UnauthorizedAccessException ex)", guard, StringComparison.Ordinal);
+        Assert.Contains("catch (IOException ex)", guard, StringComparison.Ordinal);
+        Assert.Contains("[\"cause\"]", guard, StringComparison.Ordinal);
+        Assert.DoesNotContain("catch (Exception", guard, StringComparison.Ordinal);
+        Assert.DoesNotContain("catch (System.Exception", guard, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task NoSession_Tool_Returns_NotReady()
     {
         var result = await _fixture.InvokeAsync("editor.asset_list");
@@ -489,8 +582,34 @@ public sealed class EditorToolsTests : IDisposable
             (bool)asset["isNew"]! ? "new" : "existing",
             string.Join(",", asset["tags"]!.AsArray().Select(node => (string)node!)));
 
-    private static string CardJson(string localId, string name, params string[] tags)
+    private static void CopyDirectory(string source, string target)
     {
+        Directory.CreateDirectory(target);
+        foreach (var directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
+        {
+            Directory.CreateDirectory(Path.Combine(target, Path.GetRelativePath(source, directory)));
+        }
+
+        foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            var destination = Path.Combine(target, Path.GetRelativePath(source, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(file, destination, overwrite: true);
+        }
+    }
+
+    private static string FindRepoRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "OrcEngine.slnx")))
+        {
+            directory = directory.Parent;
+        }
+
+        return directory?.FullName ?? AppContext.BaseDirectory;
+    }
+
+    private static string CardJson(string localId, string name, params string[] tags)    {
         var tagData = tags.Length == 0
             ? """{ "component": "tagData", "rarity": "Standard" }"""
             : $$"""{ "component": "tagData", "rarity": "Standard", "tags": [{{string.Join(",", tags.Select(tag => $"\"{tag}\""))}}] }""";

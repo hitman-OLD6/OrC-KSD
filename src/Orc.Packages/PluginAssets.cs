@@ -221,6 +221,9 @@ public static class PluginAssetLockVerifier
     /// <summary>注册面存在但未纳入正式 lock（不会加载）⇒ 重锁。</summary>
     public const string Unlisted = "unlisted";
 
+    /// <summary>lock 对同一资产 GUID 重复声明（lock 自相矛盾）⇒ 修改 lock 文本或重锁。</summary>
+    public const string DuplicateEntry = "duplicate-entry";
+
     /// <summary>校验包根下的 <c>lock.formal.json</c> 与本次注册结果是否一致。</summary>
     /// <exception cref="ArgumentNullException">参数为 null。</exception>
     public static PluginAssetLockVerification Verify(
@@ -242,17 +245,50 @@ public static class PluginAssetLockVerifier
             return new PluginAssetLockVerification(false, issues);
         }
 
-        var registered = registrations.ToDictionary(registration => registration.AssetGuid);
-        var locked = @lock.Assets.ToDictionary(entry => entry.AssetGuid);
+        // 容错索引：lock 自相矛盾（同 GUID 多条）只报问题，不抛异常（F12/I16）。
+        var registered = new Dictionary<Guid, AssetRegistration>();
+        foreach (var registration in registrations)
+        {
+            registered.TryAdd(registration.AssetGuid, registration);
+        }
 
+        var locked = new Dictionary<Guid, AssetLockEntry>();
         foreach (var entry in @lock.Assets)
         {
-            if (!registered.ContainsKey(entry.AssetGuid))
+            if (locked.TryGetValue(entry.AssetGuid, out var kept))
+            {
+                issues.Add(new PluginAssetLockIssue(
+                    DuplicateEntry,
+                    $"lock 对同一资产 GUID '{entry.AssetGuid}' 重复声明："
+                    + $"{kept.AppId}#{kept.Version} 与 {entry.AppId}#{entry.Version}"
+                    + "——请修改 lock 文本或重锁。"));
+                continue;
+            }
+
+            locked.Add(entry.AssetGuid, entry);
+        }
+
+        foreach (var entry in locked.Values.OrderBy(item => item.AppId, StringComparer.Ordinal))
+        {
+            if (!registered.TryGetValue(entry.AssetGuid, out var registration))
             {
                 issues.Add(new PluginAssetLockIssue(
                     StaleLock,
                     $"lock 引用的资产版本已不存在：{AssetKindTokens.Token(entry.Kind)}：{entry.AppId}#{entry.Version}"
                     + $"——程序集插件不保留历史版本，请重锁（旧 lock 不会被静默降级）。"));
+                continue;
+            }
+
+            // 四元组比对（guid 已由索引命中）＝「引用仍指向注册面同一身份」，否则视作篡改／过期。
+            if (registration.Kind != entry.Kind
+                || !string.Equals(registration.AppId, entry.AppId, StringComparison.Ordinal)
+                || registration.Version != entry.Version)
+            {
+                issues.Add(new PluginAssetLockIssue(
+                    StaleLock,
+                    $"lock 条目与注册面不一致：{AssetKindTokens.Token(entry.Kind)}：{entry.AppId}#{entry.Version}"
+                    + $"（注册面 {AssetKindTokens.Token(registration.Kind)}：{registration.AppId}#{registration.Version}）"
+                    + "——lock 被篡改或已过期，请重锁。"));
             }
         }
 

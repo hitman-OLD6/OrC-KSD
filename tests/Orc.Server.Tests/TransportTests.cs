@@ -151,8 +151,8 @@ public class TransportTests
             "room-1",
             RoomStates.Lobby,
             [
-                new RoomSeatSnapshot(0, ControllerKinds.Local, "房主", true, true),
-                new RoomSeatSnapshot(1, string.Empty, null, false, false),
+                new RoomSeatSnapshot(0, ControllerKinds.Local, "房主", true),
+                new RoomSeatSnapshot(1, string.Empty, null, false),
             ],
             "loaded",
             null,

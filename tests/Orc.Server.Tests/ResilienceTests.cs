@@ -30,12 +30,13 @@ public class ResilienceTests
 
         await host.DisposeAsync();
 
-        // 关键断言：抛的是真实异常，而不是 WaitAsync 的 TimeoutException（那说明挂起了）。
+        // 关键断言：抛的是真实 IOException（而不是 WaitAsync 的 TimeoutException——那说明挂起了）。
         var exception = await Record.ExceptionAsync(
             () => client.CallAsync("room.info").WaitAsync(TimeSpan.FromSeconds(5)));
 
         Assert.NotNull(exception);
-        Assert.IsNotType<TimeoutException>(exception);
+        Assert.IsType<IOException>(exception);
+        Assert.False(client.IsConnected);
     }
 
     [Fact]
@@ -63,7 +64,8 @@ public class ResilienceTests
             () => client.CallAsync("room.info").WaitAsync(TimeSpan.FromSeconds(5)));
 
         Assert.NotNull(exception);
-        Assert.IsNotType<TimeoutException>(exception);
+        Assert.IsType<IOException>(exception);
+        Assert.False(client.IsConnected);
     }
 
     [Fact]

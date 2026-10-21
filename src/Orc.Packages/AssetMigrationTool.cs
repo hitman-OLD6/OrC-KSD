@@ -318,7 +318,7 @@ public static class AssetMigrationTool
                 PackageKind.CardPack,
                 packageId,
                 packageGuid,
-                PackageVersion.Compute(packageId, metadata),
+                PackageVersion.ComputeContent(packageId, ContentFingerprintInput(root, entries)),
                 Array.Empty<PackageDependency>(),
                 Array.Empty<PackageAsset>(),
                 packageName,
@@ -453,6 +453,46 @@ public static class AssetMigrationTool
             domain,
             declared.Select(asset => new AssetLockEntry(asset.Guid, asset.Kind, AssetAppId.Compose(packageId, asset.Id), asset.Version)));
         return BuildFileAction(relative, existing, AssetLockJson.ToJson(lockModel));
+    }
+
+    /// <summary>
+    /// 迁移期内容指纹输入（双路径，S20）：磁盘现有 sidecar ∪ 计划中 <see cref="MigrationAction.Create"/>／
+    /// <see cref="MigrationAction.Overwrite"/> 的规范内容；同一 <c>sidecarRelative</c> 以**计划内容优先**
+    /// （Create 项的 sidecar 尚未落盘）；<see cref="MigrationAction.Skip"/> 项一律读现有文件。
+    /// </summary>
+    private static IReadOnlyList<(string RelativePath, AssetSidecar Sidecar)> ContentFingerprintInput(
+        string root,
+        IReadOnlyList<MigrationEntry> entries)
+    {
+        var sidecars = new Dictionary<string, AssetSidecar>(StringComparer.Ordinal);
+
+        foreach (var relative in PackageScanner.EnumerateCurrentSidecars(root))
+        {
+            try
+            {
+                sidecars[relative] = AssetSidecarJson.ReadFile(
+                    Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar)));
+            }
+            catch (FormatException)
+            {
+                // 不可解析的既有 sidecar 已作为障碍记录（ReadExistingAssets）；此处不进指纹输入。
+            }
+        }
+
+        foreach (var entry in entries)
+        {
+            if (entry.Action == MigrationAction.Skip || entry.Content is not { } content)
+            {
+                continue;
+            }
+
+            sidecars[entry.SidecarFile.Replace('\\', '/')] = AssetSidecarJson.Parse(content);
+        }
+
+        return sidecars
+            .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+            .Select(pair => (pair.Key, pair.Value))
+            .ToArray();
     }
 
     private static MigrationFileAction BuildFileAction(string relativePath, string? existingText, string canonicalText)

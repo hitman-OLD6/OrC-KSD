@@ -11,8 +11,8 @@ internal sealed class FakeRoomControl : IRoomControl
         "test-room",
         RoomStates.Lobby,
         [
-            new RoomSeatSnapshot(0, ControllerKinds.Local, "房主", true, true),
-            new RoomSeatSnapshot(1, ControllerKinds.Remote, null, false, false),
+            new RoomSeatSnapshot(0, ControllerKinds.Local, "房主", true),
+            new RoomSeatSnapshot(1, ControllerKinds.Remote, null, false),
         ],
         "loaded",
         null,

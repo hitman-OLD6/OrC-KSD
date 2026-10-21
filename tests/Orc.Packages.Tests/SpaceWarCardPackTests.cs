@@ -25,7 +25,7 @@ public sealed class SpaceWarCardPackTests
         Assert.Equal("太空战争", manifest.Name);
         Assert.Equal(PackageKind.CardPack, manifest.Kind);
         Assert.Equal(PackageManifest.CurrentSchemaVersion, manifest.SchemaVersion);
-        Assert.Equal(PackageVersion.Compute(manifest.Id, manifest.MetadataList), manifest.Version);
+        Assert.Equal(AssetLoadTestKit.RecomputeContent(PackRoot, manifest.Id), manifest.Version);
         Assert.Empty(manifest.Dependencies);
 
         var registration = PackageRegistrar.Register(PackRoot, manifest, new AssetRegistry());

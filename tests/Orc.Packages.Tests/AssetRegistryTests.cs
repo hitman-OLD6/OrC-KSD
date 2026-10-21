@@ -141,6 +141,75 @@ public class AssetRegistryTests
         Assert.Equal(2, registry.RuntimeCards.Count);
     }
 
+    [Fact]
+    public void 同ID不同GUID的双包_按GUID各查本包_按包ID仍合并()
+    {
+        var registry = new AssetRegistry();
+        var first = Guid.Parse("b0070000-0000-4000-8000-0000000000a1");
+        var second = Guid.Parse("b0070000-0000-4000-8000-0000000000a2");
+        registry.Register(GuidRegistration(first, "same.pack", "rifle", "1.0.0"));
+        registry.Register(GuidRegistration(second, "same.pack", "rifle", "2.0.0"));
+
+        var byFirst = Assert.Single(registry.VersionsOf(first, AssetKind.Card, "rifle"));
+        Assert.Equal(AssetVersion.Parse("1.0.0"), byFirst.Version);
+        var bySecond = Assert.Single(registry.VersionsOf(second, AssetKind.Card, "rifle"));
+        Assert.Equal(AssetVersion.Parse("2.0.0"), bySecond.Version);
+
+        // 既有按包 ID 的语义保持：跨包合并（同 ID 双包并存是允许的）。
+        Assert.Equal(2, registry.VersionsOf("same.pack", AssetKind.Card, "rifle").Count);
+    }
+
+    [Fact]
+    public void 空包GUID不入GUID索引_按包ID仍可命中()
+    {
+        var registry = new AssetRegistry();
+        registry.Register(Registration("rifle", "1.0.0")); // PackageGuid 默认 Guid.Empty
+
+        Assert.Empty(registry.VersionsOf(Guid.Empty, AssetKind.Card, "rifle"));
+        Assert.Single(registry.VersionsOf(PackageId, AssetKind.Card, "rifle"));
+    }
+
+    [Fact]
+    public void 按GUID查询_单包多版本升序()
+    {
+        var registry = new AssetRegistry();
+        var packageGuid = Guid.Parse("b0070000-0000-4000-8000-0000000000a3");
+        registry.Register(GuidRegistration(packageGuid, "p", "rifle", "2.0.0"));
+        registry.Register(GuidRegistration(packageGuid, "p", "rifle", "1.0.0"));
+
+        var versions = registry.VersionsOf(packageGuid, AssetKind.Card, "rifle");
+
+        Assert.Equal(2, versions.Count);
+        Assert.Equal(AssetVersion.Parse("1.0.0"), versions[0].Version);
+        Assert.Equal(AssetVersion.Parse("2.0.0"), versions[1].Version);
+    }
+
+    private static AssetRegistration GuidRegistration(
+        Guid packageGuid, string packageId, string localId, string version)
+    {
+        var parsed = AssetVersion.Parse(version);
+        return new AssetRegistration(
+            new AssetMetadata(
+                AssetIdentity.DeriveAssetGuid(packageGuid, AssetKind.Card, localId, parsed),
+                AssetKind.Card,
+                localId,
+                parsed,
+                Anchor: null,
+                Loader: null,
+                DependsOn: [],
+                ConflictsWith: []),
+            AssetDomain.Formal,
+            packageId,
+            AssetAppId.Compose(packageId, localId),
+            AssetMetadataSource.Sidecar,
+            Card: null,
+            Prefab: null,
+            SourcePath: null)
+        {
+            PackageGuid = packageGuid,
+        };
+    }
+
     private static Orc.Game.Cards.CardDefinition Definition() => new(
         "临时卡", deployCost: 1, operateCost: 1, attack: 1, defense: 1,
         unitTypes: ["infantry"], faction: "germany", rarity: "standard");

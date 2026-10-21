@@ -20,6 +20,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- F4/S23：重解析点探测与 [ReparsePointFact] 的唯一实现（两测试工程共享同一源文件）。 -->
+    <Compile Include="..\Shared\ReparsePointProbe.cs" Link="Shared\ReparsePointProbe.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Orc.Mcp\Orc.Mcp.csproj" />
   </ItemGroup>
 

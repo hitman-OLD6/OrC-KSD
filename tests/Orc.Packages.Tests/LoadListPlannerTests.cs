@@ -349,6 +349,62 @@ public class LoadListPlannerTests
         Assert.DoesNotContain(plan.Issues, item => item.Code == AssetLoadIssueCode.DeclaredConflict);
     }
 
+    [Fact]
+    public void 声明冲突只判定依赖剔除后仍在列表的资产()
+    {
+        var registry = new AssetRegistry();
+        var b = Register(registry, "p", "b", dependsOn: [Depends(AssetKind.Card, "pack/p/nothing")]);
+        var a = RegisterWithConflict(
+            registry, "p", "a", [Conflict(AssetKind.Card, "pack/p/b")], [Depends(AssetKind.Card, "pack/p/b")]);
+
+        var plan = LoadListPlanner.Plan(registry, [FormalLock("p", a, b)]);
+
+        // F5：判定域＝本次实际加载集合——b 因依赖缺失被剔除，a 因依赖非法被传播剔除，
+        // 故 a 对 b 的冲突声明不成立（不再触发结构性失败）。
+        Assert.True(plan.IsValid);
+        Assert.Contains(plan.Issues, issue => issue.Code == AssetLoadIssueCode.DependencyMissing);
+        Assert.Contains(plan.Issues, issue => issue.Code == AssetLoadIssueCode.DependencyInvalid);
+        Assert.DoesNotContain(plan.Issues, issue => issue.Code == AssetLoadIssueCode.DeclaredConflict);
+        Assert.Empty(plan.Formal.Items);
+    }
+
+    [Fact]
+    public void 同GUID重复声明_报DuplicateLockEntry且致命()
+    {
+        var registry = new AssetRegistry();
+        var asset = Register(registry, "p", "a");
+        var malformed = AssetLock.Create("p", AssetDomain.Formal,
+        [
+            Entry(asset),
+            new AssetLockEntry(asset.AssetGuid, AssetKind.Card, "pack/p/a-shadow", AssetVersion.Parse("2.0.0")),
+            new AssetLockEntry(asset.AssetGuid, AssetKind.Card, "pack/p/a-shadow2", AssetVersion.Parse("3.0.0")),
+        ]);
+
+        var plan = LoadListPlanner.Plan(registry, [malformed]);
+
+        Assert.False(plan.IsValid); // 结构性：本次计算不产出列表
+        var issues = plan.Issues.Where(issue => issue.Code == AssetLoadIssueCode.DuplicateLockEntry).ToArray();
+        Assert.Equal(2, issues.Length); // 每个被丢弃的额外条目各报一条（不聚合）
+        Assert.All(issues, issue => Assert.True(issue.IsFatal));
+        Assert.All(issues, issue => Assert.Contains(asset.AssetGuid.ToString(), issue.Message, StringComparison.Ordinal));
+        Assert.All(issues, issue => Assert.Contains("pack/p/a#1.0.0", issue.Message, StringComparison.Ordinal));
+        Assert.Contains("pack/p/a-shadow#2.0.0", issues[0].Message, StringComparison.Ordinal);
+        Assert.Contains("pack/p/a-shadow2#3.0.0", issues[1].Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void 合法lock不产DuplicateLockEntry()
+    {
+        var registry = new AssetRegistry();
+        var a = Register(registry, "p", "a");
+
+        var plan = LoadListPlanner.Plan(registry, [FormalLock("p", a), FormalLock("p", a)]);
+
+        Assert.True(plan.IsValid);
+        Assert.DoesNotContain(plan.Issues, issue => issue.Code == AssetLoadIssueCode.DuplicateLockEntry);
+        Assert.Single(plan.Formal.Items);
+    }
+
     private static AssetReference Conflict(AssetKind kind, string appId, string constraint = "1.*.*")
         => new(kind, appId, constraint);
 
@@ -357,7 +413,15 @@ public class LoadListPlannerTests
         string packageId,
         string localId,
         params AssetReference[] conflictsWith)
-        => RegisterWithConflict(AssetDomain.Formal, registry, packageId, localId, conflictsWith);
+        => RegisterWithConflict(AssetDomain.Formal, registry, packageId, localId, conflictsWith, dependsOn: null);
+
+    private static AssetRegistration RegisterWithConflict(
+        AssetRegistry registry,
+        string packageId,
+        string localId,
+        AssetReference[] conflictsWith,
+        AssetReference[]? dependsOn)
+        => RegisterWithConflict(AssetDomain.Formal, registry, packageId, localId, conflictsWith, dependsOn);
 
     private static AssetRegistration RegisterWithConflict(
         AssetDomain domain,
@@ -365,6 +429,15 @@ public class LoadListPlannerTests
         string packageId,
         string localId,
         params AssetReference[] conflictsWith)
+        => RegisterWithConflict(domain, registry, packageId, localId, conflictsWith, dependsOn: null);
+
+    private static AssetRegistration RegisterWithConflict(
+        AssetDomain domain,
+        AssetRegistry registry,
+        string packageId,
+        string localId,
+        AssetReference[] conflictsWith,
+        AssetReference[]? dependsOn)
     {
         var version = AssetVersion.Parse("1.0.0");
         var packageGuid = PackageGuidOf(packageId);
@@ -376,7 +449,7 @@ public class LoadListPlannerTests
                 version,
                 Anchor: null,
                 Loader: null,
-                DependsOn: [],
+                DependsOn: dependsOn ?? [],
                 ConflictsWith: conflictsWith),
             domain,
             packageId,

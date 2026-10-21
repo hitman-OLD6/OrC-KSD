@@ -51,7 +51,7 @@ internal sealed class AssetEditorSession
     private readonly NormalizedPath _temporaryRoot;
     private readonly Dictionary<EditorAssetKey, EditorAssetEntry> _assets = new();
     private readonly Dictionary<EditorAssetKey, EditorAssetEntry> _initialAssets = new();
-    private readonly HashSet<EditorAssetKey> _pinned = new();
+    private readonly HashSet<string> _pinned = new(StringComparer.Ordinal);
     private readonly HashSet<string> _deletedSourceRelatives = new(StringComparer.Ordinal);
     private readonly Dictionary<EditorAssetKey, IReadOnlyList<string>> _tags = new();
     private readonly List<string> _warnings = new();
@@ -214,6 +214,8 @@ internal sealed class AssetEditorSession
             WriteText(sourceAbsolute, CardStub(localId));
         }
 
+        VerifyDeclaredSourceId(kind, localId, sourceRelative, sourceAbsolute);
+
         var sidecarAbsolute = sourceAbsolute + AssetSidecarJson.SidecarExtension;
         var sidecarRelative = sourceRelative + AssetSidecarJson.SidecarExtension;
         var metadata = new AssetMetadata(
@@ -232,21 +234,32 @@ internal sealed class AssetEditorSession
         WriteSidecar(sidecarAbsolute, sourceRelative, assets);
 
         _assets[key] = new EditorAssetEntry(metadata, sidecarRelative, sidecarAbsolute, sourceRelative, sourceAbsolute);
-        _pinned.Add(key); // 新建即 1.0.0：首次提交不再自动 +1（R12）
+        _pinned.Add(sidecarRelative); // 新建即 1.0.0：整组首次提交不再自动 +1（R12）
         _tags.Remove(key);
 
         RecomputeLocks();
         return ToInfo(_assets[key]);
     }
 
-    /// <summary>删除资产：当前版本移出声明（正式 lock 随之不含），历史版本仍留在 <c>versions/</c>。</summary>
+    /// <summary>
+    /// 删除资产：当前版本移出声明（正式 lock 随之不含），历史版本仍留在 <c>versions/</c>。
+    /// <para>
+    /// F6：删除宿主（<c>anchor = null</c>）时**级联删除**同 sidecar 的全部内含资产——
+    /// 内含资产没有独立源文件，宿主被删后其 anchor 无处解析；删除内含资产本身不连带宿主。
+    /// </para>
+    /// </summary>
     /// <exception cref="AssetEditorException">资产未声明。</exception>
     public void DeleteAsset(AssetKind kind, string localId)
     {
         var entry = RequireEntry(kind, localId);
+        var victims = entry.Metadata.Anchor is null
+            ? GroupOf(entry.SidecarRelative)
+            : [entry];
+
+        var removedKeys = victims.Select(victim => victim.Key).ToHashSet();
         var sidecar = ReadSidecar(entry.SidecarAbsolute);
         var remaining = sidecar.Assets
-            .Where(asset => asset.Kind != kind || !string.Equals(asset.Id, localId, StringComparison.Ordinal))
+            .Where(asset => !removedKeys.Contains(new EditorAssetKey(asset.Kind, asset.Id)))
             .ToArray();
 
         if (remaining.Length == 0)
@@ -264,27 +277,38 @@ internal sealed class AssetEditorSession
             WriteSidecar(entry.SidecarAbsolute, entry.SourceRelative, remaining);
         }
 
-        _assets.Remove(entry.Key);
-        _pinned.Remove(entry.Key);
-        _tags.Remove(entry.Key);
+        foreach (var victim in victims)
+        {
+            _assets.Remove(victim.Key);
+            _tags.Remove(victim.Key);
+        }
+
+        if (!_assets.Values.Any(item => string.Equals(item.SidecarRelative, entry.SidecarRelative, StringComparison.Ordinal)))
+        {
+            _pinned.Remove(entry.SidecarRelative); // 组已删空：pin 一并清除；组未删空则保留
+        }
 
         RecomputeLocks();
     }
 
     /// <summary>
-    /// 设定版本：<paramref name="version"/> 为 null ＝ 默认自动递增（尾段 +1）；
-    /// 手写须严格大于旧版（降级／补 0 后相等＝拒绝）。
+    /// 设定版本（**组粒度**，F2）：目标条目所在 sidecar 的全部条目（宿主 ＋ 内含）统一到目标版本。
+    /// <paramref name="version"/> 为 null ＝ 默认自动递增（组内基线一致时追加测试段，否则尾段 +1）；
+    /// 手写须严格大于**组内最大**版本（降级／补 0 后相等＝拒绝）。
     /// </summary>
     /// <exception cref="AssetEditorException">格式非法或未严格递增。</exception>
     public EditorAssetInfo SetVersion(AssetKind kind, string localId, string? version)
     {
         var entry = RequireEntry(kind, localId);
+        var group = GroupOf(entry.SidecarRelative);
+        var (max, maxKey) = MaxVersionOf(group);
         var next = string.IsNullOrWhiteSpace(version)
-            ? AutoNext(entry.Key, entry.Metadata.Version)
-            : EditorVersionRules.ParseIncreasing(version, entry.Metadata.Version);
+            ? AutoNext(entry.SidecarRelative, max)
+            : EditorVersionRules.ParseIncreasing(
+                version, max, $"{AssetKindTokens.Token(maxKey.Kind)}：{maxKey.LocalId}");
 
         ApplyVersion(entry, next);
-        _pinned.Add(entry.Key); // 手写/显式设定：下一次提交不再自动 +1
+        _pinned.Add(entry.SidecarRelative); // 手写/显式设定：整组下一次提交不再自动 +1
         RecomputeLocks();
         return ToInfo(_assets[entry.Key]);
     }
@@ -359,6 +383,11 @@ internal sealed class AssetEditorSession
         foreach (var group in _assets.Values.GroupBy(entry => entry.SidecarRelative, StringComparer.Ordinal))
         {
             var entries = group.ToArray();
+            if (entries.All(entry => promoted[entry.Key] == entry.Metadata.Version))
+            {
+                continue; // F12-④：版本未变化 ⇒ 不重排、不重序列化（转正后字节不变）
+            }
+
             var updated = entries
                 .Select(entry => entry.Metadata with
                 {
@@ -374,11 +403,11 @@ internal sealed class AssetEditorSession
             }
         }
 
-        var sidecars = SidecarRelatives();
+        var sidecars = CurrentSidecars();
         Manifest = Manifest with
         {
-            Version = PackageVersion.Compute(PackageId, sidecars),
-            Metadata = sidecars,
+            Version = PackageVersion.ComputeContent(PackageId, sidecars),
+            Metadata = SidecarRelatives(),
         };
         WriteManifest();
 
@@ -390,9 +419,10 @@ internal sealed class AssetEditorSession
         AssetLockJson.WriteFile(AssetLockJson.PathFor(TemporaryRoot, AssetDomain.Formal), formal);
         AssetLockJson.WriteFile(AssetLockJson.PathFor(TemporaryRoot, AssetDomain.Test), test);
 
-        var archived = IsNewPackage ? Array.Empty<string>() : ArchiveHistory(promoted);
+        IReadOnlyList<string> archived;
         if (IsNewPackage)
         {
+            archived = Array.Empty<string>();
             if (Directory.Exists(PackageRoot) || File.Exists(PackageRoot))
             {
                 throw new AssetEditorException(
@@ -403,8 +433,10 @@ internal sealed class AssetEditorSession
         }
         else
         {
-            ApplyToFormalPackage();
+            var plan = BuildPromotionPlan(promoted);
+            ApplyPromotionPlan(plan);
             DeleteTemporary();
+            archived = plan.ArchivedVersions;
         }
 
         return new EditorPromotionResult(
@@ -518,7 +550,7 @@ internal sealed class AssetEditorSession
             PackageKind.CardPack,
             packageId,
             AssetMigrationTool.DerivePackageGuid(packageId),
-            PackageVersion.Compute(packageId, Array.Empty<string>()).AsTemporary(),
+            PackageVersion.ComputeContent(packageId, Array.Empty<(string, AssetSidecar)>()).AsTemporary(),
             Array.Empty<PackageDependency>(),
             Array.Empty<PackageAsset>(),
             request.Name,
@@ -594,11 +626,12 @@ internal sealed class AssetEditorSession
                 AssetEditorErrorCode.InvalidContent, $"卡数据体缺少 id（且 sidecar 无法唯一补位）：'{sourceRelative}'。");
         }
 
-        if (declaredCards.Length == 1 && !string.Equals(declaredCards[0].Id, localId, StringComparison.Ordinal))
+        if (declaredCards.Length >= 1 && !declaredCards.Any(asset => string.Equals(asset.Id, localId, StringComparison.Ordinal)))
         {
             throw new AssetEditorException(
                 AssetEditorErrorCode.InvalidContent,
-                $"sidecar 与源文件 id 不一致（sidecar '{declaredCards[0].Id}'，源文件 '{localId}'）：'{sourceRelative}'。");
+                $"源文件 id '{localId}' 不在 sidecar 声明的卡集合"
+                + $"（{string.Join("、", declaredCards.Select(asset => asset.Id))}）：'{sourceRelative}'。");
         }
 
         var key = new EditorAssetKey(AssetKind.Card, localId);
@@ -615,7 +648,7 @@ internal sealed class AssetEditorSession
                            Guid.Empty, AssetKind.Card, localId, EditorVersionRules.Initial,
                            null, null, Array.Empty<AssetReference>(), Array.Empty<AssetReference>());
         var previousVersion = metadata.Version;
-        var version = existing is not null ? AutoNext(key, metadata.Version) : metadata.Version;
+        var version = existing is not null ? AutoNext(sidecarRelative, previousVersion) : metadata.Version;
         var bumped = version != previousVersion;
         metadata = metadata with { Version = version, Guid = DeriveGuid(AssetKind.Card, localId, version) };
 
@@ -658,6 +691,15 @@ internal sealed class AssetEditorSession
         var sidecar = File.Exists(sidecarAbsolute) ? ReadSidecar(sidecarAbsolute) : null;
         var host = sidecar?.Assets.FirstOrDefault(asset => asset.Anchor is null);
 
+        if (sidecar is not null && sidecar.Assets.Count > 0 && host is null)
+        {
+            // F7：sidecar 只有内含条目 ⇒ 结构化拒绝（原实现会在 committed 保持 null 时 NRE）。
+            throw new AssetEditorException(
+                AssetEditorErrorCode.InvalidContent,
+                $"sidecar 缺宿主条目（只有内含资产）：'{sidecarRelative}'"
+                + "——请补一条 anchor 为空的宿主声明后再提交。");
+        }
+
         if (host is not null && !string.Equals(host.Id, localId, StringComparison.Ordinal))
         {
             throw new AssetEditorException(
@@ -667,8 +709,10 @@ internal sealed class AssetEditorSession
 
         var key = new EditorAssetKey(AssetKind.Effect, localId);
         _assets.TryGetValue(key, out var existing);
-        var previousVersion = existing?.Metadata.Version ?? host?.Version ?? EditorVersionRules.Initial;
-        var hostVersion = existing is not null ? AutoNext(key, previousVersion) : previousVersion;
+
+        // F2：版本基准是**整组**（宿主 ＋ 全部内含）的最大版本，避免内含资产被留在旧版。
+        var previousVersion = GroupMaxVersion(sidecarRelative, sidecar?.Assets);
+        var hostVersion = existing is not null ? AutoNext(sidecarRelative, previousVersion) : previousVersion;
         var bumped = hostVersion != previousVersion;
 
         var assets = (sidecar?.Assets ?? Array.Empty<AssetMetadata>())
@@ -718,30 +762,81 @@ internal sealed class AssetEditorSession
     // ── 内部：版本与写入 ─────────────────────────────────────────────────────
 
     /// <summary>
-    /// 默认自动递增：**首次进入测试域**＝追加测试段（<c>1.0.0</c> → <c>1.0.0.1</c>，D53）；
-    /// 已在测试域内／无正式版基线（本会话新建）＝尾段 +1。显式设定过版本（pinned）＝本次不递增。
+    /// 默认自动递增（**组粒度**，F2）：**首次进入测试域**＝追加测试段（<c>1.0.0</c> → <c>1.0.0.1</c>，D53）；
+    /// 已在测试域内／无正式版基线（本会话新建）／组内历史分裂＝尾段 +1。
+    /// 显式设定或新建过（pinned，按 sidecar 存）＝本次不递增，且**一次提交只消费一次**。
     /// </summary>
-    private AssetVersion AutoNext(EditorAssetKey key, AssetVersion current)
+    /// <param name="sidecarRelative">sidecar 相对路径（pin 与组的键）。</param>
+    /// <param name="current">组内当前最大版本。</param>
+    private AssetVersion AutoNext(string sidecarRelative, AssetVersion current)
     {
-        if (_pinned.Remove(key))
+        if (_pinned.Remove(sidecarRelative))
         {
             return current;
         }
 
-        return _initialAssets.TryGetValue(key, out var initial) && current == initial.Metadata.Version
-            ? EditorVersionRules.TestVersionOf(current)
-            : EditorVersionRules.Next(current);
+        var group = GroupOf(sidecarRelative);
+        var consistent = group.Count > 0 && group.All(entry => entry.Metadata.Version == current);
+        var atBaseline = consistent
+            && group.All(entry => _initialAssets.TryGetValue(entry.Key, out var initial)
+                                  && entry.Metadata.Version == initial.Metadata.Version);
+
+        return atBaseline ? EditorVersionRules.TestVersionOf(current) : EditorVersionRules.Next(current);
     }
 
+    /// <summary>同 sidecar 的全部条目（宿主 ＋ 内含），按 <c>(Kind, Id)</c> 稳定排序。</summary>
+    private IReadOnlyList<EditorAssetEntry> GroupOf(string sidecarRelative)
+        => _assets.Values
+            .Where(entry => string.Equals(entry.SidecarRelative, sidecarRelative, StringComparison.Ordinal))
+            .OrderBy(entry => entry.Metadata.Kind)
+            .ThenBy(entry => entry.Metadata.Id, StringComparer.Ordinal)
+            .ToArray();
+
+    /// <summary>组内最大版本及其来源条目（并列时取 <c>(Kind, Id)</c> 最小者，保证消息稳定）。</summary>
+    private static (AssetVersion Version, EditorAssetKey Key) MaxVersionOf(IReadOnlyList<EditorAssetEntry> group)
+    {
+        var owner = group[0];
+        foreach (var entry in group)
+        {
+            if (entry.Metadata.Version > owner.Metadata.Version)
+            {
+                owner = entry;
+            }
+        }
+
+        return (owner.Metadata.Version, owner.Key);
+    }
+
+    /// <summary>组内最大版本（可并入 sidecar 磁盘声明，覆盖「前端直写尚未提交」的条目）。</summary>
+    private AssetVersion GroupMaxVersion(string sidecarRelative, IEnumerable<AssetMetadata>? declared)
+    {
+        var versions = GroupOf(sidecarRelative)
+            .Select(entry => entry.Metadata.Version)
+            .Concat(declared?.Select(asset => asset.Version) ?? [])
+            .ToArray();
+
+        return versions.Length == 0
+            ? EditorVersionRules.Initial
+            : versions.Aggregate((left, right) => left > right ? left : right);
+    }
+
+    /// <summary>把**整组**（同 sidecar 的全部条目）统一改写为目标版本，GUID 各自重算并整份写回 sidecar。</summary>
     private void ApplyVersion(EditorAssetEntry entry, AssetVersion version)
     {
-        var metadata = entry.Metadata with { Version = version, Guid = DeriveGuid(entry.Metadata.Kind, entry.Metadata.Id, version) };
-        var sidecar = ReadSidecar(entry.SidecarAbsolute);
-        var assets = sidecar.Assets
-            .Select(asset => asset.Kind == metadata.Kind && string.Equals(asset.Id, metadata.Id, StringComparison.Ordinal) ? metadata : asset)
+        var group = GroupOf(entry.SidecarRelative);
+        var updated = group
+            .Select(item => item.Metadata with
+            {
+                Version = version,
+                Guid = DeriveGuid(item.Metadata.Kind, item.Metadata.Id, version),
+            })
             .ToArray();
-        WriteSidecar(entry.SidecarAbsolute, entry.SourceRelative, assets);
-        _assets[entry.Key] = entry with { Metadata = metadata };
+
+        WriteSidecar(entry.SidecarAbsolute, entry.SourceRelative, updated);
+        for (var index = 0; index < group.Count; index++)
+        {
+            _assets[group[index].Key] = group[index] with { Metadata = updated[index] };
+        }
     }
 
     private Dictionary<EditorAssetKey, AssetVersion> ComputePromotedVersions()
@@ -749,7 +844,24 @@ internal sealed class AssetEditorSession
         var result = new Dictionary<EditorAssetKey, AssetVersion>();
         foreach (var group in _assets.Values.GroupBy(entry => entry.SidecarRelative, StringComparer.Ordinal))
         {
-            var entries = group.ToArray();
+            var entries = group
+                .OrderBy(entry => entry.Metadata.Kind)
+                .ThenBy(entry => entry.Metadata.Id, StringComparer.Ordinal)
+                .ToArray();
+
+            var (max, _) = MaxVersionOf(entries);
+            if (entries.Any(entry => entry.Metadata.Version != max))
+            {
+                // 历史分裂（F2 前遗留的数据）：无论是否改动，整组自愈到 PromoteVersion(组内最大)。
+                var unified = PromoteVersion(entries.First(entry => entry.Metadata.Version == max));
+                foreach (var entry in entries)
+                {
+                    result[entry.Key] = unified;
+                }
+
+                continue;
+            }
+
             var host = entries.FirstOrDefault(entry => entry.Metadata.Anchor is null);
             var hostVersion = host is null ? (AssetVersion?)null : PromoteVersion(host);
 
@@ -816,15 +928,24 @@ internal sealed class AssetEditorSession
             throw new AssetEditorException(
                 AssetEditorErrorCode.PathDenied, $"写入目标未获授权：'{target.Value}'——{reason}");
         }
+
+        // F3/R3：versions/** 是只读历史区（由转正归档维护）——写入侧与枚举侧复用同一判定。
+        var relative = RelativeToTemporary(target.Value);
+        if (IsUnderVersions(relative))
+        {
+            throw new AssetEditorException(
+                AssetEditorErrorCode.PathDenied,
+                $"写入目标落在历史版本目录：'{relative}'——'{VersionsDirectory}/' 为只读禁区"
+                + "（编辑器只写当前正式版；历史副本由转正归档维护）。");
+        }
     }
 
     private void RecomputeLocks()
     {
-        var sidecars = SidecarRelatives();
         Manifest = Manifest with
         {
-            Version = PackageVersion.Compute(PackageId, sidecars).AsTemporary(),
-            Metadata = sidecars,
+            Version = PackageVersion.ComputeContent(PackageId, CurrentSidecars()).AsTemporary(),
+            Metadata = SidecarRelatives(), // 资产清单：只含「有资产声明」的 sidecar（与指纹集合允许不同）
         };
         WriteManifest();
 
@@ -895,21 +1016,21 @@ internal sealed class AssetEditorSession
             yield break;
         }
 
-        var files = Directory
-            .EnumerateFiles(TemporaryRoot, "*" + AssetSidecarJson.SidecarExtension, SearchOption.AllDirectories)
-            .OrderBy(path => path, StringComparer.Ordinal);
-
-        foreach (var file in files)
+        // F1/I18：枚举面只有一处（PackageScanner），且显式排除 versions/** 与插件清单镜像。
+        foreach (var relative in PackageScanner.EnumerateCurrentSidecars(TemporaryRoot))
         {
-            var relative = RelativeToTemporary(file);
-            if (IsUnderVersions(relative))
-            {
-                continue; // 历史版本目录不参与编辑（D55：只扫当前正式版）
-            }
-
-            yield return file;
+            yield return TemporaryPath(relative);
         }
     }
+
+    /// <summary>
+    /// 内容指纹的输入：**从磁盘枚举**当前版 sidecar 再逐个读入（不从 <c>_assets</c> 反推）——
+    /// 使「无任何资产声明的空 sidecar」同样参与指纹（F1）。
+    /// </summary>
+    private IReadOnlyList<(string RelativePath, AssetSidecar Sidecar)> CurrentSidecars()
+        => PackageScanner.EnumerateCurrentSidecars(TemporaryRoot)
+            .Select(relative => (relative, ReadSidecar(TemporaryPath(relative))))
+            .ToArray();
 
     private static bool IsUnderVersions(string relative)
         => relative.StartsWith(VersionsDirectory + "/", StringComparison.OrdinalIgnoreCase);
@@ -1053,34 +1174,77 @@ internal sealed class AssetEditorSession
 
     // ── 内部：落地 ──────────────────────────────────────────────────────────
 
-    /// <summary>把临时包文件覆盖到正式包（先删墓碑，再逐文件复制）。</summary>
-    private void ApplyToFormalPackage()
+    /// <summary>一条落地写项：<paramref name="OriginalBytes"/>＝目标已存在时的原始字节（回滚快照）。</summary>
+    private sealed record PromotionWrite(
+        string RelativePath,
+        PromotionWriteKind Kind,
+        byte[]? Bytes,
+        byte[]? OriginalBytes);
+
+    /// <summary>写项种类（前置校验：<see cref="PromotionWriteKind.Create"/> ⇔ 目标不存在；其余 ⇔ 目标存在）。</summary>
+    private enum PromotionWriteKind
     {
-        foreach (var relative in _deletedSourceRelatives)
+        Create,
+        Overwrite,
+        Delete,
+    }
+
+    /// <summary>
+    /// 一次转正的**完整写计划**（F10）：历史归档 ＋ 墓碑删除 ＋ 临时包→正式包复制一次算齐；
+    /// 计划完全生成后才开始写盘（禁止「先复制再补记录」）。
+    /// </summary>
+    private sealed class PromotionWritePlan
+    {
+        /// <summary>按应用顺序排列的写项（归档 → 墓碑 → 复制）。</summary>
+        public List<PromotionWrite> Writes { get; } = [];
+
+        /// <summary>本次归档的历史版本目录（<c>versions/&lt;v&gt;</c>；同内容跳过写也算）。</summary>
+        public List<string> ArchivedVersions { get; } = [];
+    }
+
+    private PromotionWritePlan BuildPromotionPlan(IReadOnlyDictionary<EditorAssetKey, AssetVersion> promoted)
+    {
+        var plan = new PromotionWritePlan();
+        AppendArchiveWrites(promoted, plan);
+
+        foreach (var relative in _deletedSourceRelatives.OrderBy(path => path, StringComparer.Ordinal))
         {
-            DeleteFileIfExists(FormalPath(relative));
-            DeleteFileIfExists(FormalPath(relative) + AssetSidecarJson.SidecarExtension);
+            foreach (var targetRelative in new[] { relative, relative + AssetSidecarJson.SidecarExtension })
+            {
+                var target = FormalPath(targetRelative);
+                if (File.Exists(target))
+                {
+                    plan.Writes.Add(new PromotionWrite(
+                        targetRelative, PromotionWriteKind.Delete, null, File.ReadAllBytes(target)));
+                }
+            }
         }
 
         foreach (var file in Directory
                      .EnumerateFiles(TemporaryRoot, "*", SearchOption.AllDirectories)
                      .OrderBy(path => path, StringComparer.Ordinal))
         {
-            var target = FormalPath(RelativeToTemporary(file));
-            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            File.Copy(file, target, overwrite: true);
+            var relative = RelativeToTemporary(file);
+            var target = FormalPath(relative);
+            var content = File.ReadAllBytes(file);
+            plan.Writes.Add(File.Exists(target)
+                ? new PromotionWrite(relative, PromotionWriteKind.Overwrite, content, File.ReadAllBytes(target))
+                : new PromotionWrite(relative, PromotionWriteKind.Create, content, null));
         }
+
+        return plan;
     }
 
     /// <summary>
-    /// 归档被改动（或删除）资产的**旧正式版**：源文件＋sidecar 复制到 <c>versions/&lt;版本&gt;/</c>。
+    /// 归档被改动（或删除）资产的**旧正式版**：源文件＋sidecar → <c>versions/&lt;版本&gt;/</c>。
     /// <para>
-    /// 归档 sidecar 只含本次归档的条目（避免同文件未变更资产的 GUID 重复注册），
-    /// 且 <c>source</c> 写**相对包根**的完整路径（含 <c>versions/…</c> 前缀）——注册面按包根校验
-    /// <c>source</c> 与文件名一致，故历史副本必须自带完整相对路径。
+    /// 幂等：目标已存在且**逐字节相同** ⇒ 不生成写项（但仍计入 <see cref="PromotionWritePlan.ArchivedVersions"/>）；
+    /// 内容不同 ⇒ 立即抛 <see cref="AssetEditorErrorCode.PromoteFailed"/>（此时尚未写入任何文件）。
     /// </para>
     /// </summary>
-    private IReadOnlyList<string> ArchiveHistory(IReadOnlyDictionary<EditorAssetKey, AssetVersion> promoted)
+    private void AppendArchiveWrites(
+        IReadOnlyDictionary<EditorAssetKey, AssetVersion> promoted,
+        PromotionWritePlan plan)
     {
         var groups = new Dictionary<(string Source, AssetVersion Version), List<AssetMetadata>>();
 
@@ -1110,27 +1274,177 @@ internal sealed class AssetEditorSession
             list.Add(initial.Metadata);
         }
 
+        var writes = new List<(string Relative, byte[] Content)>();
         var versions = new SortedSet<string>(StringComparer.Ordinal);
         foreach (var ((source, version), metadata) in groups)
         {
             var versionText = version.ToString();
             var targetRelative = $"{VersionsDirectory}/{versionText}/{source}";
-            var targetAbsolute = FormalPath(targetRelative);
-            Directory.CreateDirectory(Path.GetDirectoryName(targetAbsolute)!);
-            File.Copy(FormalPath(source), targetAbsolute, overwrite: true);
+            writes.Add((targetRelative, File.ReadAllBytes(FormalPath(source))));
 
-            AssetSidecarJson.WriteFile(
-                targetAbsolute + AssetSidecarJson.SidecarExtension,
-                new AssetSidecar(
-                    AssetSidecarJson.CurrentSchemaVersion,
-                    PackageId,
-                    targetRelative,
-                    metadata.OrderBy(asset => asset.Kind).ThenBy(asset => asset.Id, StringComparer.Ordinal).ToArray()));
+            var archivedSidecar = new AssetSidecar(
+                AssetSidecarJson.CurrentSchemaVersion,
+                PackageId,
+                targetRelative,
+                metadata.OrderBy(asset => asset.Kind).ThenBy(asset => asset.Id, StringComparer.Ordinal).ToArray());
+            writes.Add((
+                targetRelative + AssetSidecarJson.SidecarExtension,
+                Utf8NoBom.GetBytes(AssetSidecarJson.ToJson(archivedSidecar))));
 
             versions.Add($"{VersionsDirectory}/{versionText}");
         }
 
-        return versions.ToArray();
+        foreach (var (relative, content) in writes.OrderBy(write => write.Relative, StringComparer.Ordinal))
+        {
+            var target = FormalPath(relative);
+            if (File.Exists(target))
+            {
+                if (File.ReadAllBytes(target).AsSpan().SequenceEqual(content))
+                {
+                    continue; // 同内容＝跳过写（历史字节不被改动）
+                }
+
+                throw new AssetEditorException(
+                    AssetEditorErrorCode.PromoteFailed,
+                    $"版本归档冲突：'{relative}' 已存在且内容不同——拒绝覆盖历史"
+                    + "（转正中止，正式包未写入任何文件；临时包已保留）。");
+            }
+
+            plan.Writes.Add(new PromotionWrite(relative, PromotionWriteKind.Create, content, null));
+        }
+
+        plan.ArchivedVersions.AddRange(versions);
+    }
+
+    /// <summary>
+    /// 按计划顺序写盘；任一 IO 失败 ⇒ **逆序回滚**已执行项（含失败项本身），再抛
+    /// <see cref="AssetEditorErrorCode.PromoteFailed"/>（临时包保留，不清理）。
+    /// </summary>
+    private void ApplyPromotionPlan(PromotionWritePlan plan)
+    {
+        var applied = new List<PromotionWrite>();
+        var createdDirectories = new List<string>();
+        PromotionWrite? failing = null;
+
+        try
+        {
+            foreach (var write in plan.Writes)
+            {
+                failing = write;
+                var target = FormalPath(write.RelativePath);
+                switch (write.Kind)
+                {
+                    case PromotionWriteKind.Create:
+                        if (File.Exists(target))
+                        {
+                            throw new IOException($"目标已存在（Create 须目标不存在）：'{write.RelativePath}'。");
+                        }
+
+                        EnsureDirectory(Path.GetDirectoryName(target)!, createdDirectories);
+                        File.WriteAllBytes(target, write.Bytes!);
+                        break;
+
+                    case PromotionWriteKind.Overwrite:
+                        if (!File.Exists(target))
+                        {
+                            throw new IOException($"目标不存在（Overwrite 须目标存在）：'{write.RelativePath}'。");
+                        }
+
+                        File.WriteAllBytes(target, write.Bytes!);
+                        break;
+
+                    case PromotionWriteKind.Delete:
+                        if (!File.Exists(target))
+                        {
+                            throw new IOException($"目标不存在（Delete 须目标存在）：'{write.RelativePath}'。");
+                        }
+
+                        File.Delete(target);
+                        break;
+                }
+
+                applied.Add(write);
+                failing = null;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            var rollback = new List<string>();
+            var candidates = new List<PromotionWrite>(applied);
+            if (failing is not null)
+            {
+                candidates.Add(failing); // 失败项可能已部分写入：一并回滚
+            }
+
+            for (var index = candidates.Count - 1; index >= 0; index--)
+            {
+                var write = candidates[index];
+                try
+                {
+                    var target = FormalPath(write.RelativePath);
+                    switch (write.Kind)
+                    {
+                        case PromotionWriteKind.Create:
+                            DeleteFileIfExists(target);
+                            break;
+
+                        case PromotionWriteKind.Overwrite:
+                        case PromotionWriteKind.Delete:
+                            File.WriteAllBytes(target, write.OriginalBytes!);
+                            break;
+                    }
+                }
+                catch (Exception rollbackException) when (rollbackException is IOException or UnauthorizedAccessException)
+                {
+                    rollback.Add(
+                        $"{write.Kind} '{write.RelativePath}'：{rollbackException.GetType().Name}：{rollbackException.Message}");
+                }
+            }
+
+            foreach (var directory in createdDirectories.AsEnumerable().Reverse())
+            {
+                try
+                {
+                    Directory.Delete(directory, recursive: false); // 只删本次新建的空目录
+                }
+                catch (Exception cleanupException) when (cleanupException is IOException or UnauthorizedAccessException)
+                {
+                    // 忽略：非空或已被他人使用时不强删。
+                }
+            }
+
+            var failedItem = failing;
+            if (failedItem is null)
+            {
+                throw; // 不可达：异常只可能发生在某一写项执行期间
+            }
+
+            var rollbackState = rollback.Count == 0 ? "回滚完整" : $"回滚失败 {rollback.Count} 项";
+            var details = rollback.Count == 0 ? "" : "；回滚明细：" + string.Join("；", rollback);
+            throw new AssetEditorException(
+                AssetEditorErrorCode.PromoteFailed,
+                $"转正失败：{failedItem.Kind} '{failedItem.RelativePath}'"
+                + $"（{ex.GetType().Name}：{ex.Message}）——{rollbackState}{details}；"
+                + $"临时包已保留：'{TemporaryRoot}'。",
+                ex);
+        }
+    }
+
+    private static void EnsureDirectory(string path, List<string> created)
+    {
+        if (Directory.Exists(path))
+        {
+            return;
+        }
+
+        var parent = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(parent))
+        {
+            EnsureDirectory(parent, created);
+        }
+
+        Directory.CreateDirectory(path);
+        created.Add(path);
     }
 
     private void DeleteTemporary() => TryDeleteDirectory(TemporaryRoot);
@@ -1263,6 +1577,42 @@ internal sealed class AssetEditorSession
         {
             throw new AssetEditorException(
                 AssetEditorErrorCode.InvalidContent, $"资产局部 ID '{localId}' 非法（不得为空／含路径分隔符／首尾空白）。");
+        }
+    }
+
+    /// <summary>
+    /// F7：新建资产时按 kind 比对**源文件声明的 id** 与待声明 id（只在能读出非空 id 时判定；
+    /// 解析失败／缺 id 保持既有语义，不在此处升级为拒绝）。
+    /// </summary>
+    private static void VerifyDeclaredSourceId(AssetKind kind, string localId, string sourceRelative, string sourceAbsolute)
+    {
+        string? declaredId;
+        try
+        {
+            if (kind == AssetKind.Card && sourceAbsolute.EndsWith(".card.json", StringComparison.OrdinalIgnoreCase))
+            {
+                declaredId = CardDataLoader.LoadFileLenient(sourceAbsolute).Id;
+            }
+            else if (kind == AssetKind.Effect && sourceAbsolute.EndsWith(".prefab.json", StringComparison.OrdinalIgnoreCase))
+            {
+                declaredId = PrefabJson.Deserialize(File.ReadAllText(sourceAbsolute)).Root.Id;
+            }
+            else
+            {
+                return;
+            }
+        }
+        catch (Exception ex) when (ex is InvalidDataException or FormatException or IOException
+            or System.Text.Json.JsonException)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(declaredId) && !string.Equals(declaredId, localId, StringComparison.Ordinal))
+        {
+            throw new AssetEditorException(
+                AssetEditorErrorCode.InvalidContent,
+                $"源文件声明的 id '{declaredId}' 与待声明 id '{localId}' 不一致：'{sourceRelative}'。");
         }
     }
 

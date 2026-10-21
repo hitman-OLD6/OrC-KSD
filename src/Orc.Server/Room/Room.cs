@@ -64,28 +64,33 @@ public sealed class Room
         }
     }
 
-    /// <summary>房间快照（纯 DTO）。</summary>
+    /// <summary>房间快照（纯 DTO）。**锁内只拷座位数组**，网卡枚举一律放到锁外（不持锁做 IO）。</summary>
     public RoomSnapshot Snapshot()
     {
+        RoomSeatSnapshot[] seats;
+        string state;
+
         lock (_sync)
         {
-            var seats = new RoomSeatSnapshot[_seats.Length];
+            seats = new RoomSeatSnapshot[_seats.Length];
             for (var i = 0; i < _seats.Length; i++)
             {
                 var slot = _seats[i];
                 seats[i] = slot is null
-                    ? new RoomSeatSnapshot(i, string.Empty, null, false, false)
-                    : new RoomSeatSnapshot(i, slot.Kind, slot.DisplayName, true, slot.Connected);
+                    ? new RoomSeatSnapshot(i, string.Empty, null, false)
+                    : new RoomSeatSnapshot(i, slot.Kind, slot.DisplayName, slot.Connected);
             }
 
-            return new RoomSnapshot(
-                RoomId,
-                StateName(_state),
-                seats,
-                PackPolicy,
-                PackFingerprint,
-                _addresses());
+            state = StateName(_state);
         }
+
+        return new RoomSnapshot(
+            RoomId,
+            state,
+            seats,
+            PackPolicy,
+            PackFingerprint,
+            _addresses());
     }
 
     /// <summary>声明座位（填充控制器）。</summary>
@@ -161,7 +166,13 @@ public sealed class Room
                 return Fail(McpCodes.InvalidArguments, $"座位 {release.Seat} 当前为空。");
             }
 
-            if (!CanControl(slot, release.SeatToken))
+            // 无房主＝无人有权处置座位（否则"两个远程座位"的房间可被任意持令牌者清空）。
+            if (HostSlot() is not { } host)
+            {
+                return Fail(McpCodes.Unauthorized, "房间没有房主，无法释放座位。");
+            }
+
+            if (!CanControl(host, slot, release.SeatToken))
             {
                 return Fail(McpCodes.Unauthorized, "令牌无效（既不是房主，也不是该座位持有者）。");
             }
@@ -214,7 +225,7 @@ public sealed class Room
         }
     }
 
-    /// <summary>开局（房主令牌；无房主座位时允许无令牌）。</summary>
+    /// <summary>开局（房主令牌；无房主座位时拒绝——不允许免令牌开局）。</summary>
     public async Task<McpToolResult> StartAsync(string? seatToken, CancellationToken ct = default)
     {
         RoomStartRequest request;
@@ -230,7 +241,13 @@ public sealed class Room
                 return Fail(McpCodes.RoomNotReady, "仍有空座，无法开局。");
             }
 
-            if (HostSlot() is { } host && host.SeatToken != seatToken)
+            // 无房主＝无人有权开局（不能因为"没有房主座位"就免令牌）。
+            if (HostSlot() is not { } host)
+            {
+                return Fail(McpCodes.Unauthorized, "房间没有房主，无法开局。");
+            }
+
+            if (host.SeatToken != seatToken)
             {
                 return Fail(McpCodes.Unauthorized, "开局须由房主发起。");
             }
@@ -289,7 +306,12 @@ public sealed class Room
                 return Fail(McpCodes.InvalidArguments, $"座位 {seat} 当前为空。");
             }
 
-            if (HostSlot() is { } host && host.SeatToken != seatToken)
+            if (HostSlot() is not { } host)
+            {
+                return Fail(McpCodes.Unauthorized, "房间没有房主，无法踢出座位。");
+            }
+
+            if (host.SeatToken != seatToken)
             {
                 return Fail(McpCodes.Unauthorized, "只有房主可以踢出座位。");
             }
@@ -402,8 +424,8 @@ public sealed class Room
         return null;
     }
 
-    private bool CanControl(SeatSlot slot, string? token)
-        => token is not null && (token == slot.SeatToken || HostSlot()?.SeatToken == token);
+    private static bool CanControl(SeatSlot host, SeatSlot slot, string? token)
+        => token is not null && (token == slot.SeatToken || host.SeatToken == token);
 
     private bool InRange(int seat) => seat >= 0 && seat < _seats.Length;
 

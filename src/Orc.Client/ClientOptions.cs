@@ -14,9 +14,9 @@ public sealed class ClientOptions
     /// <summary>连接超时（默认 5 秒）。</summary>
     public TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
-    /// <summary>心跳间隔（默认 5 秒；断线判定依赖它）。</summary>
-    public TimeSpan HeartbeatInterval { get; init; } = TimeSpan.FromSeconds(5);
+    /// <summary>心跳间隔（默认 30 秒；静默超过它即主动 <c>ping</c>）。</summary>
+    public TimeSpan HeartbeatInterval { get; init; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>心跳超时（默认 15 秒；超时即判定断线）。</summary>
+    /// <summary>心跳超时（默认 15 秒；<c>ping</c> 发出后仍无入站帧即判定断线并失败挂起请求）。</summary>
     public TimeSpan HeartbeatTimeout { get; init; } = TimeSpan.FromSeconds(15);
 }

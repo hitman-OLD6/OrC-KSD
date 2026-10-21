@@ -35,7 +35,8 @@ public class SkeletonSmokeTests
     {
         var options = new ClientOptions { Host = "127.0.0.1", Port = 1 };
 
-        Assert.Equal(TimeSpan.FromSeconds(5), options.HeartbeatInterval);
+        // 只断言口径（行为覆盖见 ClientHeartbeatTests：空闲 ping、超时判死、失败而非挂起）。
+        Assert.Equal(TimeSpan.FromSeconds(30), options.HeartbeatInterval);
         Assert.Equal(TimeSpan.FromSeconds(15), options.HeartbeatTimeout);
     }
 }

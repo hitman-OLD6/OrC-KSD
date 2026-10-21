@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
@@ -28,11 +29,18 @@ public sealed class ServerHost : IAsyncDisposable
     private readonly bool _ownsQueue;
     private readonly Dictionary<int, Task> _aiDrivers = new();
     private readonly ConcurrentDictionary<int, DateTimeOffset> _disconnectedSeats = new();
+
+    /// <summary>宽限判负的在途去重（同一座位在途期间不重复入队）。</summary>
+    private readonly ConcurrentDictionary<int, byte> _graceInFlight = new();
     private CancellationTokenSource? _aiCts;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly ConcurrentDictionary<string, ClientSession> _sessions = new(StringComparer.Ordinal);
     private readonly IDisposable _targetingSubscription;
     private readonly List<TcpClient> _clients = new();
+
+    private static readonly FrozenSet<string> SeatReleasingTools =
+        new[] { "room.release", "room.kick", "room.add_ai" }
+            .ToFrozenSet(StringComparer.Ordinal);
 
     private TcpListener? _listener;
     private Task? _acceptLoop;
@@ -56,6 +64,10 @@ public sealed class ServerHost : IAsyncDisposable
         _targetingSubscription = _service.SubscribeTargetingRequests(OnTargetingRequest);
         _service.Bridge.PendingExpired += OnTargetingExpired;
         _service.MatchChanged += OnMatchChanged;
+
+        // S5③：选靶超时/取消把动作推进到完结时，完成点不在任何客户端调用栈上——
+        // 订阅者只做"入队一次推送"（此刻不在消费者上下文，不能同步投影）。
+        _service.Executor.Settled += OnActionSettled;
     }
 
     /// <summary>实际监听端口（<see cref="ServerOptions.Port"/> 为 0 时由系统分配）。</summary>
@@ -129,7 +141,6 @@ public sealed class ServerHost : IAsyncDisposable
 
             session = new ClientSession(sessionId, client, writer, ct);
             _sessions[sessionId] = session;
-
             while (!ct.IsCancellationRequested)
             {
                 JsonNode? node;
@@ -185,6 +196,10 @@ public sealed class ServerHost : IAsyncDisposable
         catch (IOException)
         {
             // 对端断开。
+        }
+        catch (SocketException)
+        {
+            // 连接重置（RST）：与"对端断开"同义，不得冒泡成未观察异常。
         }
         finally
         {
@@ -286,6 +301,16 @@ public sealed class ServerHost : IAsyncDisposable
         }
 
         var arguments = ToElement(request.Params?["arguments"]);
+
+        // 门禁顺序固定（不可调换）：分类 → 座位校验 → 入队。
+        // 被拒绝的请求**不入队、不碰引擎**，也绝不改绑座位。
+        if (Gate(session, name, ref arguments) is { } denial)
+        {
+            return RpcResponse.Success(
+                request.Id,
+                Serialize(ToolResultPayload.Failure(ResultCodes.Unauthorized, denial)));
+        }
+
         var priority = name.StartsWith("target.", StringComparison.Ordinal)
             || name.StartsWith("session.", StringComparison.Ordinal)
             ? WorkPriority.Interactive
@@ -313,9 +338,207 @@ public sealed class ServerHost : IAsyncDisposable
             return RpcResponse.Success(request.Id, Serialize(ToolResultPayload.Failure(ResultCodes.Busy, "服务繁忙，请重试。")));
         }
 
-        BindSeat(session, result);
+        ApplySeatEffects(session, name, result);
+
+        if (result.Ok && IsRoomMutation(name))
+        {
+            BroadcastRoom();
+        }
+
         return RpcResponse.Success(request.Id, Serialize(Map(result)));
     }
+
+    /// <summary>房间态会变化的工具（成功即广播 <c>notify/room</c>）。</summary>
+    private static bool IsRoomMutation(string tool)
+        => tool is "room.claim" or "room.release" or "room.kick" or "room.add_ai";
+
+    /// <summary>
+    /// 向**所有会话**广播房间态（载荷＝<c>room.info</c> 的 details，同一个序列化函数）。
+    /// <para>房间内容属产品上公开的信息（需求非目标已声明 <c>room.info</c> 不做访问控制）。</para>
+    /// </summary>
+    private void BroadcastRoom()
+    {
+        if (_room is not { } room)
+        {
+            return;
+        }
+
+        var notification = Serialize(new RpcNotification
+        {
+            Method = ProtocolMethods.NotifyRoom,
+            Params = Orc.Mcp.Room.RoomSnapshotJson.ToNode(room.Snapshot()),
+        });
+
+        foreach (var session in _sessions.Values)
+        {
+            session.Send(notification);
+        }
+    }
+
+    // ---------------------------------------------------------------- 授权门禁
+
+    /// <summary>工具分类查询（诊断/守卫测试；只读，不暴露表本身）。</summary>
+    public static bool IsToolClassified(string toolName) => SeatScopeRegistry.IsClassified(toolName);
+
+    /// <summary>工具作用域名（未登记＝<c>null</c>；专门分支＝<c>"special"</c>；诊断/守卫测试用）。</summary>
+    public static string? SeatScopeOf(string toolName) => SeatScopeRegistry.ScopeName(toolName);
+
+    /// <summary>已登记的工具名（四类 ∪ 专门分支；反查死条目用）。</summary>
+    public static IReadOnlyCollection<string> RegisteredToolNames => SeatScopeRegistry.RegisteredNames;
+
+    /// <summary>
+    /// 座位门禁：返回 <c>null</c>＝放行；否则为拒绝说明（统一映射为 <c>unauthorized</c>）。
+    /// <para>
+    /// 未登记工具一律拒绝（默认拒绝）；<c>Bind</c>/<c>Agnostic</c> 不看座位；
+    /// <c>OwnerScoped</c> 校验 <c>owner</c>；<c>SeatRequired</c> 只要求已绑定。
+    /// </para>
+    /// </summary>
+    private string? Gate(ClientSession session, string name, ref JsonElement arguments)
+    {
+        if (SeatScopeRegistry.SpecialCasedTools.Contains(name))
+        {
+            return GateSpecial(session, name, ref arguments);
+        }
+
+        if (!SeatScopeRegistry.ToolScopes.TryGetValue(name, out var scope))
+        {
+            return $"工具 '{name}' 未登记座位作用域（默认拒绝）。";
+        }
+
+        switch (scope)
+        {
+            case SeatScope.Bind:
+                return GateBind(session, name, arguments);
+
+            case SeatScope.Agnostic:
+                return null;
+
+            case SeatScope.OwnerScoped:
+                if (session.Seat is not { } seat)
+                {
+                    return "会话未绑定座位（请先 room.claim / room.resume）。";
+                }
+
+                if (!TryReadInt(arguments, "owner", out var owner))
+                {
+                    return $"工具 '{name}' 需要整数参数 owner。";
+                }
+
+                return owner == seat
+                    ? null
+                    : $"owner={owner} 与会话座位 {seat} 不符。";
+
+            case SeatScope.SeatRequired:
+                return session.Seat is null
+                    ? "会话未绑定座位（请先 room.claim / room.resume）。"
+                    : null;
+
+            default:
+                return $"工具 '{name}' 的作用域未知（默认拒绝）。";
+        }
+    }
+
+    /// <summary>
+    /// Bind 类工具的附加门禁：<c>kind:"local"</c>（房主）只接受回环来源。
+    /// </summary>
+    private static string? GateBind(ClientSession session, string name, JsonElement arguments)
+    {
+        if (!string.Equals(name, "room.claim", StringComparison.Ordinal))
+        {
+            return null; // room.resume：凭令牌，不看来源。
+        }
+
+        var kind = arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("kind", out var kindNode)
+            && kindNode.ValueKind == JsonValueKind.String
+                ? kindNode.GetString()
+                : null;
+
+        if (!string.Equals(kind, Orc.Mcp.Room.ControllerKinds.Local, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return SeatScopePolicy.IsTrustedLocal(session.RemoteAddress)
+            ? null
+            : $"kind:\"local\"（房主）只接受回环连接来源（当前 {session.RemoteAddress}）。";
+    }
+
+    /// <summary>
+    /// 专门分支：<c>observe.view</c>（座位改写/拒绝）与 <c>target.*</c>（待决归属裁决）。
+    /// </summary>
+    private string? GateSpecial(ClientSession session, string name, ref JsonElement arguments)
+    {
+        switch (name)
+        {
+            case "observe.view":
+            {
+                if (session.Seat is not { } seat)
+                {
+                    return null; // 未绑定：允许（单机诊断沙盒），且**不**写座位。
+                }
+
+                if (TryReadInt(arguments, "seat", out var requested) && requested != seat)
+                {
+                    return $"seat={requested} 与会话座位 {seat} 不符（已绑定会话只能读自己的视图）。";
+                }
+
+                // 缺省/相同 → 改写为会话座位（"忽略"语义，响应回显也是会话座位）。
+                arguments = WithSeat(arguments, seat);
+                return null;
+            }
+
+            case "target.submit":
+            case "target.cancel":
+            {
+                var pending = _service.Bridge.CurrentPending;
+                if (pending is null)
+                {
+                    // 门禁不抢业务错误码：交由服务层回 invalid-arguments（pending 可能在入队后消失）。
+                    return null;
+                }
+
+                if (session.Seat is not { } seat)
+                {
+                    return "会话未绑定座位，不能应答选靶请求。";
+                }
+
+                return pending.Seat is { } owner && owner != seat
+                    ? $"待决请求归属座位 {owner}（会话座位 {seat}），无权应答。"
+                    : null;
+            }
+
+            default:
+                // target.claim：不推进引擎、只写认领表——本批不动协议面工具集合（已在接入指南标注退役）。
+                return null;
+        }
+    }
+
+    private static bool TryReadInt(JsonElement arguments, string property, out int value)
+    {
+        value = 0;
+        return arguments.ValueKind == JsonValueKind.Object
+            && arguments.TryGetProperty(property, out var node)
+            && node.ValueKind == JsonValueKind.Number
+            && node.TryGetInt32(out value);
+    }
+
+    private static JsonElement WithSeat(JsonElement arguments, int seat)
+    {
+        var args = new JsonObject();
+        if (arguments.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in arguments.EnumerateObject())
+            {
+                args[property.Name] = JsonNode.Parse(property.Value.GetRawText());
+            }
+        }
+
+        args["seat"] = seat;
+        using var document = JsonDocument.Parse(args.ToJsonString());
+        return document.RootElement.Clone();
+    }
+
+    // ---------------------------------------------------------------- 座位绑定与解绑
 
     private static bool IsMatchAction(string tool)
         => tool.StartsWith("play.", StringComparison.Ordinal)
@@ -324,23 +547,60 @@ public sealed class ServerHost : IAsyncDisposable
             || tool.StartsWith("mulligan.", StringComparison.Ordinal)
             || tool.StartsWith("target.", StringComparison.Ordinal);
 
-    private void BindSeat(ClientSession session, McpToolResult result)
+    /// <summary>
+    /// 绑定/解绑的唯一入口（`session.Seat =` 只出现在本方法与两个解绑方法内）：
+    /// 成功后按工具语义绑定座位，或按房间语义拆除座位上的悬空绑定。
+    /// </summary>
+    private void ApplySeatEffects(ClientSession session, string toolName, McpToolResult result)
     {
-        if (!result.Ok || result.Details?["seat"] is not { } seatNode)
+        if (!result.Ok)
         {
             return;
         }
 
-        int seat;
+        if (SeatScopeRegistry.ScopeOf(toolName) == SeatScope.Bind
+            && result.Details is { } details
+            && TryReadInt(details, "seat", out var seat))
+        {
+            BindSeat(session, seat);
+            return;
+        }
+
+        // 座位消失的三条路径：释放座位 / 踢出 / 生成 AI（原本"只绑不拆"的漏洞面）。
+        if (toolName is "room.release" or "room.kick" or "room.add_ai"
+            && result.Details is { } seatDetails
+            && TryReadInt(seatDetails, "seat", out var released))
+        {
+            UnbindSeat(released);
+        }
+    }
+
+    private static bool TryReadInt(JsonNode? node, string property, out int value)
+    {
+        value = 0;
+        if (node?[property] is not { } seatNode)
+        {
+            return false;
+        }
+
         try
         {
-            seat = seatNode.GetValue<int>();
+            value = seatNode.GetValue<int>();
+            return true;
         }
         catch (InvalidOperationException)
         {
-            return; // 非数值 seat：不是座位绑定结果。
+            return false;
         }
+    }
 
+    /// <summary>
+    /// 绑定座位（不变量：一个座位最多一个活动会话；一个会话最多一个座位）。
+    /// </summary>
+    private void BindSeat(ClientSession session, int seat)
+    {
+        UnbindSeat(seat, except: session); // ⑤ 同座位其它会话解绑（半开连接 + 新连接 resume）
+        UnbindSeatOf(session);             // 一个会话最多一个座位（旧座位一并拆除）
         session.Seat = seat;
         _disconnectedSeats.TryRemove(seat, out _);
         _room?.MarkConnected(seat);
@@ -356,7 +616,22 @@ public sealed class ServerHost : IAsyncDisposable
         }
     }
 
-    /// <summary>座位断线：房间态立即释放（R9），对局态保留并记录宽限起点。</summary>
+    /// <summary>座位消失：把绑到该座位的一切会话置空。</summary>
+    private void UnbindSeat(int seat, ClientSession? except = null)
+    {
+        foreach (var session in _sessions.Values)
+        {
+            if (!ReferenceEquals(session, except) && session.Seat == seat)
+            {
+                session.Seat = null;
+            }
+        }
+    }
+
+    /// <summary>会话改绑前：拆掉它的旧座位。</summary>
+    private void UnbindSeatOf(ClientSession session) => session.Seat = null;
+
+    /// <summary>座位断线：房间态立即释放（含解绑），对局态保留并记录宽限起点。</summary>
     private void MarkSeatDisconnected(int seat)
     {
         if (_room is { } room)
@@ -364,6 +639,8 @@ public sealed class ServerHost : IAsyncDisposable
             if (room.State == Orc.Server.Rooms.RoomState.Lobby)
             {
                 room.DropSeat(seat);
+                UnbindSeat(seat); // ④ 断线释放座位后，其它绑到该座位的会话一并解绑
+                BroadcastRoom();
                 return;
             }
 
@@ -392,37 +669,94 @@ public sealed class ServerHost : IAsyncDisposable
                 continue;
             }
 
-            // 只尝试一次：先移除再看是否轮到它，避免重复认输。
-            if (!_disconnectedSeats.TryRemove(pair.Key, out _))
+            // 同一座位在途期间不重复入队（节流）；记录**不**在这里移除——只有认输成功才移除。
+            if (!_graceInFlight.TryAdd(pair.Key, 0))
             {
                 continue;
             }
 
             var seat = pair.Key;
+            try
+            {
+                _ = _queue.EnqueueAsync(
+                    WorkPriority.Command,
+                    async token =>
+                    {
+                        try
+                        {
+                            if (!IsItsTurn(seat))
+                            {
+                                return false; // 还没轮到它：记录保留，等下一次检查（F5）
+                            }
+
+                            var outcome = await _service.ConcedeAsync(seat, token).ConfigureAwait(false);
+                            if (outcome.Status != ActionOutcome.StatusCompleted)
+                            {
+                                return false;
+                            }
+
+                            _disconnectedSeats.TryRemove(seat, out _); // 真正认输成功后才移除
+                            await PushViewsAsync(token).ConfigureAwait(false); // 客户端才看得到 phase:"over"
+                            return true;
+                        }
+                        catch (Exception)
+                        {
+                            return false;
+                        }
+                        finally
+                        {
+                            _graceInFlight.TryRemove(seat, out _);
+                        }
+                    },
+                    _shutdown.Token);
+            }
+            catch (Exception)
+            {
+                // 队列满/已关闭：放弃本次尝试，下一次检查再试。
+                _graceInFlight.TryRemove(seat, out _);
+            }
+        }
+    }
+
+    /// <summary>投影的 <c>activePlayerSide</c> 是相对 viewer 的：self＝轮到该座位。</summary>
+    private bool IsItsTurn(int seat)
+    {
+        var view = _service.ProjectView(seat);
+        return view.Payload is JsonObject payload
+            && payload["activePlayerSide"]?.GetValue<string>() == "self";
+    }
+
+    // ---------------------------------------------------------------- 推送
+
+    /// <summary>动作"交出去之后自行完结"（选靶超时/取消）→ 入队一次推送。</summary>
+    private void OnActionSettled(Orc.Mcp.Match.ActionOutcome outcome) => EnqueuePush();
+
+    /// <summary>
+    /// 以 <see cref="WorkPriority.Command"/> 入队一次推送（与产生变更的动作同优先级，保证顺序）。
+    /// <para>队列满/已关闭时静默丢弃：view 幂等，下一次动作的推送兜底。</para>
+    /// </summary>
+    private void EnqueuePush()
+    {
+        try
+        {
             _ = _queue.EnqueueAsync(
                 WorkPriority.Command,
                 async token =>
                 {
-                    var view = _service.ProjectView(seat);
-                    if (view.Payload is not JsonObject payload)
-                    {
-                        return false;
-                    }
-
-                    // 投影的 activePlayerSide 是相对 viewer 的：self＝轮到该座位。
-                    if (payload["activePlayerSide"]?.GetValue<string>() != "self")
-                    {
-                        return false;
-                    }
-
-                    var outcome = await _service.ConcedeAsync(seat, token).ConfigureAwait(false);
-                    return outcome.Status == Orc.Mcp.Match.ActionOutcome.StatusCompleted;
+                    await PushViewsAsync(token).ConfigureAwait(false);
+                    return true;
                 },
                 _shutdown.Token);
         }
+        catch (WorkQueueFullException)
+        {
+            // 静默丢弃。
+        }
+        catch (ObjectDisposedException)
+        {
+            // 关闭中。
+        }
     }
-
-    // ---------------------------------------------------------------- 推送
 
     private async Task PushViewsAsync(CancellationToken ct)
     {
@@ -567,7 +901,22 @@ public sealed class ServerHost : IAsyncDisposable
             try
             {
                 result = await _queue
-                    .EnqueueAsync(WorkPriority.Command, token => pilot.StepAsync(token), ct)
+                    .EnqueueAsync(
+                        WorkPriority.Command,
+                        async token =>
+                        {
+                            var step = await pilot.StepAsync(token).ConfigureAwait(false);
+
+                            // S5①：推送必须包在 AI 步自身的 work item 内（投影依赖只读执行面＝消费者上下文）。
+                            // 未行动（Performed==false）不推——否则 AI 空转会挤掉真实 view。
+                            if (step.Performed)
+                            {
+                                await PushViewsAsync(token).ConfigureAwait(false);
+                            }
+
+                            return step;
+                        },
+                        ct)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -725,6 +1074,7 @@ public sealed class ServerHost : IAsyncDisposable
         _targetingSubscription.Dispose();
         _service.Bridge.PendingExpired -= OnTargetingExpired;
         _service.MatchChanged -= OnMatchChanged;
+        _service.Executor.Settled -= OnActionSettled;
 
         foreach (var task in new[] { _acceptLoop, _heartbeatLoop })
         {
@@ -791,6 +1141,7 @@ public sealed class ServerHost : IAsyncDisposable
             _client = client;
             _writer = writer;
             _ct = ct;
+            RemoteAddress = (client.Client.RemoteEndPoint as IPEndPoint)?.Address;
             _pump = Task.Run(() => PumpAsync(ct), CancellationToken.None);
         }
 
@@ -799,6 +1150,9 @@ public sealed class ServerHost : IAsyncDisposable
             => node is null ? Task.CompletedTask : _writer.WriteAsync(node, _ct);
 
         public string Id { get; }
+
+        /// <summary>对端远端地址（房主来源约束判定用；已断开＝null）。</summary>
+        public IPAddress? RemoteAddress { get; }
 
         public int? Seat { get; set; }
 

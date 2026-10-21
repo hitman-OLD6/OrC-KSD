@@ -25,7 +25,7 @@ public class RoomTests
         var snapshot = room.Snapshot();
         Assert.Equal(RoomStates.Lobby, snapshot.State);
         Assert.Equal(ControllerKinds.Local, snapshot.Seats[0].ControllerKind);
-        Assert.True(snapshot.Seats[0].Ready);
+        Assert.True(snapshot.Seats[0].Connected);
         Assert.Equal(string.Empty, snapshot.Seats[1].ControllerKind);
     }
 
@@ -183,6 +183,34 @@ public class RoomTests
 
         Assert.False(result.Ok);
         Assert.Equal(McpCodes.DeckInvalid, result.Code);
+    }
+
+    /// <summary>空卡组在**没有校验器**时也必须被拒（F19；不能靠 DeckRules 兜底）。</summary>
+    [Fact]
+    public void Claim_WithEmptyDeck_IsRejected_EvenWithoutValidator()
+    {
+        var room = new Room("room-1", 2, deckValidator: null);
+
+        var result = room.Claim(new RoomSeatClaim(0, "房主", [], ControllerKind: ControllerKinds.Local));
+
+        Assert.False(result.Ok);
+        Assert.Equal(McpCodes.DeckInvalid, result.Code);
+    }
+
+    /// <summary>DeckRulesValidator 的张数口径来自 RequiredDeckSize（F16）：配置 30 时 39 张也应被拒。</summary>
+    [Fact]
+    public void DeckRulesValidator_HonorsRequiredDeckSize()
+    {
+        var validator = new DeckRulesValidator(
+            () => new Dictionary<string, Orc.Game.Cards.CardDefinition>(StringComparer.Ordinal),
+            enforce: true,
+            requiredDeckSize: 30);
+
+        var result = validator.Validate(Enumerable.Repeat("card-x", 39).ToArray(), null);
+
+        Assert.NotNull(result);
+        Assert.Equal(McpCodes.DeckInvalid, result!.Code);
+        Assert.Contains("要求 30 张", result.Message);
     }
 
     private static Room CreateRoom(IMatchLauncher? launcher = null)

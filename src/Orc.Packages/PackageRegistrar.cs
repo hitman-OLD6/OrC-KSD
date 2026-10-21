@@ -123,23 +123,31 @@ public static class PackageRegistrar
         return new PackageRegistrationResult(manifest, content, registered, diagnostics);
     }
 
-    /// <summary>读取全部 sidecar（manifest 元数据列表 ＋ 卡文件同目录）并按源文件相对路径索引。</summary>
+    /// <summary>
+    /// 读取全部 sidecar（两段式，顺序不可换）：
+    /// ① 先按 <see cref="PackageScan.ManifestSidecars"/> 校验「声明即落地」（缺失＝包级结构性非法，B4）；
+    /// ② 再把并集（<see cref="PackageScan.SidecarFiles"/> ＋ 卡文件同目录）读入并按源文件相对路径索引。
+    /// <para>并集每一项**一视同仁**：source／packageId 一致性与重复 GUID 校验对全量生效。</para>
+    /// </summary>
     private static Dictionary<string, AssetSidecar> ReadSidecars(PackageScan scan)
     {
         var sidecars = new Dictionary<string, AssetSidecar>(StringComparer.Ordinal);
         var paths = new List<string>();
 
-        foreach (var relative in scan.SidecarFiles)
+        foreach (var relative in scan.ManifestSidecars)
         {
-            var absolute = Path.GetFullPath(Path.Combine(scan.RootDirectory, relative));
-            if (!File.Exists(absolute))
+            var declared = Path.GetFullPath(Path.Combine(scan.RootDirectory, relative));
+            if (!File.Exists(declared))
             {
                 throw new InvalidDataException(MigrationGuidance.ForPackage(
                     scan.RootDirectory,
                     $"manifest 元数据列表指向的 sidecar 缺失：{relative}（包级结构性非法）"));
             }
+        }
 
-            paths.Add(absolute);
+        foreach (var relative in scan.SidecarFiles)
+        {
+            paths.Add(Path.GetFullPath(Path.Combine(scan.RootDirectory, relative)));
         }
 
         foreach (var cardFile in scan.CardFiles)
