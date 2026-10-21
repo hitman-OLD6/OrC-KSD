@@ -1,6 +1,8 @@
 # Requirements — 多人支持（服务端 / 客户端分离）
 
-> 状态：**需求已冻结 ＋ 实现已验收**（2026-10-20）。R1–R15 全部确认；验收勾选反映**实际实现与测试状态**（`dotnet test OrcEngine.slnx` → 2147 通过 / 0 失败）。
+> 状态：**需求已冻结 ＋ 实现已验收**（2026-10-20；2026-10-21 完成安全与契约修复）。R1–R15 全部确认；验收勾选反映**实际实现与测试状态**（`dotnet test OrcEngine.slnx` → 2263 通过 / 0 失败）。
+>
+> **2026-10-21 修复批**：补「会话 → 座位」授权层（`SeatScopeRegistry` ＋ `ServerHost.Gate`，默认拒绝）、动作归属强制（`owner` / `target.*` 归属）、房主身份约束（仅回环 + 无房主不可开局）、推送闭环（AI 步 / 判负 / 选靶超时）、断线宽限时序、客户端心跳、`notify/room`、`ready` 删除，以及 12 项健壮性收敛。详见 `代码审查与测试审查报告.md` 与 `修复-2026-10-21/`。
 > 实现路径见 `implementation.md`；客户端接入见 `客户端接入指南.md`；取证基线见 `requirements-grill-plan.md`。
 
 一句话：把 OrC 逻辑引擎从客户端进程内抽出，做成**一个实例只服务一场对局**的独立服务端；服务端以「房间」承载多个「座位」，每个座位必须由一个「控制器」填充（本地玩家／远程客户端／服务端 AI）才能开局；所有客户端只经字符串形态的远程协议交换动作、投影、事件段与选靶应答。
@@ -35,7 +37,7 @@
 - 引用键随对局生灭；`KeyOf` 对失效引用返回空串（仍成立，客户端不得长期缓存 ref）。
 - ~~全仓无网络栈~~ → **已新增** `Orc.Protocol`（协议 DTO/NDJSON）、`Orc.Client`（连接/推送/子进程）、`Orc.Server`（房间/传输/宿主）；序列化仍只用 `System.Text.Json`。
 - **分发形态**：安装包同时含客户端与服务端；不追求"客户端工程零引擎依赖"，但线上一律自描述 JSON，不依赖 DTO 类型名/二进制布局。
-- ~~断线需心跳策略~~ → **已实现**：`ping` ＋ 服务端 45s 空闲判定；客户端崩溃由 `--parent-pid` watchdog 兜底。
+- ~~断线需心跳策略~~ → **已实现（双向）**：客户端 `OrcClient` 静默 30s 发 `ping`、15s 无入站帧判死；服务端 45s 无请求断开；客户端崩溃由 `--parent-pid` watchdog 兜底。
 - ~~建局校验只到张数~~ → **已补** `Orc.Game.Decks.DeckRules`（张数/卡池/同名 4·3·2·1/主国盟国配对），`MatchLaunchOptions` 已透传构筑配置。
 - 活对象依赖是**语义问题**，不是传输问题（Nexum 不采用，见 grill plan Q15）。
 
@@ -156,6 +158,8 @@
   - [x] 长期不回来有终局路径（`DisconnectedSeat_LosesAfterGrace`）。
   - [x] 房间态断线立即释放（`LobbyDisconnect_ReleasesSeatImmediately`）。
   - [x] 心跳超时断连（`IdleConnection_IsClosed_ByHeartbeatTimeout`）。
+  - [x] 客户端主动心跳（`ClientHeartbeatTests`：静默发 `ping`、超时判死并失败挂起请求）。
+  - [x] 断线发生在对手回合时仍能判负（`DisconnectDuringOpponentTurn_StillLosesAfterGrace`）。
 
 ### R10: 外围能力范围
 - Status: **Confirmed**
@@ -167,7 +171,7 @@
 ### R11: 控制器契约与卡组校验
 - Status: **Confirmed**
 - Behavior:
-  - 控制器契约：`{ kind, seat, displayName, deck[], deckConfig{mainFaction, allyFaction}, ready }`。
+  - 控制器契约：`{ kind, seat, displayName, deck[], deckConfig{mainFaction, allyFaction} }`（`ready` 已删除——本协议无"座位就绪"语义，座位填满即可开局）。
   - 填充时服务端完整校验：张数 39、卡 id 在已装载卡池、同名上限（standard 4 / limited 3 / special 2 / elite 1）、主国/盟国配对。
   - `room.start` 前复检。
   - 客户端自检只作体验优化。
