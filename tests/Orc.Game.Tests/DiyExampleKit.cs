@@ -74,8 +74,8 @@ internal static class DiyExampleKit
         return card;
     }
 
-    internal static Slot FindEmptySupportSlot(Match match, Player player)
-        => match.Battlefield.GetSupportLine(player).First(slot => slot.IsEmpty);
+    internal static FormationGap FindEmptySupportSlot(Match match, Player player)
+        => match.Battlefield.GetSupportLine(player).GetInsertionGaps()[0];
 
     internal static string FindRepoRoot()
     {

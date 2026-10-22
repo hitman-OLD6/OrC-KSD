@@ -17,7 +17,7 @@ public class DiagTests
     public async Task AuditChain_ContainsReservedTriggers()
     {
         using var fixture = new SandboxFixture();
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
         var chain = await fixture.InvokeAsync("diag.audit_chain");
         Assert.True(chain.Ok, chain.Message);
@@ -46,7 +46,7 @@ public class DiagTests
     public async Task Report_TriggerCountExcludesReserved()
     {
         using var fixture = new SandboxFixture();
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
         var report = await fixture.InvokeAsync("diag.report");
         Assert.True(report.Ok);
@@ -62,7 +62,7 @@ public class DiagTests
     public async Task AuditChain_ReservedTriggers_ReadOnly()
     {
         using var fixture = new SandboxFixture();
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
         var before = fixture.Service.Executor.Match!.ExportReservedTriggersJson();
         var chain = await fixture.InvokeAsync("diag.audit_chain", """{"indented":true}""");

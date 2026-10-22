@@ -53,21 +53,28 @@ public sealed partial class McpService
             return ActionOutcome.Failed(McpCodes.InvalidArguments, deckError);
         }
 
-        // 进程级资产（词条/组件注册面）：预检与卡数据装载都依赖它，须早于装载。
-        BuiltInPlugin.RegisterProcessDefaults();
-        FoundationActions.Register();
-        NoteProcessStateChange("builtin.process-defaults（内置词条/组件进程级注册，幂等）");
+        // 进程级资产（词条/组件注册面）由 **boot 段**注册（刻意变化第 10 条：不在每局重复调用，
+        // 避免两处都调的双真源）。此处只留痕一次，供 sandbox.state 呈现。
+        NoteProcessStateChange("builtin.process-defaults（进程级注册，boot 段一次，幂等）");
 
         // S7：卡组装载＝注册面 ＋ 两域 lock ＋ 资产加载器（分层列表）＋ 卡牌加载器；卡库在初始化期接入。
+        // 管理面已按"本局加载计划"注册过时直接复用（同一份卡包只解析一遍）。
         MatchCardAssembly assembly;
-        try
+        if (options.Assembly is { } prebuilt)
         {
-            assembly = MatchCardAssembly.Register(options.PackDirectories);
+            assembly = prebuilt;
         }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or FormatException
-            or InvalidOperationException or ArgumentException or DirectoryNotFoundException)
+        else
         {
-            return ActionOutcome.Failed(McpCodes.InvalidArguments, $"卡包装载失败：{ex.Message}");
+            try
+            {
+                assembly = MatchCardAssembly.Register(options.PackDirectories);
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or FormatException
+                or InvalidOperationException or ArgumentException or DirectoryNotFoundException)
+            {
+                return ActionOutcome.Failed(McpCodes.InvalidArguments, $"卡包装载失败：{ex.Message}");
+            }
         }
 
         string[] deckA;

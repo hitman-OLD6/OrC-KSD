@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 3,
+  "root": {
+    "id": "atp.beachhead-supply.effect",
+    "version": 1,
+    "oneShot": false,
+    "mainTrigger": {
+      "id": "t.main",
+      "stableKey": "跨越海洋·滩头补给",
+      "kind": "passive",
+      "viewType": "Orc.Cards.CardEventView",
+      "hooks": [
+        "card.played"
+      ],
+      "events": [
+        {
+          "id": "onEvent",
+          "entry": "HandleAsync",
+          "csx": "Func<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n\n    if (view.Host is not Orc.Cards.Card self || view.Card is not Orc.Cards.Card played) { return; }\n    if (!object.ReferenceEquals(played, self)) { return; }\n\n    var runtime = Orc.Game.Effects.EffectRuntime.ResolveFor(self);\n    var random = Orc.Game.MatchRandomService.ResolveFor(self);\n    var engine = ctx.Engine;\n    if (runtime is null || random is null || engine is null) { return; }\n\n    Func<Orc.Cards.Card, Orc.Game.Players.Player?> ownerOf = c =>\n    {\n        if (c is Orc.Game.Players.Hq hq) { return hq.Owner; }\n        if (c is Orc.Game.Cards.CardBase cb) { return cb.Owner; }\n        return null;\n    };\n\n    Func<Orc.Game.Cards.UnitCard, bool> onField = u =>\n        u.TryGetData<Orc.Game.Cards.UnitStateData>(out var st) && !st.IsDestroyed && st.Position is not null;\n\n    Func<Orc.Game.Cards.UnitCard, bool> isInfantry = u =>\n    {\n        foreach (var t in u.Definition.UnitTypes)\n        {\n            if (string.Equals(t, \"infantry\", System.StringComparison.OrdinalIgnoreCase)) { return true; }\n        }\n        return false;\n    };\n\n    Func<Orc.Game.Cards.UnitCard, bool> onFrontLine = u =>\n    {\n        if (!u.TryGetData<Orc.Game.Cards.UnitStateData>(out var st) || st.IsDestroyed || st.Position is null)\n        {\n            return false;\n        }\n        return st.Position.Name.Contains(\"前线\", System.StringComparison.Ordinal);\n    };\n\n    var owner = ownerOf(self);\n    if (owner is null) { return; }\n\n    // 每有 1 个友方步兵 -> 随机 1 个友方单位 +1/+1。\n    var friendlies = new System.Collections.Generic.List<Orc.Cards.Card>();\n    var infantry = 0;\n    foreach (var c in engine.Cards)\n    {\n        if (c is not Orc.Game.Cards.UnitCard u || !object.ReferenceEquals(u.Owner, owner) || !onField(u)) { continue; }\n        friendlies.Add(u);\n        if (isInfantry(u)) { infantry++; }\n    }\n\n    for (var i = 0; i < infantry && friendlies.Count > 0; i++)\n    {\n        var pick = random.PickOne(friendlies);\n        await runtime.BuffAsync(pick, 1, 1, Orc.Game.Effects.EffectDuration.Permanent, ct, self);\n    }\n};\n",
+          "version": 1
+        }
+      ],
+      "version": 1
+    },
+    "otherTriggers": [],
+    "wrappers": [],
+    "injects": []
+  }
+}

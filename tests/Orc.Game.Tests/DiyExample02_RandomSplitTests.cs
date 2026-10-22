@@ -65,6 +65,6 @@ public class DiyExample02_RandomSplitTests
         var result = await match.PlayManager.PlayOrderAsync(command);
 
         Assert.Equal(PlayResultStatus.Success, result.Status);
-        Assert.Equal(0, match.Battlefield.FrontLine.Count(slot => !slot.IsEmpty));
+        Assert.Equal(0, match.Battlefield.FrontLine.Size);
     }
 }

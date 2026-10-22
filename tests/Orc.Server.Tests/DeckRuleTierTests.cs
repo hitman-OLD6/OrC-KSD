@@ -91,28 +91,21 @@ public class DeckRuleTierTests
         Assert.Empty(new AiDeckGenerator(pool, new Random(7)).Generate(RequiredSize));
     }
 
-    /// <summary>房间态（claim）按 lenient 档位判定：小卡组放行、未知卡仍拒绝。</summary>
+    /// <summary>
+    /// 批准期（S4：卡组校验前移到批准这一刻）按 lenient 档位判定：小卡组放行、未知卡仍拒绝。
+    /// <para>服务器启动时不装卡池，因此校验必须自己带上"用并集算出的池视图"。</para>
+    /// </summary>
     [Fact]
-    public void Claim_UsesLenientTier_SmallDeckAccepted_UnknownCardRejected()
+    public void ApprovalValidation_UsesLenientTier_SmallDeckAccepted_UnknownCardRejected()
     {
         var pool = BuildPool();
+        var validator = new DeckRulesValidator(() => pool, enforce: true, requiredDeckSize: 0, tier: DeckRuleTier.Lenient);
 
-        var room = new Room(
-            "room-lenient",
-            2,
-            new DeckRulesValidator(() => pool, enforce: true, requiredDeckSize: 0, tier: DeckRuleTier.Lenient));
+        Assert.Null(validator.Validate(["std", "elite"], null));
 
-        var small = room.Claim(new RoomSeatClaim(0, "seat-0", ["std", "elite"], ControllerKind: ControllerKinds.Local));
-        Assert.True(small.Ok, small.Message);
-
-        var unknown = room.Claim(new RoomSeatClaim(
-            1,
-            "seat-1",
-            ["std", "ghost"],
-            ControllerKind: ControllerKinds.Remote));
-
-        Assert.False(unknown.Ok);
-        Assert.Equal(McpCodes.DeckInvalid, unknown.Code);
+        var unknown = validator.Validate(["std", "ghost"], null);
+        Assert.NotNull(unknown);
+        Assert.Equal(McpCodes.DeckInvalid, unknown!.Code);
         Assert.Contains("ghost", unknown.Message);
     }
 

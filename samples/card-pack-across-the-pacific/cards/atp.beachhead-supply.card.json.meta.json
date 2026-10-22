@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "orc.across-the-pacific",
+  "source": "cards/atp.beachhead-supply.card.json",
+  "assets": [
+    {
+      "guid": "ebbf130d-b263-9190-70c5-1a41c8076688",
+      "kind": "card",
+      "id": "atp.beachhead-supply",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

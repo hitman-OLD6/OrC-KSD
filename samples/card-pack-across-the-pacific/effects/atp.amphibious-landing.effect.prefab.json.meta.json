@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "orc.across-the-pacific",
+  "source": "effects/atp.amphibious-landing.effect.prefab.json",
+  "assets": [
+    {
+      "guid": "fd43a0e3-2973-e179-b2f4-88ac453fecd5",
+      "kind": "effect",
+      "id": "atp.amphibious-landing.effect",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

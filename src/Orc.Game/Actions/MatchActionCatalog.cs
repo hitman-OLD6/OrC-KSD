@@ -83,7 +83,9 @@ internal sealed class MatchActionCatalog
             // 移动已迁出宿主程序集（P5b）：两端由实现自行暴露（类型擦除），目录不再引用其视图类型。
             Entry(ActionId.Move, Move, Array.Empty<ActionId>(), Move.Ends.ToArray()),
             Entry(ActionId.JoinBattlefield, JoinBattlefield, Array.Empty<ActionId>(),
-                End("部署触发端", JoinBattlefield.Deploy), End("加入触发端", JoinBattlefield.Join),
+                End("部署触发端", JoinBattlefield.Deploy),
+                End("加入前线触发端", JoinBattlefield.JoinFrontline),
+                End("加入支援阵线触发端", JoinBattlefield.JoinSupportLine),
                 End("处理端", JoinBattlefield.Handle)),
             // 指令的两端由内核唯一 flow 承载：阶段 1（Counter → Resolve＝施放结算）为触发端，
             // 阶段 2（Finalize＝收尾）为处理端；同一 flow 的两个独立触发器，避免重复登记同一对象。

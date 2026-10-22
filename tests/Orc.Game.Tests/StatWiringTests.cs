@@ -223,7 +223,7 @@ public class StatWiringTests
         await match.EndTurn();
         await match.EndTurn();
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
-        var moveResult = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine[0].Ref);
+        var moveResult = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps()[0].Ref);
         Assert.Equal(CommandResultStatus.Success, moveResult.Status);
         Assert.Equal(0, player.Points); // 2 − 2：扣费读有效行动费
 

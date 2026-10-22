@@ -1,26 +1,32 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Orc.Game.Decks;
+using Orc.Protocol;
+using Orc.Server.Admin;
 using Orc.Server.Transport;
 
 namespace Orc.Server;
 
 /// <summary>
-/// 服务端进程入口（多人支持 S8b；无头沙盒 S1 扩展）。
+/// 服务端进程入口（S2/S5）。
 /// <para>
-/// stdout **只写一行就绪报文**（非无头＝<c>{"ready":true,"port":N}</c>；无头＝同一行**追加**字段），
-/// 其余日志一律走 stderr——与既有 stdio 适配层"stdout 只写协议"的约定一致，客户端据此解析实际端口。
+/// stdout **只写**：①首行就绪报文 <c>{"ready":true,"port":N,…}</c>；②管理通道的回执与事件。
+/// 其余日志一律 stderr——stdout 是父子私有通道的一半，混入日志会让管理器解析失败。
 /// </para>
 /// <para>
-/// 参数校验一律**早于任何目录创建**：无头专属参数在未开 <c>--headless</c> 时报参数错误并退出 <c>1</c>。
+/// 参数校验一律**早于任何目录创建**。已退役的参数（<c>--headless</c>/<c>--run-dir</c>/<c>--seat0</c>/
+/// <c>--seat1</c>/<c>--wait-agent</c>/<c>--exit-on-end</c>/<c>--keep-alive</c>/<c>--log-seat-views</c>）
+/// **不保留"已弃用但可用"**，出现即参数错误（否则"服务器长存"会出现例外）。
 /// </para>
 /// </summary>
 internal static class Program
 {
     private const string Usage =
         "用法：Orc.Server [--packs <dir;dir>] [--sandbox <dir>] [--port <n>] [--parent-pid <pid>]\n" +
-        "                  [--headless] [--mode play|sandbox] [--run-dir <dir>] [--seat0 ai|agent] [--seat1 ai|agent]\n" +
-        "                  [--seed <n>] [--deck-rules strict|lenient] [--wait-agent <秒>] [--exit-on-end|--keep-alive]\n" +
-        "                  [--log-seat-views] [--allow-debug-writes] [--help]";
+        "                  [--mode play|sandbox] [--seats <json>] [--seed <n>]\n" +
+        "                  [--deck-rules strict|lenient|none] [--required-deck-size <n>]\n" +
+        "                  [--disconnect-grace <秒>] [--heartbeat <秒>] [--target-timeout <秒>]\n" +
+        "                  [--allow-debug-writes] [--label <text>] [--help]";
 
     private static async Task<int> Main(string[] args)
     {
@@ -54,12 +60,15 @@ internal static class Program
         }
 
         await using (host)
+        await using (var channel = AdminChannel.Attach(Console.OpenStandardInput(), Console.OpenStandardOutput(), host))
         {
-            // 就绪行：非无头只写既有两字段；无头为**增量**扩展（既有字段语义不变）。
+            channel.Start();
+
+            // 就绪行：字段语义与既有约定一致（只**增量**追加 roomId/label）。
             Console.Out.WriteLine(BuildReadyLine(host, options).ToJsonString());
             Console.Out.Flush();
 
-            Console.Error.WriteLine($"Orc.Server 已就绪，监听端口 {host.Port}。");
+            Console.Error.WriteLine($"Orc.Server 已就绪（instance={options.Label ?? "-"}, port={host.Port}, room={host.Room.RoomId}）。");
 
             var stop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             Console.CancelKeyPress += (_, eventArgs) =>
@@ -69,13 +78,16 @@ internal static class Program
             };
             AppDomain.CurrentDomain.ProcessExit += (_, _) => stop.TrySetResult();
 
+            _ = channel.RunAsync(host.ShutdownToken);
+
             try
             {
-                var headlessStop = host.Headless?.Stopped ?? Task.Delay(Timeout.Infinite);
-                await Task.WhenAny(stop.Task, headlessStop);
+                // 服务器**长存**：只有显式停止（Ctrl+C / 进程退出）才结束；
+                // 管理通道 EOF 只是"没有管理面"，不影响业务协议继续服务。
+                await stop.Task.ConfigureAwait(false);
 
-                // 让会话写队列把最后一次响应送出（200ms 内未送出可放弃；不得先杀进程再写盘）。
-                await Task.Delay(200);
+                // 让会话写队列把最后一次响应送出（不得先杀进程再写盘）。
+                await Task.Delay(200).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -83,35 +95,27 @@ internal static class Program
                 return 2;
             }
 
-            return host.Headless?.ExitCode ?? 0;
+            return 0;
         }
     }
 
-    /// <summary>构造 stdout 就绪行（字段顺序稳定；<c>ai+ai</c> 时省略 agent 相关字段而非写 <c>null</c>）。</summary>
+    /// <summary>构造 stdout 就绪行（字段顺序稳定）。</summary>
     private static JsonObject BuildReadyLine(ServerHost host, ServerOptions options)
     {
         var ready = new JsonObject
         {
             ["ready"] = true,
             ["port"] = host.Port,
+            ["roomId"] = host.Room.RoomId,
+            ["mode"] = options.Mode == ServerMode.Sandbox ? "sandbox" : "play",
+            ["seatCount"] = host.Room.SeatCount,
         };
 
-        if (host.Headless is not { } headless)
+        if (options.Label is { Length: > 0 } label)
         {
-            return ready;
+            ready["label"] = label;
         }
 
-        ready["headless"] = true;
-        ready["mode"] = options.Mode == ServerMode.Sandbox ? "sandbox" : "play";
-        ready["runDir"] = headless.RunDir;
-
-        if (headless.AgentSeat is { } agentSeat)
-        {
-            ready["agentSeat"] = agentSeat;
-            ready["agentTokenPath"] = headless.AgentTokenPath;
-        }
-
-        ready["eventsPath"] = headless.EventsPath;
         return ready;
     }
 
@@ -122,41 +126,43 @@ internal static class Program
     private static ParseResult ParseArgs(string[] args)
     {
         var packs = new List<string>();
-        var sandbox = Path.Combine(Path.GetTempPath(), "orc-server", Guid.NewGuid().ToString("N"));
-        var sandboxGiven = false;
+        var sandbox = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "orc-server", Guid.NewGuid().ToString("N")));
         var port = 0;
         int? parentPid = null;
 
-        var headless = false;
         var mode = ServerMode.Play;
-        string? runDir = null;
-        var seat0 = SeatRole.Ai;
-        var seat1 = SeatRole.Agent;
+        var seats = new List<SeatConfig> { new(), new() };
         int? seed = null;
-        var deckRules = DeckRuleTier.Lenient;
-        var deckRulesGiven = false;
-        var waitAgent = TimeSpan.FromSeconds(300);
-        var exitOnEnd = true;
-        var exitOnEndGiven = false;
-        var keepAliveGiven = false;
-        var logSeatViews = false;
+        var deckRules = DeckRuleTier.Strict;
+        var requiredDeckSize = DeckRules.DefaultRequiredSize;
+        var disconnectGrace = TimeSpan.FromSeconds(60);
+        var heartbeat = TimeSpan.FromSeconds(45);
+        var targetTimeout = TimeSpan.FromMinutes(10);
         var allowDebugWrites = false;
+        string? label = null;
 
-        // 无头专属参数在未开 --headless 时必须报错（不得静默忽略）。
-        var headlessOnly = new List<string>();
+        // 已退役参数：出现即参数错误（不保留"已弃用但可用"）。
+        var retired = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "--headless", "--run-dir", "--seat0", "--seat1", "--wait-agent",
+            "--exit-on-end", "--keep-alive", "--log-seat-views",
+        };
 
         for (var i = 0; i < args.Length; i++)
         {
+            if (retired.Contains(args[i]))
+            {
+                return Fail($"参数错误：{args[i]} 已退役（服务器长存；座位由 --seats 配置决定，令牌只能由批准签发）。");
+            }
+
             switch (args[i])
             {
                 case "--packs" when i + 1 < args.Length:
                     packs.AddRange(args[++i].Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
                     break;
                 case "--sandbox" when i + 1 < args.Length:
-                    // 统一绝对化：沙盒写根的守卫只接受绝对路径，且 <run-dir>/sandbox 的派生
-                    // 在相对路径下会拼出混合分隔符并被拒绝（PathViolationException）。
+                    // 统一绝对化：沙盒写根的守卫只接受绝对路径。
                     sandbox = Path.GetFullPath(args[++i]);
-                    sandboxGiven = true; // 显式给出以显式值为准（无头下不被 <run-dir>/sandbox 覆盖）
                     break;
                 case "--port" when i + 1 < args.Length && int.TryParse(args[i + 1], out var parsedPort):
                     port = parsedPort;
@@ -165,10 +171,6 @@ internal static class Program
                 case "--parent-pid" when i + 1 < args.Length && int.TryParse(args[i + 1], out var parent):
                     parentPid = parent;
                     i++;
-                    break;
-
-                case "--headless":
-                    headless = true;
                     break;
                 case "--mode" when i + 1 < args.Length:
                     switch (args[++i])
@@ -184,29 +186,15 @@ internal static class Program
                     }
 
                     break;
-                case "--run-dir" when i + 1 < args.Length:
-                    runDir = Path.GetFullPath(args[++i]);
-                    headlessOnly.Add("--run-dir");
-                    break;
-                case "--seat0" when i + 1 < args.Length:
-                    if (!TryParseRole(args[++i], out seat0))
+                case "--seats" when i + 1 < args.Length:
+                    if (!TryParseSeats(args[++i], seats, out var seatsError))
                     {
-                        return Fail($"参数错误：--seat0 只接受 ai|agent（收到 '{args[i]}'）。");
+                        return Fail($"参数错误：--seats 非法（{seatsError}）。");
                     }
 
-                    headlessOnly.Add("--seat0");
-                    break;
-                case "--seat1" when i + 1 < args.Length:
-                    if (!TryParseRole(args[++i], out seat1))
-                    {
-                        return Fail($"参数错误：--seat1 只接受 ai|agent（收到 '{args[i]}'）。");
-                    }
-
-                    headlessOnly.Add("--seat1");
                     break;
                 case "--seed" when i + 1 < args.Length && int.TryParse(args[i + 1], out var parsedSeed):
                     seed = parsedSeed;
-                    headlessOnly.Add("--seed");
                     i++;
                     break;
                 case "--deck-rules" when i + 1 < args.Length:
@@ -219,58 +207,46 @@ internal static class Program
                             deckRules = DeckRuleTier.Lenient;
                             break;
                         case "none":
-                            return Fail("参数错误：无头 --deck-rules 不接受 none（只允许 strict|lenient）。");
+                            deckRules = DeckRuleTier.None;
+                            break;
                         default:
-                            return Fail($"参数错误：--deck-rules 只接受 strict|lenient（收到 '{args[i]}'）。");
+                            return Fail($"参数错误：--deck-rules 只接受 strict|lenient|none（收到 '{args[i]}'）。");
                     }
 
-                    deckRulesGiven = true;
-                    headlessOnly.Add("--deck-rules");
                     break;
-                case "--wait-agent" when i + 1 < args.Length && int.TryParse(args[i + 1], out var waitSeconds):
-                    waitAgent = TimeSpan.FromSeconds(waitSeconds);
-                    headlessOnly.Add("--wait-agent");
+                case "--required-deck-size" when i + 1 < args.Length && int.TryParse(args[i + 1], out var size):
+                    requiredDeckSize = size;
                     i++;
                     break;
-                case "--exit-on-end":
-                    exitOnEnd = true;
-                    exitOnEndGiven = true;
-                    headlessOnly.Add("--exit-on-end");
+                case "--disconnect-grace" when i + 1 < args.Length && int.TryParse(args[i + 1], out var grace):
+                    disconnectGrace = TimeSpan.FromSeconds(grace);
+                    i++;
                     break;
-                case "--keep-alive":
-                    exitOnEnd = false;
-                    keepAliveGiven = true;
-                    headlessOnly.Add("--keep-alive");
+                case "--heartbeat" when i + 1 < args.Length && int.TryParse(args[i + 1], out var heartbeatSeconds):
+                    heartbeat = TimeSpan.FromSeconds(heartbeatSeconds);
+                    i++;
                     break;
-                case "--log-seat-views":
-                    logSeatViews = true;
-                    headlessOnly.Add("--log-seat-views");
+                case "--target-timeout" when i + 1 < args.Length && int.TryParse(args[i + 1], out var targetSeconds):
+                    targetTimeout = TimeSpan.FromSeconds(targetSeconds);
+                    i++;
                     break;
                 case "--allow-debug-writes":
                     allowDebugWrites = true;
+                    break;
+                case "--label" when i + 1 < args.Length:
+                    label = args[++i];
                     break;
                 case "--help":
                     Console.Error.WriteLine(Usage);
                     return new ParseResult(null, 0);
 
-                // 取值型开关的"值缺失/非法"分支（带 when 守卫的 case 不匹配时落到这里）：
-                // 不得静默忽略——参数错误一律在解析阶段退出 1。
+                // 取值型开关的"值缺失/非法"分支：不得静默忽略——参数错误一律在解析阶段退出 1。
                 case "--packs" or "--sandbox" or "--port" or "--parent-pid"
-                    or "--mode" or "--run-dir" or "--seat0" or "--seat1"
-                    or "--seed" or "--deck-rules" or "--wait-agent":
+                    or "--mode" or "--seats" or "--seed" or "--deck-rules"
+                    or "--required-deck-size" or "--disconnect-grace" or "--heartbeat"
+                    or "--target-timeout" or "--label":
                     return Fail($"参数错误：{args[i]} 缺少合法取值。");
             }
-        }
-
-        if (!headless && headlessOnly.Count > 0)
-        {
-            return Fail(
-                "参数错误：无头专属参数需要 --headless：" + string.Join(", ", headlessOnly.Distinct(StringComparer.Ordinal)) + "。");
-        }
-
-        if (headless && exitOnEndGiven && keepAliveGiven)
-        {
-            return Fail("参数错误：--exit-on-end 与 --keep-alive 互斥。");
         }
 
         if (allowDebugWrites && mode != ServerMode.Sandbox)
@@ -278,73 +254,96 @@ internal static class Program
             return Fail("参数错误：--allow-debug-writes 只在 --mode sandbox 下有效。");
         }
 
-        if (headless && seat0 == SeatRole.Agent && seat1 == SeatRole.Agent)
-        {
-            return Fail("参数错误：无头运行需要至少一个 ai 座位（1v1 只有一个 agent 令牌）。");
-        }
-
-        if (headless && runDir is null)
-        {
-            runDir = Path.Combine(
-                Directory.GetCurrentDirectory(),
-                ".orc-run",
-                DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"));
-        }
-
-        // 运行目录与沙盒写根语义不混：日志一律落 --run-dir；沙盒写根未显式给出时派生 <run-dir>/sandbox。
-        if (headless && !sandboxGiven && runDir is not null)
-        {
-            sandbox = Path.Combine(runDir, "sandbox");
-        }
-
-        if (headless)
-        {
-            // 无头专属语义：lenient 默认放宽张数（与 DeckRules 三档同源）；显式 strict 保持生产口径。
-            if (!deckRulesGiven)
-            {
-                deckRules = DeckRuleTier.Lenient;
-            }
-        }
-        else
-        {
-            deckRules = DeckRuleTier.Strict;
-        }
-
-        var roles = new[] { seat0, seat1 };
         var options = new ServerOptions
         {
             PackDirectories = packs,
             SandboxRoot = sandbox,
             Port = port,
             ParentProcessId = parentPid,
-            Headless = headless,
             Mode = mode,
-            RunDir = runDir,
-            SeatRoles = roles,
+            Seats = seats,
             Seed = seed,
             DeckRules = deckRules,
-            WaitAgent = waitAgent,
-            ExitOnEnd = headless && exitOnEnd,
-            LogSeatViews = logSeatViews,
+            EnforceDeckRules = deckRules != DeckRuleTier.None,
+            RequiredDeckSize = requiredDeckSize,
+            DisconnectGrace = disconnectGrace,
+            HeartbeatTimeout = heartbeat,
+            TargetSelectionTimeout = targetTimeout,
             AllowDebugWrites = allowDebugWrites,
+            Label = label,
         };
 
         return new ParseResult(options, null);
     }
 
-    private static bool TryParseRole(string value, out SeatRole role)
+    /// <summary>
+    /// 解析 <c>--seats</c>：<c>[{"kind":"ai","packages":[],"deck":[…],"displayName":"…"},{"kind":"agent"}]</c>。
+    /// 未给出/元素缺失＝<c>agent</c> 空座。
+    /// </summary>
+    private static bool TryParseSeats(string json, List<SeatConfig> seats, out string? error)
     {
-        switch (value)
+        error = null;
+        try
         {
-            case "ai":
-                role = SeatRole.Ai;
-                return true;
-            case "agent":
-                role = SeatRole.Agent;
-                return true;
-            default:
-                role = SeatRole.Ai;
+            if (JsonNode.Parse(json) is not JsonArray array)
+            {
+                error = "需要 JSON 数组";
                 return false;
+            }
+
+            if (array.Count != 2)
+            {
+                error = $"seat 数恒为 2（收到 {array.Count}）";
+                return false;
+            }
+
+            seats.Clear();
+            foreach (var node in array)
+            {
+                var kindText = node?["kind"]?.GetValue<string>() ?? "agent";
+                var kind = kindText switch
+                {
+                    "ai" => SeatKind.Ai,
+                    "agent" or "human" => SeatKind.Agent,
+                    _ => (SeatKind?)null,
+                };
+
+                if (kind is null)
+                {
+                    error = $"seat.kind 只接受 ai|agent（收到 '{kindText}'）";
+                    return false;
+                }
+
+                var packages = node?["packages"] is JsonArray packageArray
+                    ? packageArray.Select(PackageRef.From).Where(p => p is not null).Select(p => p!).ToArray()
+                    : null;
+
+                var deck = node?["deck"] is JsonArray deckArray
+                    ? deckArray.Select(item => item?.GetValue<string>()).Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id!).ToArray()
+                    : null;
+
+                DeckConfigPayload? deckConfig = null;
+                if (node?["deckConfig"] is JsonObject config)
+                {
+                    deckConfig = new DeckConfigPayload(
+                        config["mainFaction"]?.GetValue<string>(),
+                        config["allyFaction"]?.GetValue<string>());
+                }
+
+                seats.Add(new SeatConfig(
+                    kind.Value,
+                    node?["displayName"]?.GetValue<string>(),
+                    packages,
+                    deck,
+                    deckConfig));
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException)
+        {
+            error = ex.Message;
+            return false;
         }
     }
 

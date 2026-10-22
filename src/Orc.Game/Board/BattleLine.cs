@@ -1,139 +1,167 @@
-using System.Collections;
-using Orc.Core;
-using Orc.Game.Cards;
-using Orc.Game.Players;
+using Orc.Cards;
 
 namespace Orc.Game.Board;
 
 /// <summary>
-/// 战线（2A 槽位模型）：固定容量槽位序列（容量 5/5/5；按索引 0..N-1）。
-/// 读面：容量 / 槽位序列（实现 <see cref="IReadOnlyList{T}"/>；索引越界＝明确错误、不静默）；
-/// 「整线空槽枚举」可经槽位序列读面派生（不单列）。
-/// 部署主查询 GetInsertionGaps 提供全部阵型插入边界（含 HQ），底层槽位仅承载最终位置；
-/// GetAdjacentEmptySlots 保留为旧槽位模型的查询，不再决定预打出部署候选。
-/// 〔移动候选口径（终态）：指挥移动＝仅推进、候选＝前线空槽；无后撤/横移候选——不在本查询范围。〕
+/// 阵线（有序单位列表模型）：元素＝HQ 与单位，**顺序即位置**；容量限制元素总数（默认 5，HQ 计入）。
+/// <para>可插入位置＝N 个元素之间的 N+1 个空隙（含首尾两端），满员＝无空隙；空隙是临时生成的
+/// <see cref="FormationGap"/>（快照失效即拒绝），阵线本身不保存任何"空格"。</para>
+/// <para>插入**不居中重排**：元素保持插入后的相对顺序，因此 HQ 可以在最左、中间或最右。</para>
 /// </summary>
-public sealed class BattleLine : IReadOnlyList<Slot>
+public sealed class BattleLine
 {
-    private readonly Slot[] _slots;
-    private object?[]? _gapPositions;
+    private readonly List<Card> _members = new();
+    private readonly string _name;
+    private long _generation;
+    private Card[]? _gapSnapshot;
     private IReadOnlyList<FormationGap> _gaps = Array.Empty<FormationGap>();
-    private long _gapGeneration;
 
-    /// <summary>N occupied entities offer N+1 insertion gaps, until capacity is full.
-    /// Unchanged queries reuse identities; occupancy changes invalidate every old candidate.</summary>
-    public IReadOnlyList<FormationGap> GetInsertionGaps()
-    {
-        var positions = _slots.Select(s => s.Occupant).ToArray();
-        if (_gapPositions is not null && positions.SequenceEqual(_gapPositions)) return _gaps;
-        foreach (var gap in _gaps) gap.Destroy();
-        _gapPositions = positions; _gapGeneration++;
-        var occupants = positions.OfType<Entity>().ToArray();
-        if (occupants.Length != positions.Count(p => p is not null)
-            || occupants.Length >= Capacity || occupants.Any(e => e is not UnitCard && e is not Hq))
-            return _gaps = Array.Empty<FormationGap>();
-        return _gaps = Array.AsReadOnly(Enumerable.Range(0, occupants.Length + 1)
-            .Select(i => new FormationGap(this, _gapGeneration, i, positions,
-                i > 0 ? occupants[i - 1] : null, i < occupants.Length ? occupants[i] : null)).ToArray());
-    }
-
-    internal bool IsCurrent(FormationGap gap) => ReferenceEquals(gap.Line, this)
-        && gap.Generation == _gapGeneration && _gaps.Contains(gap)
-        && _slots.Select(s => s.Occupant).SequenceEqual(gap.Positions)
-        && _slots.Any(s => s.IsEmpty);
-
-    /// <summary>Engine-only layout commit after play validation. All existing entities retain order;
-    /// positions (including HQ) are updated together before any deployment signal is emitted.</summary>
-    internal bool TryOpenGap(FormationGap gap, out Slot slot)
-    {
-        slot = null!;
-        if (!gap.IsCurrent) return false;
-        var occupants = gap.Positions.OfType<Entity>().ToArray();
-        if (occupants.Any(e => e is UnitCard u && (!u.TryGetData<UnitStateData>(out var state)
-                || !ReferenceEquals(state.Position?.Occupant, u) || state.IsDestroyed))) return false;
-        var start = (Capacity - occupants.Length - 1) / 2;
-        foreach (var position in _slots) position.Clear();
-        for (var i = 0; i < occupants.Length; i++)
-        {
-            var destination = _slots[start + i + (i >= gap.Ordinal ? 1 : 0)];
-            destination.Place(occupants[i]);
-            if (occupants[i] is UnitCard unit) unit.GetData<UnitStateData>().Position = destination;
-            else if (occupants[i] is Hq hq) hq.AttachToSlot(destination);
-        }
-        slot = _slots[start + gap.Ordinal];
-        return true;
-    }
-
-    /// <summary>创建固定容量战线（槽位随创建生成、索引固定）。</summary>
-    /// <param name="capacity">容量（须为正整数）。</param>
-    /// <param name="lineName">线名（2B 加性可选参数：用于槽位引用形态的命名，如「玩家A支援线[1]」；缺省＝「战线」）。</param>
+    /// <summary>创建阵线。</summary>
+    /// <param name="capacity">元素容量（单位＋HQ 总数上限；须为正整数）。</param>
+    /// <param name="lineName">线名（用于诊断与空隙命名；缺省＝「战线」）。</param>
     /// <exception cref="ArgumentOutOfRangeException">capacity 非正整数。</exception>
     public BattleLine(int capacity, string? lineName = null)
     {
         if (capacity < 1)
         {
-            throw new ArgumentOutOfRangeException(nameof(capacity), capacity, "战线容量须为正整数（≥1）。");
+            throw new ArgumentOutOfRangeException(nameof(capacity), capacity, "阵线容量须为正整数（≥1）。");
         }
 
-        var resolvedLineName = string.IsNullOrWhiteSpace(lineName) ? "战线" : lineName;
-        _slots = new Slot[capacity];
-        for (var i = 0; i < capacity; i++)
-        {
-            _slots[i] = new Slot(i, resolvedLineName);
-        }
+        Capacity = capacity;
+        _name = string.IsNullOrWhiteSpace(lineName) ? "战线" : lineName;
     }
 
-    /// <summary>容量（槽位数；4/5/4 配置承载）。</summary>
-    public int Capacity => _slots.Length;
+    /// <summary>容量（元素数上限；HQ 计入）。</summary>
+    public int Capacity { get; }
 
-    /// <summary>槽位数量（＝容量）。</summary>
-    public int Count => _slots.Length;
+    /// <summary>线名。</summary>
+    public string Name => _name;
 
-    /// <summary>按索引访问槽位。</summary>
+    /// <summary>当前元素序列（从左到右；只读快照视图）。</summary>
+    public IReadOnlyList<Card> Members => _members;
+
+    /// <summary>元素数（＝<see cref="Members"/> 数量，**不是**容量）。</summary>
+    public int Size => _members.Count;
+
+    /// <summary>是否已满（元素数＝容量）。</summary>
+    public bool IsFull => _members.Count >= Capacity;
+
+    /// <summary>按位置序号取元素。</summary>
     /// <exception cref="ArgumentOutOfRangeException">index 越界（明确错误、不静默）。</exception>
-    public Slot this[int index]
+    public Card this[int index]
     {
         get
         {
-            if (index < 0 || index >= _slots.Length)
+            if (index < 0 || index >= _members.Count)
             {
-                throw new ArgumentOutOfRangeException(nameof(index), index, $"槽位索引越界（合法范围：0..{_slots.Length - 1}）。");
+                throw new ArgumentOutOfRangeException(nameof(index), index, $"位置序号越界（合法范围：0..{_members.Count - 1}）。");
             }
 
-            return _slots[index];
+            return _members[index];
         }
+    }
+
+    /// <summary>元素位置序号（不在线上＝-1）。</summary>
+    /// <exception cref="ArgumentNullException">card 为 null。</exception>
+    public int IndexOf(Card card)
+    {
+        ArgumentNullException.ThrowIfNull(card);
+        return _members.IndexOf(card);
+    }
+
+    /// <summary>元素是否在该线上。</summary>
+    /// <exception cref="ArgumentNullException">card 为 null。</exception>
+    public bool Contains(Card card)
+    {
+        ArgumentNullException.ThrowIfNull(card);
+        return _members.Contains(card);
     }
 
     /// <summary>
-    /// 旧模型邻位空槽查询（不是当前预打出部署候选）：遍历所有被占槽位（含 HQ），取其左右相邻槽位中的空槽、
-    /// 去重、按槽位索引升序（端点越界侧跳过）；无被占槽位或无空邻位＝空列表。
-    /// 〔移动候选（指挥）＝前线空槽；无后撤/横移候选——见指挥侧，不在本查询范围。〕
+    /// 当前全部可插入空隙（N 个元素 ⇒ N+1 个，含首尾两端；满员＝空）。
+    /// 快照不变＝复用同一批实例；占用变化＝旧实例销毁并重建（<see cref="FormationGap.IsCurrent"/> 由此失效）。
     /// </summary>
-    public IReadOnlyList<Slot> GetAdjacentEmptySlots()
+    public IReadOnlyList<FormationGap> GetInsertionGaps()
     {
-        var result = new List<Slot>();
-        for (var i = 0; i < _slots.Length; i++)
+        var snapshot = _members.ToArray();
+        if (_gapSnapshot is not null && snapshot.SequenceEqual(_gapSnapshot))
         {
-            var slot = _slots[i];
-            if (!slot.IsEmpty)
-            {
-                continue;
-            }
-
-            var hasOccupiedNeighbor = (i > 0 && !_slots[i - 1].IsEmpty)
-                || (i < _slots.Length - 1 && !_slots[i + 1].IsEmpty);
-
-            if (hasOccupiedNeighbor)
-            {
-                result.Add(slot);
-            }
+            return _gaps;
         }
 
-        return result;
+        foreach (var gap in _gaps)
+        {
+            gap.Destroy();
+        }
+
+        _gapSnapshot = snapshot;
+        _generation++;
+
+        if (snapshot.Length >= Capacity)
+        {
+            return _gaps = Array.Empty<FormationGap>();
+        }
+
+        return _gaps = Array.AsReadOnly(Enumerable.Range(0, snapshot.Length + 1)
+            .Select(i => new FormationGap(this, _generation, i, snapshot,
+                i > 0 ? snapshot[i - 1] : null,
+                i < snapshot.Length ? snapshot[i] : null))
+            .ToArray());
     }
 
-    /// <summary>枚举（索引序）。</summary>
-    public IEnumerator<Slot> GetEnumerator() => ((IEnumerable<Slot>)_slots).GetEnumerator();
+    internal bool IsCurrent(FormationGap gap)
+        => ReferenceEquals(gap.Line, this)
+           && gap.Generation == _generation
+           && _gaps.Contains(gap)
+           && _members.Count < Capacity
+           && _members.SequenceEqual(gap.Positions);
 
-    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    /// <summary>按空隙插入（落地唯一写面；快照失效／已满／序号越界＝false、零变更）。</summary>
+    internal bool TryInsert(FormationGap gap, Card card)
+    {
+        ArgumentNullException.ThrowIfNull(card);
+        if (!IsCurrent(gap) || _members.Contains(card) || gap.Ordinal > _members.Count)
+        {
+            return false;
+        }
+
+        _members.Insert(gap.Ordinal, card);
+        _generation++;
+        return true;
+    }
+
+    /// <summary>按空隙名次插入（加入战场等"显式序号"路径；序号＝插入后的位置）。</summary>
+    internal bool TryInsertAt(int ordinal, Card card)
+    {
+        ArgumentNullException.ThrowIfNull(card);
+        if (_members.Contains(card) || _members.Count >= Capacity || ordinal < 0 || ordinal > _members.Count)
+        {
+            return false;
+        }
+
+        _members.Insert(ordinal, card);
+        _generation++;
+        return true;
+    }
+
+    /// <summary>移除元素（不在线上＝false、零变更）。</summary>
+    internal bool TryRemove(Card card)
+    {
+        ArgumentNullException.ThrowIfNull(card);
+        if (!_members.Remove(card))
+        {
+            return false;
+        }
+
+        _generation++;
+        return true;
+    }
+
+    /// <summary>装配期初始入列（仅对局/战场构造路径使用；不校验空隙）。</summary>
+    internal void AppendInitial(Card card)
+    {
+        ArgumentNullException.ThrowIfNull(card);
+        _members.Add(card);
+        _generation++;
+    }
 }

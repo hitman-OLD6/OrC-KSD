@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "atp.rifleman",
+  "name": "美国步枪兵",
+  "components": [
+    {
+      "component": "typeCategory",
+      "type": [
+        "infantry"
+      ]
+    },
+    {
+      "component": "factionCost",
+      "faction": "usa",
+      "kredits": 0
+    },
+    {
+      "component": "battleStats",
+      "operationCost": 1,
+      "attack": 1,
+      "defense": 2
+    },
+    {
+      "component": "tagData",
+      "rarity": "standard"
+    }
+  ]
+}

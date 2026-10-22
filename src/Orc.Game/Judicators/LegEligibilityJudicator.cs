@@ -51,7 +51,7 @@ public enum LegEligibilityFailure
 internal sealed class LegEligibilityJudicator : Judicator<LegEligibilityJudicator.LegEligibilityRule>
 {
     /// <summary>强类型 delegate（该判定器签名）：（单位, 源位置）→ leg 资格结果（null＝通过）。</summary>
-    public delegate LegEligibilityFailure? LegEligibilityRule(UnitCard unit, Slot? position);
+    public delegate LegEligibilityFailure? LegEligibilityRule(UnitCard unit, BoardPosition? position);
 
     private readonly Func<Player?> _currentPlayerProvider;
     private readonly Battlefield? _battlefield;
@@ -86,7 +86,7 @@ internal sealed class LegEligibilityJudicator : Judicator<LegEligibilityJudicato
     protected override Func<object[]?, object[]?> Adapt(LegEligibilityRule handler)
         => args =>
         {
-            var result = handler(Unpack<UnitCard>(args, 0), Unpack<Slot?>(args, 1));
+            var result = handler(Unpack<UnitCard>(args, 0), Unpack<BoardPosition?>(args, 1));
             return result is { } failure
                 ? new object[] { failure }
                 : new object[] { null! }; // 通过标记：数组元素运行时承载 null（判定器输出约定的合法值）
@@ -96,7 +96,7 @@ internal sealed class LegEligibilityJudicator : Judicator<LegEligibilityJudicato
     public override object[]? Invoke(object[]? args) => Adapt(Evaluate)(args);
 
     /// <summary>leg 资格求值（条件序列单源；短路顺序＝可用性侧现状优先级——逐条与收编前一致）。</summary>
-    private LegEligibilityFailure? Evaluate(UnitCard unit, Slot? position)
+    private LegEligibilityFailure? Evaluate(UnitCard unit, BoardPosition? position)
     {
         var state = unit.GetData<UnitStateData>();
         var command = unit.GetData<CommandData>();

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "atp.amphibious-landing",
+  "name": "两栖登陆",
+  "components": [
+    {
+      "component": "typeCategory",
+      "type": [
+        "order"
+      ]
+    },
+    {
+      "component": "factionCost",
+      "faction": "usa",
+      "kredits": 3
+    },
+    {
+      "component": "tagData",
+      "rarity": "standard"
+    },
+    {
+      "component": "effects",
+      "prefabs": [
+        "atp.amphibious-landing.effect"
+      ]
+    }
+  ]
+}

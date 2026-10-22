@@ -22,7 +22,7 @@ namespace Orc.Game.Judicators;
 internal sealed class MoveRevalidationJudicator : ValidationJudicator
 {
     private readonly MatchLifecycle? _lifecycle;
-    private readonly Func<UnitCard, Slot?, LegEligibilityFailure?> _moveLegEligibility;
+    private readonly Func<UnitCard, BoardPosition?, LegEligibilityFailure?> _moveLegEligibility;
     private readonly Battlefield _battlefield;
     private readonly Func<Player, bool> _moveFrontlineEnemy;
 
@@ -30,7 +30,7 @@ internal sealed class MoveRevalidationJudicator : ValidationJudicator
     /// <exception cref="ArgumentNullException">moveLegEligibility / battlefield / moveFrontlineEnemy 为 null。</exception>
     internal MoveRevalidationJudicator(
         MatchLifecycle? lifecycle,
-        Func<UnitCard, Slot?, LegEligibilityFailure?> moveLegEligibility,
+        Func<UnitCard, BoardPosition?, LegEligibilityFailure?> moveLegEligibility,
         Battlefield battlefield,
         Func<Player, bool> moveFrontlineEnemy)
     {
@@ -64,15 +64,18 @@ internal sealed class MoveRevalidationJudicator : ValidationJudicator
             return ValidationVerdict.Invalid();
         }
 
-        if (!refs[1].IsAlive || refs[1].Value is not Slot oldSlot)
+        if (!refs[1].IsAlive || refs[1].Value is not BoardPosition oldSlot)
         {
             return ValidationVerdict.Invalid();
         }
 
-        if (!refs[2].IsAlive || refs[2].Value is not Slot newSlot)
+        if (!refs[2].IsAlive || refs[2].Value is not BoardPosition newPosition)
         {
             return ValidationVerdict.Invalid();
         }
+
+        // 新位置：目标线＋插入序号（快照语义）。
+        var newSlot = newPosition;
 
         // K3：leg 资格（共享条件源——原内联的 owner/destroyed/can/suppressed/cost/位置〔源∈支援线〕检查迁至
         // leg 条目；复验按 bool 语义消费：非 null＝Invalid；编排保持——leg 整体判定位于 refs/终局/subject 检查之后）。
@@ -83,17 +86,20 @@ internal sealed class MoveRevalidationJudicator : ValidationJudicator
 
         var state = unit.GetData<UnitStateData>();
 
-        // 复验固有：位置一致性（Position==oldSlot——复验兜底语义，非两侧重复项；与共享「位置」检查的相对顺序
-        // 调整（置后）＝值级等价——所有检查无副作用、纯 AND 必要条件，见实现记录申报）。
-        if (!ReferenceEquals(state.Position, oldSlot))
+        // 复验固有：位置一致性（所在线＋序号与载荷一致——复验兜底语义）。
+        if (!ReferenceEquals(state.Line, oldSlot.Line) || state.Line.IndexOf(unit) != oldSlot.Index)
         {
             return ValidationVerdict.Invalid();
         }
 
-        // 仅推进：目标须为前线空槽（move 上下文——调用点单源保留）。
-        if (!CommandMovementRules.Destinations(_battlefield, unit, oldSlot).Contains(newSlot) || !newSlot.IsEmpty)
+        // 仅推进/撤退：目标线须为 Destinations 给出的线，且序号在可插入范围内。
+        var destinationLine = CommandMovementRules.IsRetreat(_battlefield, unit, oldSlot)
+            ? _battlefield.GetSupportLine(unit.Owner!)
+            : _battlefield.FrontLine;
+        if (!ReferenceEquals(newSlot.Line, destinationLine)
+            || newSlot.Index < 0 || newSlot.Index > destinationLine.Size)
         {
-            return ValidationVerdict.Invalid(); // 目标须为前线空槽
+            return ValidationVerdict.Invalid();
         }
 
         // K3：推进前置（经 move.frontline-enemy 条目——与可用性侧单源；owner 非 null 由 leg 资格保证）。

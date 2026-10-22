@@ -121,7 +121,7 @@ public class DiyExample07_TargetingForbidTests
         var playerB = match.Players[1];
         var guarded = playerA.Hand.OfType<UnitCard>()
             .First(card => match.CardService.TryResolveDefinitionId(card, out var id) && id == unitId);
-        var slot = match.Battlefield.GetSupportLine(playerA).First(candidate => candidate.IsEmpty);
+        var slot = match.Battlefield.GetSupportLine(playerA).GetInsertionGaps()[0];
         var joined = await match.PlayManager.JoinUnitAsync(guarded, slot);
         Assert.Equal(PlayResultStatus.Success, joined.Status);
 

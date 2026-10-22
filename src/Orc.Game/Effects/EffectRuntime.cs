@@ -140,9 +140,9 @@ public sealed partial class EffectRuntime
         var units = new List<Card>();
         foreach (var line in new[] { battlefield.PlayerASupportLine, battlefield.PlayerBSupportLine, battlefield.FrontLine })
         {
-            foreach (var slot in line)
+            foreach (var slot in line.Members)
             {
-                if (slot.Occupant is Orc.Game.Cards.CardBase unit && ReferenceEquals(unit.Owner, owner))
+                if (slot is Orc.Game.Cards.CardBase unit && ReferenceEquals(unit.Owner, owner))
                 {
                     units.Add(unit);
                 }
@@ -313,7 +313,7 @@ public sealed partial class EffectRuntime
     }
 
     private static bool IsBattleReady(UnitCard unit)
-        => unit.TryGetData<UnitStateData>(out var state) && !state.IsDestroyed && state.Position is not null;
+        => unit.TryGetData<UnitStateData>(out var state) && !state.IsDestroyed && state.Line is not null;
 
     /// <summary>属性修饰（攻击力/防御力增减；来源＝本门面实例——撤销请经 <c>RemoveBySourceAsync</c>）。</summary>
     /// <param name="duration">期限（E1-41；<see cref="EffectDuration.Permanent"/>＝随效果存续）。</param>
@@ -1028,9 +1028,9 @@ public sealed partial class EffectRuntime
         var battlefield = environment.Battlefield;
         foreach (var line in new[] { battlefield.PlayerASupportLine, battlefield.PlayerBSupportLine, battlefield.FrontLine })
         {
-            foreach (var slot in line)
+            foreach (var slot in line.Members)
             {
-                if (slot.Occupant is UnitCard unit)
+                if (slot is UnitCard unit)
                 {
                     yield return unit;
                 }

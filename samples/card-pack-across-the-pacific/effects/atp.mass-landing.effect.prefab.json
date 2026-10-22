@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 3,
+  "root": {
+    "id": "atp.mass-landing.effect",
+    "version": 1,
+    "oneShot": false,
+    "mainTrigger": {
+      "id": "t.main",
+      "stableKey": "跨越海洋·大规模登陆",
+      "kind": "passive",
+      "viewType": "Orc.Cards.CardEventView",
+      "hooks": [
+        "card.played"
+      ],
+      "events": [
+        {
+          "id": "onEvent",
+          "entry": "HandleAsync",
+          "csx": "Func<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n\n    if (view.Host is not Orc.Cards.Card self || view.Card is not Orc.Cards.Card played) { return; }\n    if (!object.ReferenceEquals(played, self)) { return; }\n\n    var service = Orc.Game.MatchCardService.ResolveFor(self);\n    var random = Orc.Game.MatchRandomService.ResolveFor(self);\n    if (service is null || random is null) { return; }\n\n    Func<Orc.Cards.Card, Orc.Game.Players.Player?> ownerOf = c =>\n    {\n        if (c is Orc.Game.Players.Hq hq) { return hq.Owner; }\n        if (c is Orc.Game.Cards.CardBase cb) { return cb.Owner; }\n        return null;\n    };\n\n    Func<Orc.Game.Cards.UnitCard, bool> onField = u =>\n        u.TryGetData<Orc.Game.Cards.UnitStateData>(out var st) && !st.IsDestroyed && st.Position is not null;\n\n    Func<Orc.Game.Cards.UnitCard, bool> isInfantry = u =>\n    {\n        foreach (var t in u.Definition.UnitTypes)\n        {\n            if (string.Equals(t, \"infantry\", System.StringComparison.OrdinalIgnoreCase)) { return true; }\n        }\n        return false;\n    };\n\n    Func<Orc.Game.Cards.UnitCard, bool> onFrontLine = u =>\n    {\n        if (!u.TryGetData<Orc.Game.Cards.UnitStateData>(out var st) || st.IsDestroyed || st.Position is null)\n        {\n            return false;\n        }\n        return st.Position.Name.Contains(\"前线\", System.StringComparison.Ordinal);\n    };\n\n    var owner = ownerOf(self);\n    if (owner is null) { return; }\n\n    // 候选：花费 <=3 的美国步兵定义。\n    var candidates = new System.Collections.Generic.List<string>();\n    foreach (var pair in service.RegisteredDefinitions)\n    {\n        var def = pair.Value;\n        if (!string.Equals(def.Category, \"unit\", System.StringComparison.Ordinal)) { continue; }\n        if (!string.Equals(def.Faction, \"usa\", System.StringComparison.OrdinalIgnoreCase)) { continue; }\n        if (def.DeployCost > 3) { continue; }\n\n        var isInf = false;\n        foreach (var t in def.UnitTypes)\n        {\n            if (string.Equals(t, \"infantry\", System.StringComparison.OrdinalIgnoreCase)) { isInf = true; break; }\n        }\n\n        if (isInf) { candidates.Add(pair.Key); }\n    }\n\n    if (candidates.Count == 0) { return; }\n\n    // 固定 4 张（同名可重复——随机取自候选定义）。\n    for (var i = 0; i < 4; i++)\n    {\n        var definitionId = random.PickOne(candidates);\n        await service.CreateAndPlaceToAdjacentAsync(\n            definitionId,\n            owner,\n            slots => slots.Count == 0 ? null : slots[0],\n            ct);\n    }\n};\n",
+          "version": 1
+        }
+      ],
+      "version": 1
+    },
+    "otherTriggers": [],
+    "wrappers": [],
+    "injects": []
+  }
+}

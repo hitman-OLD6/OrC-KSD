@@ -50,9 +50,9 @@ internal sealed class MoveFrontlineEnemyJudicator : Judicator<MoveFrontlineEnemy
             return false;
         }
 
-        foreach (var slot in _battlefield.FrontLine)
+        foreach (var member in _battlefield.FrontLine.Members)
         {
-            if (slot.Occupant is UnitCard unit && !IsDead(unit) && ReferenceEquals(unit.Owner, enemy))
+            if (member is UnitCard unit && !IsDead(unit) && ReferenceEquals(unit.Owner, enemy))
             {
                 return true;
             }

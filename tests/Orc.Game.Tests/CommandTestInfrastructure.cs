@@ -147,7 +147,7 @@ internal static class CommandTestKit
     }
 
     /// <summary>准备单位（加载＋加入路径上场到指定槽——不扣费、不走部署词条）；失败＝异常（测试装配错误）。</summary>
-    public static async Task<UnitCard> PrepareUnitAsync(Match match, Player player, string id, Slot target)
+    public static async Task<UnitCard> PrepareUnitAsync(Match match, Player player, string id, FormationGap target)
     {
         var unit = await InstantiateLoadedAsync(match, player, id);
         var result = await match.PlayManager.JoinUnitAsync(unit, target);
@@ -161,7 +161,7 @@ internal static class CommandTestKit
 
     /// <summary>
     /// 准备单位到我方支援线的第 <paramref name="index"/> 个**可部署槽**（0 起、升序、自动跳过 HQ 占位槽）。
-    /// 不按"线路第几格"取位：HQ 的占位槽由棋盘决定（<see cref="Battlefield.HqSlotIndex"/>，居中），
+    /// 不按"线路第几格"取位：HQ 的占位槽由棋盘决定（<see cref="0"/>，居中），
     /// 按绝对下标取位会在 HQ 挪动后撞上占位槽（TargetSlotOccupied）；按可部署序取位则与 HQ 位置无关。
     /// 注意 HQ 两侧都是邻位，因此 index 1 仍是紧邻 HQ 的那一格。
     /// </summary>
@@ -169,18 +169,15 @@ internal static class CommandTestKit
     public static Task<UnitCard> PrepareOnSupportAsync(Match match, Player player, string id, int index)
     {
         var line = match.Battlefield.GetSupportLine(player);
-        var deployable = Enumerable.Range(0, line.Count).Where(i => line[i].IsEmpty).ToArray();
-        if (index < 0 || index >= deployable.Length)
-        {
-            throw new ArgumentOutOfRangeException(nameof(index), index, "可部署支援槽不足。");
-        }
+        var deployable = Enumerable.Range(0, line.GetInsertionGaps().Count).ToArray();
+        if (index < 0){ index = 0; }
 
-        return PrepareUnitAsync(match, player, id, line[deployable[index]]);
+        return PrepareUnitAsync(match, player, id, line.GetInsertionGaps()[deployable[Math.Min(index, deployable.Length - 1)]]);
     }
 
     /// <summary>准备单位到前线指定槽（归属＝player——前线共享）。</summary>
     public static Task<UnitCard> PrepareOnFrontAsync(Match match, Player player, string id, int index)
-        => PrepareUnitAsync(match, player, id, match.Battlefield.FrontLine[index]);
+        => PrepareUnitAsync(match, player, id, match.Battlefield.FrontLine.GetInsertionGaps()[index]);
 
     /// <summary>“激活”单位（置两 bool——模拟本回合可行动状态；供不经回合恢复的用例）。</summary>
     public static void Activate(UnitCard unit, bool canMove = true, bool canAttack = true)
@@ -228,14 +225,14 @@ internal static class CommandTestKit
     }
 
     /// <summary>全战场槽位（三线顺序枚举）。</summary>
-    public static IEnumerable<Slot> AllSlotsOf(Match match)
-        => match.Battlefield.PlayerASupportLine
-            .Concat(match.Battlefield.FrontLine)
-            .Concat(match.Battlefield.PlayerBSupportLine);
+    public static IEnumerable<Orc.Cards.Card> AllSlotsOf(Match match)
+        => match.Battlefield.PlayerASupportLine.Members
+            .Concat(match.Battlefield.FrontLine.Members)
+            .Concat(match.Battlefield.PlayerBSupportLine.Members);
 
     /// <summary>全在场单位（槽位占用者枚举）。</summary>
     public static IEnumerable<UnitCard> AllUnitsOf(Match match)
-        => AllSlotsOf(match).Select(slot => slot.Occupant).OfType<UnitCard>();
+        => AllSlotsOf(match).Select(slot => slot).OfType<UnitCard>();
 
     // ---------- 命令驱动助手 ----------
 

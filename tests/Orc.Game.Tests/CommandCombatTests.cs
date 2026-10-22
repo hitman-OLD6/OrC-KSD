@@ -215,7 +215,7 @@ public class CommandCombatTests
         CommandTestKit.Activate(attacker);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         using var recorder = new UpdateRecorder(match.Engine);
-        var targetSlot = match.Battlefield.FrontLine[0];
+        var targetSlot = match.Battlefield.FrontLine.GetInsertionGaps()[0];
 
         var result = await CommandTestKit.RunCommandAsync(match, bridge, attacker, target.Ref);
 
@@ -225,9 +225,9 @@ public class CommandCombatTests
         // 「先数值变化、后死亡信号」：被攻击者的 sc（外部订阅通知）先于 card.died（防御归零的统一死亡衔接——总线触发器阶段），
         // 攻击者的 sc 随后；恰一次死亡。
         Assert.Equal(CommandResultStatus.Success, result.Status);
-        Assert.True(targetSlot.IsEmpty);
+        Assert.True(targetSlot.IsEmpty());
         Assert.True(target.GetData<UnitStateData>().IsDestroyed);
-        Assert.Null(target.GetData<UnitStateData>().Position);
+        Assert.Null(target.GetData<UnitStateData>().Line);
         Assert.True(target.Ref.IsAlive); // 实例保留（不销毁）——可查询
         Assert.Equal(
             new[]
@@ -297,7 +297,7 @@ public class CommandCombatTests
         Assert.Equal(30, mega.GetData<UnitStateData>().Defense);
         Assert.Equal(MatchState.Ended, match.State);
         Assert.Same(playerA, match.Winner);
-        Assert.Same(enemyHq, match.Battlefield.PlayerBSupportLine[Battlefield.HqSlotIndex].Occupant); // HQ 占位不变（占位者＝HQ 实体）
+        Assert.Same(enemyHq, match.Battlefield.PlayerBSupportLine.GetInsertionGaps()[0]); // HQ 占位不变（占位者＝HQ 实体）
         Assert.Equal(0, playerA.Points); // 当次收尾照常：扣费恰一次
         Assert.False(mega.GetData<CommandData>().CanAttack); // 清位照常
         Assert.False(mega.GetData<CommandData>().CanMove);

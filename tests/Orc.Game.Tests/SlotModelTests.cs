@@ -6,120 +6,136 @@ using Xunit;
 namespace Orc.Game.Tests;
 
 /// <summary>
-/// 2A 验收锚点⑥（战线槽位模型）：三线槽位化（容量 5/5/5）；HQ 初始占位（支援线居中槽 Battlefield.HqSlotIndex、占容量格；前线不占）；
-/// 邻位动态计算（含 HQ 被占位、重叠去重、索引升序稳定、端点越界侧跳过）；槽位读面（索引/占用者/是否空；类型可判）；
-/// 越界明确错误；「整线空槽枚举」经槽位序列读面派生（不单列）。
+/// 阵线**有序单位列表**模型锚点（原槽位模型已退场）：
+/// 元素顺序即位置、容量按元素数（HQ 计入）、插入不居中重排、可插入位置＝N+1 个临时空隙（含首尾）、满员＝无空隙。
 /// </summary>
 public class SlotModelTests
 {
-    private static UnitCard CreateUnit(LogicEngine engine)
-        => new(engine, new CardDefinition("单位", 1, 2, 3, 4, faction: Faction.Germany, rarity: Rarity.Standard));
+    private static UnitCard CreateUnit(LogicEngine engine, string name = "单位")
+        => new(engine, new CardDefinition(name, 1, 2, 3, 4, faction: Faction.Germany, rarity: Rarity.Standard));
 
     [Fact]
-    public void Slot_Read_Surface_Exposes_Index_Occupant_And_Emptiness()
+    public async Task Empty_Line_Offers_Single_Gap_And_Zero_Elements()
     {
-        var line = new BattleLine(4);
-        Assert.Equal(4, line.Count);
-        Assert.Equal(4, line.Capacity);
+        var match = GameTestData.CreateStandardMatch(seed: 42);
+        await match.Initialize();
 
-        for (var i = 0; i < line.Count; i++)
-        {
-            Assert.Equal(i, line[i].Index);
-            Assert.Null(line[i].Occupant);
-            Assert.True(line[i].IsEmpty);
-        }
+        var frontLine = match.Battlefield.FrontLine;
+        Assert.Equal(5, frontLine.Capacity);
+        Assert.Equal(0, frontLine.Size);
+        Assert.Single(frontLine.GetInsertionGaps());
+        Assert.Equal(0, frontLine.GetInsertionGaps()[0].Ordinal);
     }
 
     [Fact]
-    public void Place_And_Clear_Are_Guarded_And_Occupant_Type_Is_Distinguishable()
-    {
-        var line = new BattleLine(2);
-        var slot = line[0];
-        var unit = CreateUnit(new LogicEngine());
-
-        slot.Place(unit);
-        Assert.False(slot.IsEmpty);
-        var occupant = slot.Occupant;
-        Assert.IsType<UnitCard>(occupant); // 占用者「单位」＝对象类型可判（单位卡实例）
-
-        Assert.Throws<InvalidOperationException>(() => slot.Place(new object())); // 已占＝明确拒绝（放置仅空槽）
-
-        slot.Clear();
-        Assert.True(slot.IsEmpty);
-        slot.Clear(); // 幂等：已空＝无操作、不抛错
-
-        Assert.Throws<ArgumentNullException>(() => slot.Place(null!)); // null 占用者被拒绝
-    }
-
-    [Fact]
-    public void Index_Out_Of_Range_And_Invalid_Capacity_Are_Explicit_Errors()
-    {
-        var line = new BattleLine(4);
-        Assert.Throws<ArgumentOutOfRangeException>(() => _ = line[-1]);
-        Assert.Throws<ArgumentOutOfRangeException>(() => _ = line[4]);
-        Assert.Throws<ArgumentOutOfRangeException>(() => new BattleLine(0));
-    }
-
-    [Fact]
-    public void Adjacent_Candidates_Of_Empty_Line_Are_Empty()
-    {
-        var line = new BattleLine(5);
-        Assert.Empty(line.GetAdjacentEmptySlots()); // 无被占槽位＝无候选
-    }
-
-    [Fact]
-    public void Adjacent_Candidates_Extend_From_Single_Occupant_And_Skip_Out_Of_Range()
-    {
-        var line = new BattleLine(3);
-        line[0].Place(new object()); // 端点被占：越界侧（左）跳过
-        Assert.Equal(new[] { 1 }, line.GetAdjacentEmptySlots().Select(s => s.Index));
-    }
-
-    [Fact]
-    public void Adjacent_Candidates_Merge_Overlaps_And_Keep_Ascending_Order()
-    {
-        var line = new BattleLine(4);
-        line[0].Place(new object());
-        line[2].Place(new object());
-        // 槽 1 同时为 0 的右邻与 2 的左邻（重叠去重、只出现一次）；槽 3 为 2 的右邻；结果按索引升序
-        Assert.Equal(new[] { 1, 3 }, line.GetAdjacentEmptySlots().Select(s => s.Index));
-    }
-
-    [Fact]
-    public async Task Adjacent_Candidates_Include_HQ_Occupancy_And_All_Three_Lines_Are_Slotted()
+    public async Task Hq_Starts_At_Leftmost_Position()
     {
         var match = GameTestData.CreateStandardMatch(seed: 42);
         await match.Initialize();
 
         var lineA = match.Battlefield.PlayerASupportLine;
-        var frontLine = match.Battlefield.FrontLine;
         var lineB = match.Battlefield.PlayerBSupportLine;
 
-        // 三线槽位化：容量 5/5/5
-        Assert.Equal(5, lineA.Capacity);
-        Assert.Equal(5, frontLine.Capacity);
-        Assert.Equal(5, lineB.Capacity);
-
-        // HQ 占位：支援线居中槽＝对应玩家的总部实体（占容量格——恰 1 格被占、余 4 格空）；前线 0 占位
-        Assert.Same(match.Players[0].Hq, lineA[Battlefield.HqSlotIndex].Occupant);
-        Assert.Same(match.Players[1].Hq, lineB[Battlefield.HqSlotIndex].Occupant);
-        Assert.Single(lineA, slot => !slot.IsEmpty);
-        Assert.Single(lineB, slot => !slot.IsEmpty);
-        Assert.All(frontLine, slot => Assert.True(slot.IsEmpty));
-
-        // 邻位候选（含 HQ 被占位）：HQ 居中 → 两侧邻位都候选＝[1,3]；前线（无被占）＝[]
-        Assert.Equal(new[] { 1, 3 }, lineA.GetAdjacentEmptySlots().Select(s => s.Index));
-        Assert.Equal(new[] { 1, 3 }, lineB.GetAdjacentEmptySlots().Select(s => s.Index));
-        Assert.Empty(frontLine.GetAdjacentEmptySlots());
+        Assert.Equal(1, lineA.Size);
+        Assert.Same(match.Players[0].Hq, lineA[0]);
+        Assert.Same(match.Players[1].Hq, lineB[0]);
+        Assert.Equal(0, Battlefield.IndexOfHq(lineA));
+        Assert.Equal(0, Battlefield.IndexOfHq(lineB));
     }
 
     [Fact]
-    public void Empty_Slot_Enumeration_Is_Derivable_From_Slot_Sequence()
+    public async Task Insert_Keeps_Order_Without_Centering()
     {
+        var match = GameTestData.CreateStandardMatch(seed: 42);
+        await match.Initialize();
+
+        var line = match.Battlefield.PlayerASupportLine;
+        var unit = CreateUnit(match.Engine, "甲");
+
+        // 插到 HQ 右侧（位置 1）——HQ 保持在最左，不被居中重排。
+        Assert.True(line.TryInsertAt(1, unit));
+        Assert.Equal(2, line.Size);
+        Assert.Same(match.Players[0].Hq, line[0]);
+        Assert.Same(unit, line[1]);
+        Assert.Equal(1, line.IndexOf(unit));
+
+        // 再插到最左——新元素占据 0，HQ 与甲顺移到 1/2。
+        var left = CreateUnit(match.Engine, "乙");
+        Assert.True(line.TryInsertAt(0, left));
+        Assert.Same(left, line[0]);
+        Assert.Same(match.Players[0].Hq, line[1]);
+        Assert.Same(unit, line[2]);
+    }
+
+    [Fact]
+    public async Task Hq_Leftmost_With_Four_Units_Is_Full_And_Has_No_Gap()
+    {
+        var match = GameTestData.CreateStandardMatch(seed: 42);
+        await match.Initialize();
+
+        var line = match.Battlefield.PlayerASupportLine;
+        for (var i = 0; i < 4; i++)
+        {
+            Assert.True(line.TryInsertAt(line.Size, CreateUnit(match.Engine, $"单位{i}")));
+        }
+
+        Assert.Equal(5, line.Size);
+        Assert.Equal(0, Battlefield.IndexOfHq(line)); // HQ 仍在最左
+        Assert.True(line.IsFull);
+        Assert.Empty(line.GetInsertionGaps());
+    }
+
+    [Fact]
+    public async Task Old_Gap_Becomes_Stale_After_Insert()
+    {
+        var match = GameTestData.CreateStandardMatch(seed: 42);
+        await match.Initialize();
+
+        var line = match.Battlefield.PlayerASupportLine;
+        var gap = line.GetInsertionGaps()[1];
+        Assert.True(gap.IsCurrent);
+
+        Assert.True(line.TryInsertAt(1, CreateUnit(match.Engine, "先入")));
+        Assert.False(gap.IsCurrent);
+        Assert.False(line.TryInsert(gap, CreateUnit(match.Engine, "后入"))); // 旧候选被拒绝
+    }
+
+    [Fact]
+    public async Task Gaps_Are_Reused_While_Snapshot_Unchanged()
+    {
+        var match = GameTestData.CreateStandardMatch(seed: 42);
+        await match.Initialize();
+
+        var line = match.Battlefield.PlayerASupportLine;
+        var first = line.GetInsertionGaps();
+        var second = line.GetInsertionGaps();
+
+        Assert.Equal(first.Count, second.Count);
+        Assert.Same(first[0], second[0]); // 占用未变＝复用同一批实例
+    }
+
+    [Fact]
+    public async Task BoardPosition_Reports_Occupant_And_Index()
+    {
+        var match = GameTestData.CreateStandardMatch(seed: 42);
+        await match.Initialize();
+
+        var line = match.Battlefield.PlayerASupportLine;
+        var position = new BoardPosition(line, 0);
+
+        Assert.Same(match.Players[0].Hq, position.Occupant);
+        Assert.Equal(0, position.Index);
+        Assert.NotNull(position.Ref);
+    }
+
+    [Fact]
+    public void Invalid_Capacity_And_Index_Are_Explicit_Errors()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BattleLine(0));
+
         var line = new BattleLine(4);
-        line[0].Place(new object());
-        // 整线空槽枚举＝槽位序列读面派生（不单列）
-        var emptyIndexes = line.Where(slot => slot.IsEmpty).Select(slot => slot.Index).ToArray();
-        Assert.Equal(new[] { 1, 2, 3 }, emptyIndexes);
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = line[0]); // 空线：任何位置越界
+        Assert.False(line.TryInsertAt(1, CreateUnit(new LogicEngine()))); // 序号越界＝false、零变更
+        Assert.Equal(0, line.Size);
     }
 }

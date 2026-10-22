@@ -119,4 +119,33 @@ public static class McpCodes
 
     /// <summary>卡组不合法（张数/卡池/同名上限/配国）。</summary>
     public const string DeckInvalid = "deck-invalid";
+
+    // ---- 多人模型（管理面/房间轮换；与 Orc.Protocol.ResultCodes 同名同值） ----
+
+    /// <summary><c>Pending</c> 连接调任何动作/调试/观察工具（不按工具区分）。</summary>
+    public const string NotAdmitted = "not-admitted";
+
+    /// <summary>调用携带旧 <c>roomId</c>（轮换后）。</summary>
+    public const string StaleRoom = "stale-room";
+
+    /// <summary>用旧纪元 <c>SeatBinding</c> 解析设施。</summary>
+    public const string StaleSeat = "stale-seat";
+
+    /// <summary>轮换 drain 窗口内的管理 op（带 <c>retryAfterMs</c>）。</summary>
+    public const string RoomRotating = "room-rotating";
+
+    /// <summary>对已结束对局调 <c>room.abort</c>（幂等成功，不报错）。</summary>
+    public const string AlreadyEnded = "already-ended";
+
+    /// <summary>重连令牌无效或已随房间终结失效。</summary>
+    public const string InvalidToken = "invalid-token";
+
+    /// <summary>并集中同 id 版本冲突（指名双方与版本）。</summary>
+    public const string LockConflict = "lock-conflict";
+
+    /// <summary>缺口清单（点名哪一方缺哪些 <c>{kind,id,version}</c>）。</summary>
+    public const string MissingAssets = "missing-assets";
+
+    /// <summary>实例进程起不来（boot 前置不满足）。</summary>
+    public const string InstanceBootFailed = "instance-boot-failed";
 }

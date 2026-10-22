@@ -61,13 +61,13 @@ public class AuraSystemTests
         Assert.Equal(2, AttackOf(beneficiary));
 
         // （a）源出现于相邻位（槽 1；加入路径）→ 加成出现（unit.joined → 全域重跑自动随动）
-        var joinResult = await match.PlayManager.JoinUnitAsync(source, frontLine[1]);
+        var joinResult = await match.PlayManager.JoinUnitAsync(source, frontLine.GetInsertionGaps()[1]);
         Assert.Equal(PlayResultStatus.Success, joinResult.Status);
         Assert.Equal(4, AttackOf(beneficiary)); // 2 + 2
 
         // （b1）移动：相邻位 → 另一相邻位（槽 1 → 槽 3）→ 加成持续（防「移动即误撤销」）
         using var recorder = new UpdateRecorder(match.Engine);
-        await MoveUnitAsync(match, source, frontLine[3]);
+        await MoveUnitAsync(match, source, frontLine.GetInsertionGaps()[3]);
         Assert.Equal(4, AttackOf(beneficiary));
         Assert.DoesNotContain( // 无变化不通知：无新发射（缓存比较既有保证）
             recorder.Updates,
@@ -76,11 +76,11 @@ public class AuraSystemTests
                 && ReferenceEquals(u.Payload[GameUpdates.PayloadCard], beneficiary));
 
         // （b2）移动：离开相邻（槽 3 → 槽 0；间隔槽 1、2）→ 加成消失（防漏撤）
-        await MoveUnitAsync(match, source, frontLine[0]);
+        await MoveUnitAsync(match, source, frontLine.GetInsertionGaps()[0]);
         Assert.Equal(2, AttackOf(beneficiary));
 
         // 移回相邻位（槽 0 → 槽 1）→ 加成再现（随动闭环）
-        await MoveUnitAsync(match, source, frontLine[1]);
+        await MoveUnitAsync(match, source, frontLine.GetInsertionGaps()[1]);
         Assert.Equal(4, AttackOf(beneficiary));
 
         // （d）源死亡 → 加成消失（失效即消失）＋ 声明注销（效果卸载链托管收口——按来源整组撤销）
@@ -113,9 +113,9 @@ public class AuraSystemTests
         await sourceRight.LoadAsync(playerA);
 
         // 左源出现 → +2；右源出现 → 再 +2（同字段多命中：各声明独立参与合成、按登记序依次施加）
-        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(sourceLeft, frontLine[1])).Status);
+        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(sourceLeft, frontLine.GetInsertionGaps()[1])).Status);
         Assert.Equal(4, AttackOf(beneficiary));
-        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(sourceRight, frontLine[3])).Status);
+        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(sourceRight, frontLine.GetInsertionGaps()[3])).Status);
         Assert.Equal(6, AttackOf(beneficiary)); // 2 + 2 + 2
 
         // 单源注销（死亡）→ 回落一档；双源全注销 → 回落原值
@@ -148,11 +148,11 @@ public class AuraSystemTests
         Assert.Equal(2, AttackOf(unit)); // 支援线：条件不成立——产出原值
 
         // 移动至前线 → 条件成立（+1）
-        await MoveUnitAsync(match, unit, frontLine[2]);
+        await MoveUnitAsync(match, unit, frontLine.GetInsertionGaps()[2]);
         Assert.Equal(3, AttackOf(unit));
 
         // 离开前线（机制级构造——本批无后撤真实路径）→ 条件失效产出原值（加成消失）
-        await MoveUnitAsync(match, unit, supportLine[1]);
+        await MoveUnitAsync(match, unit, supportLine.GetInsertionGaps()[1]);
         Assert.Equal(2, AttackOf(unit));
 
         // 撤销修饰器（按来源）→ 行为不变、无残留
@@ -181,27 +181,27 @@ public class AuraSystemTests
         // 源：完整装载链路径（声明注册）→ 加入支援线槽 3（尚未在前线——条件不成立）
         var source = (UnitCard)match.CardLibrary.Instantiate(AuraTestKit.FrontLineAuraUnitId);
         await source.LoadAsync(playerA);
-        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(source, supportLine[3])).Status);
+        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(source, supportLine.GetInsertionGaps()[3])).Status);
         Assert.Equal(2, AttackOf(first)); // 源不在前线：不生效
         Assert.Equal(2, AttackOf(second));
 
         // 源推进至前线 → 全体 +1
-        await MoveUnitAsync(match, source, frontLine[1]);
+        await MoveUnitAsync(match, source, frontLine.GetInsertionGaps()[1]);
         Assert.Equal(3, AttackOf(first));
         Assert.Equal(3, AttackOf(second));
 
         // 源仍在前线（换槽）→ 持续
-        await MoveUnitAsync(match, source, frontLine[4]);
+        await MoveUnitAsync(match, source, frontLine.GetInsertionGaps()[4]);
         Assert.Equal(3, AttackOf(first));
         Assert.Equal(3, AttackOf(second));
 
         // 源离开前线 → 全体加成消失
-        await MoveUnitAsync(match, source, supportLine[3]);
+        await MoveUnitAsync(match, source, supportLine.GetInsertionGaps()[3]);
         Assert.Equal(2, AttackOf(first));
         Assert.Equal(2, AttackOf(second));
 
         // 复位：源回前线 → 再生效；源死亡 → 全体消失（推荐并测）
-        await MoveUnitAsync(match, source, frontLine[2]);
+        await MoveUnitAsync(match, source, frontLine.GetInsertionGaps()[2]);
         Assert.Equal(3, AttackOf(first));
         await KillAsync(source);
         Assert.Equal(2, AttackOf(first));
@@ -232,13 +232,13 @@ public class AuraSystemTests
         Assert.Equal(2, AttackOf(counting));
 
         // 移至前线槽 2（无相邻单位）→ 原值
-        await MoveUnitAsync(match, counting, frontLine[2]);
+        await MoveUnitAsync(match, counting, frontLine.GetInsertionGaps()[2]);
         Assert.Equal(2, AttackOf(counting));
 
         // 递进（至少两级）：n=1 → +2；n=2 → +4（n1 为敌方单位——「不分敌我」计数）
-        var n1 = await CommandTestKit.PrepareUnitAsync(match, playerB, CommandTestKit.InfantryId, frontLine[1]);
+        var n1 = await CommandTestKit.PrepareUnitAsync(match, playerB, CommandTestKit.InfantryId, frontLine.GetInsertionGaps()[1]);
         Assert.Equal(4, AttackOf(counting));
-        var n2 = await CommandTestKit.PrepareUnitAsync(match, playerA, CommandTestKit.InfantryId, frontLine[3]);
+        var n2 = await CommandTestKit.PrepareUnitAsync(match, playerA, CommandTestKit.InfantryId, frontLine.GetInsertionGaps()[3]);
         Assert.Equal(6, AttackOf(counting));
 
         // 回落（死亡）：相邻单位死亡 → 回落一档
@@ -246,7 +246,7 @@ public class AuraSystemTests
         Assert.Equal(4, AttackOf(counting));
 
         // 回落（离开）：相邻单位移走 → 回落原值
-        await MoveUnitAsync(match, n2, frontLine[4]);
+        await MoveUnitAsync(match, n2, frontLine.GetInsertionGaps()[4]);
         Assert.Equal(2, AttackOf(counting));
     }
 
@@ -304,7 +304,7 @@ public class AuraSystemTests
         var beneficiary = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 2);
         var source = (UnitCard)match.CardLibrary.Instantiate(AuraTestKit.AdjacentAuraUnitId);
         await source.LoadAsync(playerA);
-        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(source, frontLine[1])).Status);
+        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(source, frontLine.GetInsertionGaps()[1])).Status);
         Assert.Equal(4, AttackOf(beneficiary));
 
         // 显式移除效果（非死亡路径）→ 统一卸载链 → 托管注销（按来源整组撤销）＋受益侧衔接（有命中才跑）
@@ -337,7 +337,7 @@ public class AuraSystemTests
         Assert.Equal(3, AttackOf(beneficiary));
 
         // 光环出现 → 叠加（固定序、文档化：先挂载修饰器〔挂载序〕、后光环收集〔登记序〕→ 2 + 1 + 2）
-        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(source, frontLine[1])).Status);
+        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(source, frontLine.GetInsertionGaps()[1])).Status);
         Assert.Equal(5, AttackOf(beneficiary));
         Assert.Equal(5, beneficiary.Modifiers.ComputeEffectiveValue(CardStatFields.Attack)); // 现算读取同构含光环
 
@@ -418,14 +418,16 @@ public class AuraSystemTests
     /// 机制级移动（授权口径：直接操作槽位占用并发射对应更新——重跑链真实、驱动动作不作硬性要求；
     /// 步骤与移动执行段一致：清旧位 → 入新位 → 改状态 → 发 unit.position.changed）。
     /// </summary>
-    private static async Task MoveUnitAsync(Match match, UnitCard unit, Slot target)
+    private static async Task MoveUnitAsync(Match match, UnitCard unit, FormationGap target)
     {
         var state = unit.GetData<UnitStateData>();
-        var old = state.Position ?? throw new InvalidOperationException("移动源未在场（测试装配错误）。");
-        old.Clear();
-        target.Place(unit);
-        state.Position = target;
-        await GameUpdates.EmitUnitPositionChanged(match.Engine, unit, old, target);
+        var old = state.Line ?? throw new InvalidOperationException("移动源未在场（测试装配错误）。");
+        var oldIndex = old.IndexOf(unit);
+        old.TryRemove(unit);
+        target.Line.TryInsertAt(target.Ordinal, unit);
+        state.Line = target.Line;
+        await GameUpdates.EmitUnitPositionChanged(
+            match.Engine, unit, new BoardPosition(old, oldIndex), new BoardPosition(target.Line, target.Ordinal));
     }
 
     /// <summary>击杀（门户伤害——防御归零 → 统一死亡流程：清位/置毁/清理/效果卸载托管/发 card.died）。</summary>

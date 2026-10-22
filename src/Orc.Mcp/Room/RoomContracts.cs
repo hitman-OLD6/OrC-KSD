@@ -1,5 +1,3 @@
-using Orc.Mcp.Contracts;
-
 namespace Orc.Mcp.Room;
 
 /// <summary>房间状态标识（协议可见的受控字符串）。</summary>
@@ -15,10 +13,29 @@ public static class RoomStates
     public const string Ended = "ended";
 }
 
-/// <summary>控制器类型标识（三种来源）。</summary>
+/// <summary>座位状态（协议可见的受控字符串；R12 的 <c>state</c> 字段）。</summary>
+public static class SeatStates
+{
+    /// <summary>空闲。</summary>
+    public const string Idle = "idle";
+
+    /// <summary>已被申请、尚未批准。</summary>
+    public const string Pending = "pending";
+
+    /// <summary>已批准（或 AI 配置态）。</summary>
+    public const string Admitted = "admitted";
+
+    /// <summary>已批准但当前断线（对局态保留绑定）。</summary>
+    public const string Disconnected = "disconnected";
+
+    /// <summary>许可被撤销。</summary>
+    public const string Revoked = "revoked";
+}
+
+/// <summary>控制器类型标识（三种来源；仅用于展示，不参与鉴权）。</summary>
 public static class ControllerKinds
 {
-    /// <summary>本地玩家（房主）。</summary>
+    /// <summary>本地玩家（历史值；新模型中不再参与门禁）。</summary>
     public const string Local = "local";
 
     /// <summary>远程客户端（MCP/远程连接声明座位）。</summary>
@@ -28,18 +45,24 @@ public static class ControllerKinds
     public const string Ai = "ai";
 }
 
+/// <summary>卡包声明（引用形态；房间快照里只回显**自己的**）。</summary>
+public sealed record RoomPackageSnapshot(string PackageId, string? Version = null, string? Guid = null);
+
 /// <summary>
-/// 座位快照（纯 DTO；不含任何引擎对象）。
+/// 房间座位快照（纯 DTO；不含任何引擎对象）。
 /// <para>
-/// **没有 <c>ready</c> 字段**：本协议不存在"座位就绪"语义（开局只要求座位被填满），
-/// 残留该字段会让客户端误以为有就绪流程。
+/// **按调用者角色构造**（不是"构造全量再裁剪"）：<see cref="Deck"/>/<see cref="Packages"/> 只在自己那座、
+/// 或调试面/管理员读取时出现——对手的构筑与卡包声明永远不可见（全知 viewer 亦不可）。
 /// </para>
 /// </summary>
 public sealed record RoomSeatSnapshot(
     int Seat,
-    string ControllerKind,
+    bool Occupied,
+    string State,
     string? DisplayName,
-    bool Connected);
+    string? Kind = null,
+    IReadOnlyList<string>? Deck = null,
+    IReadOnlyList<RoomPackageSnapshot>? Packages = null);
 
 /// <summary>可连接地址（房主 UI 展示/复制；非回环 IPv4 ＋ 实际端口）。</summary>
 public sealed record RoomListenAddress(string Ip, int Port);
@@ -48,32 +71,23 @@ public sealed record RoomListenAddress(string Ip, int Port);
 public sealed record RoomSnapshot(
     string RoomId,
     string State,
+    int SeatCount,
     IReadOnlyList<RoomSeatSnapshot> Seats,
-    string PackPolicy,
-    string? PackFingerprint,
     IReadOnlyList<RoomListenAddress> Addresses);
 
 /// <summary>构筑配置（主国/盟国；可空＝不校验配对）。</summary>
 public sealed record RoomDeckConfig(string? MainFaction, string? AllyFaction);
 
-/// <summary>声明座位（远程客户端或本地玩家）。</summary>
-public sealed record RoomSeatClaim(
-    int Seat,
-    string DisplayName,
-    IReadOnlyList<string> Deck,
-    RoomDeckConfig? DeckConfig = null,
-    string? SeatToken = null,
-    string ControllerKind = ControllerKinds.Remote);
-
-/// <summary>释放座位。</summary>
-public sealed record RoomSeatRelease(int Seat, string? SeatToken = null);
-
-/// <summary>生成 AI 控制器（缺省卡组＝服务端生成）。</summary>
-public sealed record RoomAiSeat(
-    int Seat,
-    string DisplayName,
-    IReadOnlyList<string>? Deck = null,
-    RoomDeckConfig? DeckConfig = null);
+/// <summary>
+/// 读取房间快照时的调用者视角（由宿主按连接角色构造；服务层不感知会话模型）。
+/// </summary>
+/// <param name="Seat">调用者绑定的座位（未绑＝null）。</param>
+/// <param name="SeeAllDeclarations">是否可见全部卡组/卡包声明（调试面与管理员＝true）。</param>
+public sealed record RoomViewRequest(int? Seat = null, bool SeeAllDeclarations = false)
+{
+    /// <summary>默认视角（未绑定、不可见全量）。</summary>
+    public static readonly RoomViewRequest Anonymous = new();
+}
 
 /// <summary>
 /// 房间控制面（服务层向宿主暴露的**唯一**房间入口）。
@@ -81,28 +95,13 @@ public sealed record RoomAiSeat(
 /// 约束：入参与出参一律纯 DTO/JSON，**不得出现 `Match`/`Player`/`Card`/`Ref&lt;T&gt;`**——
 /// 本接口是 `Orc.Mcp` 与房间实现（`Orc.Server`）之间的活对象隔离点。
 /// </para>
-/// <para>实现由宿主注入；未注入＝房间工具不登记（无房间能力）。</para>
+/// <para>
+/// 管理动作（开局/终止/绑定/撤销）**不在这里**——它们属于管理面（管理 API 不进工具表），
+/// 因此本接口只有"读一间房间的当前态"这一项能力。
+/// </para>
 /// </summary>
 public interface IRoomControl
 {
-    /// <summary>房间快照。</summary>
-    RoomSnapshot Snapshot();
-
-    /// <summary>声明座位（填充控制器）；成功时结果 details 携带 <c>seatToken</c>。</summary>
-    McpToolResult Claim(RoomSeatClaim claim);
-
-    /// <summary>释放座位（房主或持有令牌者）。</summary>
-    McpToolResult Release(RoomSeatRelease release);
-
-    /// <summary>在空座生成 AI 控制器。</summary>
-    McpToolResult AddAi(RoomAiSeat ai);
-
-    /// <summary>开局（房主/持有令牌者）；成功后房间进入对局态。</summary>
-    Task<McpToolResult> StartAsync(string? seatToken, CancellationToken ct = default);
-
-    /// <summary>强制释放座位（房主）。</summary>
-    McpToolResult Kick(int seat, string? seatToken);
-
-    /// <summary>凭座位令牌重连并重新绑定控制器。</summary>
-    McpToolResult Resume(string seatToken);
+    /// <summary>按调用者视角构造房间快照。</summary>
+    RoomSnapshot Snapshot(RoomViewRequest request);
 }

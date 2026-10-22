@@ -27,6 +27,14 @@ public sealed class MatchLaunchOptions
     /// <summary>0 号座位。</summary>
     public required MatchSeatConfig SeatA { get; init; }
 
+    /// <summary>
+    /// 预装配的卡组装载（管理面按"本局加载计划"先注册、再交付本入口）。
+    /// <para>
+    /// 给出时**不再**按 <see cref="PackDirectories"/> 二次注册——同一份卡包只解析一遍；
+    /// 未给出（进程内沙盒/AI 夹具）＝按目录现场注册。
+    /// </para>
+    /// </summary>
+    public Orc.Packages.Loading.MatchCardAssembly? Assembly { get; init; }
     /// <summary>1 号座位。</summary>
     public required MatchSeatConfig SeatB { get; init; }
 

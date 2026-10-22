@@ -17,12 +17,6 @@ public class ToolWhitelistTests
         "service.info",
         "service.tools",
         "room.info",
-        "room.claim",
-        "room.release",
-        "room.add_ai",
-        "room.start",
-        "room.kick",
-        "room.resume",
         "match.end_turn",
         "match.concede",
         "mulligan.begin",
@@ -50,8 +44,6 @@ public class ToolWhitelistTests
     /// <summary>调试类工具（沙盒专属；不得出现在 player 模式）。</summary>
     private static readonly string[] DebugTools =
     [
-        "sandbox.create",
-        "sandbox.dispose",
         "sandbox.state",
         "sandbox.spawn",
         "sandbox.kill",
@@ -142,10 +134,10 @@ public class ToolWhitelistTests
     {
         using var fixture = new SandboxFixture(McpServiceMode.Player, room: new FakeRoomControl());
 
-        var result = await fixture.InvokeAsync("sandbox.create");
+        var result = await fixture.CreateSandboxMatchAsync();
 
         Assert.False(result.Ok);
-        Assert.Equal(McpCodes.UnknownTool, result.Code);
+        Assert.Equal(McpCodes.ModeDenied, result.Code);
     }
 
     [Fact]

@@ -1,4 +1,4 @@
-﻿using Orc.Cards;
+using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Actions;
 using Orc.Game.Board;
@@ -41,6 +41,7 @@ public sealed class PlayManager
     private readonly Func<Player, Entity?, Entity?, bool> _inputAllowed;
     private readonly Func<Player, bool>? _turnOwner;
     private readonly IOrderAction _orderAction;
+    private readonly Func<UnitCard, IReadOnlyList<FormationGap>>? _deploymentCandidates;
 
     /// <summary>创建打出管理器。</summary>
     /// <param name="engine">对局引擎（发射更新 / 触发子触发器）。</param>
@@ -50,6 +51,8 @@ public sealed class PlayManager
     /// <param name="lifecycle">对局生命周期（终局门禁——后置项 B；缺省＝null＝独立构造场景无门禁）。</param>
     /// <param name="inputAllowed">行动输入准入通道（前端状态）。</param>
     /// <param name="turnOwner">回合归属判定通道（R4；缺省＝null＝按 turnManager 当前行动方引用比较）。</param>
+    /// <param name="orderAction">指令施放动作（缺省＝引擎解析）。</param>
+    /// <param name="deploymentCandidates">部署位置候选提供器（R4a：装配期注入「经判定器 <c>deploy.position.candidates</c> 调用」的委托；缺省＝内置计算）。</param>
     /// <exception cref="ArgumentNullException">engine / targeterManager / battlefield 为 null。</exception>
     public PlayManager(
         LogicEngine engine,
@@ -59,7 +62,8 @@ public sealed class PlayManager
         MatchLifecycle? lifecycle = null,
         Func<Player, Entity?, Entity?, bool>? inputAllowed = null,
         Func<Player, bool>? turnOwner = null,
-        IOrderAction? orderAction = null)
+        IOrderAction? orderAction = null,
+        Func<UnitCard, IReadOnlyList<FormationGap>>? deploymentCandidates = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(targeterManager);
@@ -72,6 +76,7 @@ public sealed class PlayManager
         _lifecycle = lifecycle;
         _inputAllowed = inputAllowed ?? ((_, _, _) => true);
         _turnOwner = turnOwner;
+        _deploymentCandidates = deploymentCandidates;
 
         // S13 第 6 条：指令施放经**唯一动作入口**（IOrderAction 包装 OrderFlow）——不直调 flow。
         _orderAction = orderAction ?? ActionRuntime.ResolveOrder(engine);
@@ -151,8 +156,8 @@ public sealed class PlayManager
         }
 
         // Engine-owned insertion gaps: before, between and after all units and HQ.
-        var candidates = DeploymentLines(card).SelectMany(line=>line.GetInsertionGaps()).ToArray();
-        if (candidates.Length == 0)
+        var candidates = DeploymentCandidates(card);
+        if (candidates.Count == 0)
         {
             return PlayResult.Failure(PlayFailureReason.PrePlayNoAvailableSlots);
         }
@@ -214,66 +219,6 @@ public sealed class PlayManager
 
     // ---------- ② 单位打出链（直接驱动；部署路径） ----------
 
-    /// <summary>
-    /// 单位打出链（部署路径）：外层复验（指挥点）→ 打出链（card.played → 部署链 → 收尾扣费/离手）。
-    /// 前置（防御性、明确失败结果、零副作用）：目标槽位须为空槽、单位未单位化——违反＝拒绝。
-    /// 复验失败＝打出链中止（仅本次取消语义＋留痕；不部署、不扣费、不发更新、不离手）。
-    /// </summary>
-    /// <exception cref="ArgumentNullException">card / target 为 null。</exception>
-    /// <exception cref="InvalidOperationException">卡牌未加载归属（装配性错误、fail-fast）。</exception>
-    public async Task<PlayResult> PlayUnitAsync(UnitCard card, Slot target, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(card);
-        ArgumentNullException.ThrowIfNull(target);
-        var owner = RequireOwner(card);
-        if (CheckAdmission(card, false) is { } admission) return PlayResult.Failure(admission);
-
-
-        // 终局门禁（后置项 B）：对局已结束＝入口拒绝（零副作用、状态不推进）
-        if (_lifecycle is not null)
-        {
-            if (_lifecycle.IsEnded)
-            {
-                return PlayResult.Failure(PlayFailureReason.GameEnded);
-            }
-
-            if (!_lifecycle.IsActionAllowed)
-            {
-                return PlayResult.Failure(PlayFailureReason.PhaseBlocked);
-            }
-        }
-
-        if (!target.IsEmpty)
-        {
-            return PlayResult.Failure(PlayFailureReason.TargetSlotOccupied);
-        }
-
-        if (card.TryGetData<UnitStateData>(out _))
-        {
-            return PlayResult.Failure(PlayFailureReason.UnitAlreadyUnitized);
-        }
-
-        // 动作作用域（UI 消费桥接）：本动作产生的事件聚合为一段。
-        await using var _actionScope = _engine.BeginAction();
-
-        if(!await KeywordProgramRuntime.PreparePlayAsync(card,ct))return PlayResult.Cancelled();
-        var stream = await card.PlayTrigger.InvokeAsync(
-            _engine,
-            new Dictionary<string, object?>
-            {
-                [GameUpdates.PayloadCard] = card,
-                [GameUpdates.PayloadPlayer] = owner,
-                [GameUpdates.PayloadPosition] = target,
-            },
-            ct);
-
-        return stream.Outcome switch
-        {
-            ExecutionOutcome.Normal => PlayResult.Success(),
-            ExecutionOutcome.ValidationRejected => PlayResult.Failure(PlayFailureReason.PlayVerificationRejected),
-            _ => PlayResult.Failure(PlayFailureReason.PlayChainFault),
-        };
-    }
 
     /// <summary>Canonical deployment portal. Rejects stale/foreign gaps before any game side effect.</summary>
     public async Task<PlayResult> PlayUnitAsync(UnitCard card, FormationGap gap, CancellationToken ct = default)
@@ -282,14 +227,14 @@ public sealed class PlayManager
         var owner = RequireOwner(card);
         if (CheckAdmission(card, true) is { } admission) return PlayResult.Failure(admission);
         if (card.TryGetData<UnitStateData>(out _)) return PlayResult.Failure(PlayFailureReason.UnitAlreadyUnitized);
-        if (!DeploymentLines(card).Any(line=>ReferenceEquals(gap.Line,line)) || !gap.IsCurrent)
+        if (!gap.IsCurrent || !DeploymentCandidates(card).Any(candidate => ReferenceEquals(candidate.Line, gap.Line)))
             return PlayResult.Failure(PlayFailureReason.FormationGapUnavailable);
         await using var scope = _engine.BeginAction();
         if(!await KeywordProgramRuntime.PreparePlayAsync(card,ct))return PlayResult.Cancelled();
         var stream = await card.PlayTrigger.InvokeAsync(_engine, new Dictionary<string, object?>
         {
             [GameUpdates.PayloadCard] = card, [GameUpdates.PayloadPlayer] = owner,
-            [nameof(CardTriggerView.FormationGap)] = gap,
+            [nameof(CardTriggerView.Position)] = gap,
         }, ct);
         return stream.Outcome switch
         {
@@ -316,12 +261,17 @@ public sealed class PlayManager
     }
 
     public IReadOnlyList<FormationGap> GetDeploymentGaps(UnitCard card) => CanPlay(card)
-        ? DeploymentLines(card).SelectMany(line=>line.GetInsertionGaps()).ToArray() : Array.Empty<FormationGap>();
+        ? DeploymentCandidates(card) : Array.Empty<FormationGap>();
+
+    /// <summary>部署位置候选（R4a：优先经判定器提供器；缺省＝内置计算）。</summary>
+    private IReadOnlyList<FormationGap> DeploymentCandidates(UnitCard card)
+        => _deploymentCandidates?.Invoke(card)
+           ?? DeploymentLines(card).SelectMany(line => line.GetInsertionGaps()).ToArray();
 
     private IEnumerable<BattleLine> DeploymentLines(UnitCard card)
     {
         yield return _battlefield.GetSupportLine(card.Owner!);
-        if(KeywordProgramRuntime.Resolve(card,"deploy.frontline",0)!=0 && !_battlefield.FrontLine.Any(slot=>slot.Occupant is UnitCard enemy && !ReferenceEquals(enemy.Owner,card.Owner)))yield return _battlefield.FrontLine;
+        if(KeywordProgramRuntime.Resolve(card,"deploy.frontline",0)!=0 && !System.Linq.Enumerable.Any(_battlefield.FrontLine.Members, member => member is UnitCard enemy && !ReferenceEquals(enemy.Owner, card.Owner)))yield return _battlefield.FrontLine;
     }
 
     private PlayFailureReason? CheckAdmission(CardBase card, bool requireHand)
@@ -351,7 +301,7 @@ public sealed class PlayManager
     /// 归属不要求（加入不涉及手牌/扣费）；单位化装配失败不留矛盾中间态。
     /// </summary>
     /// <exception cref="ArgumentNullException">card / target 为 null。</exception>
-    public async Task<PlayResult> JoinUnitAsync(UnitCard card, Slot target, CancellationToken ct = default)
+    public async Task<PlayResult> JoinUnitAsync(UnitCard card, FormationGap target, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(card);
         ArgumentNullException.ThrowIfNull(target);
@@ -370,7 +320,7 @@ public sealed class PlayManager
             }
         }
 
-        if (!target.IsEmpty)
+        if (!target.IsCurrent)
         {
             return PlayResult.Failure(PlayFailureReason.TargetSlotOccupied);
         }

@@ -16,8 +16,8 @@ namespace Orc.Game.Judicators;
 /// </summary>
 internal sealed class CombatRangeJudicator : Judicator<CombatRangeJudicator.RangeRule>
 {
-    /// <summary>强类型 delegate（该判定器签名）：（攻击者, 目标槽位）→ 目标是否在范围内。</summary>
-    public delegate bool RangeRule(UnitCard attacker, Slot targetSlot);
+    /// <summary>强类型 delegate（该判定器签名）：（攻击者, 目标位置）→ 目标是否在范围内。</summary>
+    public delegate bool RangeRule(UnitCard attacker, BoardPosition target);
 
     private readonly Battlefield _battlefield;
     private readonly Func<Player, Player?> _enemyOf;
@@ -35,17 +35,17 @@ internal sealed class CombatRangeJudicator : Judicator<CombatRangeJudicator.Rang
 
     /// <inheritdoc />
     protected override Func<object[]?, object[]?> Adapt(RangeRule handler)
-        => args => new object[] { handler(Unpack<UnitCard>(args, 0), Unpack<Slot>(args, 1)) };
+        => args => new object[] { handler(Unpack<UnitCard>(args, 0), Unpack<BoardPosition>(args, 1)) };
 
     /// <inheritdoc />
     public override object[]? Invoke(object[]? args) => Adapt(Evaluate)(args);
 
     /// <summary>范围矩阵求值（原 <c>CommandManager.IsLineInRange</c> 逐字迁移——顺序/短路/防御分支保持）。</summary>
-    private bool Evaluate(UnitCard attacker, Slot targetSlot)
+    private bool Evaluate(UnitCard attacker, BoardPosition target)
     {
         var attackerState = attacker.GetData<UnitStateData>();
         var owner = attacker.Owner;
-        if (owner is null || attackerState.Position is null)
+        if (owner is null || attackerState.Line is not { } attackerLine)
         {
             return false;
         }
@@ -61,14 +61,14 @@ internal sealed class CombatRangeJudicator : Judicator<CombatRangeJudicator.Rang
             return true;
         }
 
-        if (_battlefield.GetSupportLine(owner).Contains(attackerState.Position))
+        if (ReferenceEquals(attackerLine, _battlefield.GetSupportLine(owner)))
         {
-            return _battlefield.FrontLine.Contains(targetSlot); // 支援线 → 仅敌方前线单位
+            return ReferenceEquals(target.Line, _battlefield.FrontLine); // 支援线 → 仅敌方前线单位
         }
 
-        if (_battlefield.FrontLine.Contains(attackerState.Position))
+        if (ReferenceEquals(attackerLine, _battlefield.FrontLine))
         {
-            return _battlefield.GetSupportLine(enemy).Contains(targetSlot); // 前线 → 仅敌方支援线（单位/HQ）
+            return ReferenceEquals(target.Line, _battlefield.GetSupportLine(enemy)); // 前线 → 仅敌方支援线（单位/HQ）
         }
 
         return false; // 异常布局（防御）

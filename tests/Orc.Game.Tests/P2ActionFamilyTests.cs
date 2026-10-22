@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using Orc.Cards;
 using Orc.Core;
 using Orc.Foundation.Actions;
@@ -28,15 +28,15 @@ public class P2ActionFamilyTests
         var unit = await CommandTestKit.PrepareOnFrontAsync(match, player, CommandTestKit.InfantryId, 0);
         CommandTestKit.Activate(unit);
 
-        var support = match.Battlefield.GetSupportLine(player).First(slot => slot.IsEmpty);
+        var support = match.Battlefield.GetSupportLine(player).GetInsertionGaps()[0];
         var points = player.Points;
         using var recorder = new UpdateRecorder(match.Engine);
 
         Assert.True(await match.CommandManager.MoveUnitAsync(unit, support));
 
         // 动作状态：落地（唯一落地口）。
-        Assert.Same(support, unit.GetData<UnitStateData>().Position);
-        Assert.Same(unit, support.Occupant);
+        Assert.Same(support, unit.GetData<UnitStateData>().Line);
+        Assert.Same(unit, support);
         // 行动状态：零消耗（S6 有意变更：效果移动免费）。
         Assert.Equal(points, player.Points);
         Assert.True(unit.GetData<CommandData>().CanMove);
@@ -63,9 +63,9 @@ public class P2ActionFamilyTests
         Assert.Equal(CommandBlockReason.Suppressed, availability.Move.BlockReason);
 
         // 效果移动不受压制阻断（动作本身零压制判定）。
-        var destination = match.Battlefield.GetSupportLine(player).First(slot => slot.IsEmpty);
+        var destination = match.Battlefield.GetSupportLine(player).GetInsertionGaps()[0];
         Assert.True(await match.CommandManager.MoveUnitAsync(unit, destination));
-        Assert.Same(destination, unit.GetData<UnitStateData>().Position);
+        Assert.Same(destination, unit.GetData<UnitStateData>().Line);
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public class P2ActionFamilyTests
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         var points = player.Points;
 
-        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine[0].Ref);
+        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps()[0].Ref);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(points - unit.Modifiers.GetEffectiveValue(CardStatFields.OperateCost), player.Points);
@@ -240,7 +240,7 @@ public class P2ActionFamilyTests
         await match.Initialize();
         var player = match.Players[0];
         var unit = await CommandTestKit.PrepareOnSupportAsync(match, player, CommandTestKit.InfantryId, 1);
-        var position = unit.GetData<UnitStateData>().Position;
+        var position = unit.GetData<UnitStateData>().Line;
         var defense = unit.Modifiers.GetEffectiveValue(CardStatFields.Defense);
 
         match.CommandManager.DeathAction.Handle.Register(
@@ -258,7 +258,7 @@ public class P2ActionFamilyTests
         Assert.Equal(ActionOutcomeKind.Blocked, result.Targets[0].Outcome);
         Assert.Equal(ActionFailureKind.DeathPrevented, result.Targets[0].Reason);
         Assert.False(unit.GetData<UnitStateData>().IsDestroyed);
-        Assert.Same(position, unit.GetData<UnitStateData>().Position);
+        Assert.Same(position, unit.GetData<UnitStateData>().Line);
         Assert.Equal(defense, unit.Modifiers.GetEffectiveValue(CardStatFields.Defense));
         Assert.DoesNotContain(GameUpdates.CardDying, recorder.Types);
         Assert.DoesNotContain(GameUpdates.CardDied, recorder.Types);
@@ -323,7 +323,7 @@ public class P2ActionFamilyTests
 
     private sealed class FixedMoveServices : IMoveActionServices
     {
-        public Task<bool> LandMoveAsync(UnitCard unit, Orc.Game.Board.Slot destination, CancellationToken ct = default)
+        public Task<bool> LandMoveAsync(UnitCard unit, Orc.Game.Board.FormationGap destination, CancellationToken ct = default)
             => Task.FromResult(true);
     }
 }

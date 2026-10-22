@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "atp.mass-landing",
+  "name": "大规模登陆",
+  "components": [
+    {
+      "component": "typeCategory",
+      "type": [
+        "order"
+      ]
+    },
+    {
+      "component": "factionCost",
+      "faction": "usa",
+      "kredits": 5
+    },
+    {
+      "component": "tagData",
+      "rarity": "standard"
+    },
+    {
+      "component": "effects",
+      "prefabs": [
+        "atp.mass-landing.effect"
+      ]
+    }
+  ]
+}

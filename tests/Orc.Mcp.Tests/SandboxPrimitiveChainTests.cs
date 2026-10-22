@@ -126,7 +126,7 @@ public class SandboxPrimitiveChainTests
         // ③ 行动方须为该卡 owner（PlayManager.CheckAdmission：己方回合 ＋ 卡在手牌）。
         await EnsureTurnOfAsync(fixture, 0);
 
-        var handBefore = (await fixture.InvokeAsync("observe.view"));
+        var handBefore = (await fixture.InvokeInContextAsync("observe.view"));
         var handCountBefore = SandboxPrimitiveToolTests.HandRefs(handBefore.Details, 0).Length;
         var pointsBefore = SandboxPrimitiveToolTests.PointsOf(handBefore.Details, 0);
 
@@ -134,7 +134,7 @@ public class SandboxPrimitiveChainTests
         var played = await fixture.InvokeAsync("play.command", $$"""{"ref":"{{orderRef}}"}""");
         Assert.True(played.Ok, played.Message);
 
-        var view = await fixture.InvokeAsync("observe.view");
+        var view = await fixture.InvokeInContextAsync("observe.view");
         var hand = SandboxPrimitiveToolTests.HandRefs(view.Details, 0);
 
         Assert.DoesNotContain(orderRef, hand); // 离手
@@ -172,14 +172,14 @@ public class SandboxPrimitiveChainTests
         // ② 切回对手（指令持有方）→ 打出指令。
         await EnsureTurnOfAsync(fixture, 0);
 
-        var viewBefore = await fixture.InvokeAsync("observe.view");
+        var viewBefore = await fixture.InvokeInContextAsync("observe.view");
         var pointsBefore = SandboxPrimitiveToolTests.PointsOf(viewBefore.Details, 0);
         var handCountBefore = SandboxPrimitiveToolTests.HandRefs(viewBefore.Details, 0).Length;
 
         var played = await fixture.InvokeAsync("play.command", $$"""{"ref":"{{orderRef}}"}""");
         Assert.True(played.Ok, played.Message);
 
-        var view = await fixture.InvokeAsync("observe.view");
+        var view = await fixture.InvokeInContextAsync("observe.view");
         var handA = SandboxPrimitiveToolTests.HandRefs(view.Details, 0);
 
         // Stop 语义：Resolve 不执行（不发 card.played、指令效果不触发），Finalize 照常（扣费、离手）。
@@ -204,13 +204,13 @@ public class SandboxPrimitiveChainTests
         Assert.True((await fixture.InvokeAsync("sandbox.points", """{"owner":0,"points":5}""")).Ok);
         await EnsureTurnOfAsync(fixture, 0);
 
-        var viewBefore = await fixture.InvokeAsync("observe.view");
+        var viewBefore = await fixture.InvokeInContextAsync("observe.view");
         var handCountBefore = SandboxPrimitiveToolTests.HandRefs(viewBefore.Details, 0).Length;
 
         var played = await fixture.InvokeAsync("play.command", $$"""{"ref":"{{orderRef}}"}""");
         Assert.True(played.Ok, played.Message);
 
-        var view = await fixture.InvokeAsync("observe.view");
+        var view = await fixture.InvokeInContextAsync("observe.view");
         Assert.Equal(handCountBefore, SandboxPrimitiveToolTests.HandRefs(view.Details, 0).Length);
     }
 
@@ -218,7 +218,7 @@ public class SandboxPrimitiveChainTests
     public async Task NewCardChain_InvalidDefinition_Rejected()
     {
         using var fixture = new SandboxFixture(csx: true);
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
         // negative：非法卡数据体（schemaVersion 不符）＝写入阶段即拒绝（不落盘）。
         var malformed = await fixture.InvokeAsync(
@@ -256,7 +256,7 @@ public class SandboxPrimitiveChainTests
     {
         for (var guard = 0; guard < 4; guard++)
         {
-            var view = await fixture.InvokeAsync("observe.view");
+            var view = await fixture.InvokeInContextAsync("observe.view");
             var current = view.Details!["currentPlayerIndex"]!.GetValue<int>();
             if (current == playerIndex)
             {

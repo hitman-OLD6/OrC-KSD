@@ -396,7 +396,7 @@ public class KeywordBatch2Tests
         bridge.InteractionScript = TargeterTestKit.AutoCompleteWithFirstAllowed();
 
         // 部署（T1）→ 部署链收尾发起同伴选择（可选交互）→ 形成一对一配对。
-        var result = await match.PlayManager.PlayUnitAsync(pincer, supportLine[1]);
+        var result = await match.PlayManager.PlayUnitAsync(pincer, supportLine.GetInsertionGaps()[1]);
         Assert.Equal(PlayResultStatus.Success, result.Status);
         Assert.Single(bridge.Begins); // 选择恰一次（单选交互）
 
@@ -426,13 +426,13 @@ public class KeywordBatch2Tests
         bridge.InteractionScript = (description, responder) => responder.Cancel(description.RequestId);
 
         // 放弃选择＝不形成钳击；部署照常完成（该单位仍具「钳击」词条）。
-        var result = await match.PlayManager.PlayUnitAsync(pincer, supportLine[1]);
+        var result = await match.PlayManager.PlayUnitAsync(pincer, supportLine.GetInsertionGaps()[1]);
         Assert.Equal(PlayResultStatus.Success, result.Status);
         Assert.Single(bridge.Begins);
         Assert.False(match.CommandManager.Pincers.IsPaired(pincer));
         Assert.False(match.CommandManager.Pincers.IsPaired(friend));
         Assert.Equal(2, AttackOf(friend)); // 无加成
-        Assert.Same(pincer, supportLine[1].Occupant); // 部署正常完成
+        Assert.Same(pincer, supportLine.GetInsertionGaps()[1]); // 部署正常完成
         Assert.True(pincer.Keywords.Has(KeywordIds.Pincer)); // 词条登记不动
     }
 
@@ -448,7 +448,7 @@ public class KeywordBatch2Tests
         var pincer = await CommandTestKit.InstantiateLoadedAsync(match, playerA, PincerUnitId, toHand: true);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         bridge.InteractionScript = TargeterTestKit.AutoCompleteWithFirstAllowed();
-        await match.PlayManager.PlayUnitAsync(pincer, supportLine[1]);
+        await match.PlayManager.PlayUnitAsync(pincer, supportLine.GetInsertionGaps()[1]);
         Assert.Equal(4, AttackOf(friend)); // 配对成立（+2）
 
         // 一方离场（死亡路径）：另一方即时失去钳击效果（按来源整组撤销）。
@@ -472,11 +472,11 @@ public class KeywordBatch2Tests
         bridge.InteractionScript = TargeterTestKit.AutoCompleteWithFirstAllowed();
 
         // 场上无其它友方单位：无合法候选＝不发起选择（无可选项）、不形成、部署正常完成。
-        var result = await match.PlayManager.PlayUnitAsync(pincer, supportLine[1]);
+        var result = await match.PlayManager.PlayUnitAsync(pincer, supportLine.GetInsertionGaps()[1]);
         Assert.Equal(PlayResultStatus.Success, result.Status);
         Assert.Empty(bridge.Begins);
         Assert.False(match.CommandManager.Pincers.IsPaired(pincer));
-        Assert.Same(pincer, supportLine[1].Occupant);
+        Assert.Same(pincer, supportLine.GetInsertionGaps()[1]);
     }
 
     [Fact]
@@ -492,14 +492,14 @@ public class KeywordBatch2Tests
         bridge.InteractionScript = TargeterTestKit.AutoCompleteWithFirstAllowed();
 
         var first = await CommandTestKit.InstantiateLoadedAsync(match, playerA, PincerUnitId, toHand: true);
-        await match.PlayManager.PlayUnitAsync(first, supportLine[1]);
+        await match.PlayManager.PlayUnitAsync(first, supportLine.GetInsertionGaps()[1]);
         Assert.Single(bridge.Begins); // 第一次形成（候选＝friend）
 
         // 第二次部署（T3——点数恢复）：其余单位均已配对（一对一占用——先到先得）→ 候选为空、不发起选择。
         await match.EndTurn(); // → T2
         await match.EndTurn(); // → T3（A，2 点）
         var second = await CommandTestKit.InstantiateLoadedAsync(match, playerA, PincerUnitId, toHand: true);
-        var result = await match.PlayManager.PlayUnitAsync(second, supportLine[3]);
+        var result = await match.PlayManager.PlayUnitAsync(second, supportLine.GetInsertionGaps()[3]);
         Assert.Equal(PlayResultStatus.Success, result.Status);
         Assert.Single(bridge.Begins); // 未发起新选择
         Assert.False(match.CommandManager.Pincers.IsPaired(second));
@@ -600,7 +600,7 @@ public class KeywordBatch2Tests
             Assert.Equal(2, intel.Keywords.GetValue(KeywordIds.Intelligence));
 
             // 触发结构：「具有情报的卡被使用时」触发（card.played 时点）。
-            var result = await match.PlayManager.PlayUnitAsync(intel, match.Battlefield.GetSupportLine(playerA)[1]);
+            var result = await match.PlayManager.PlayUnitAsync(intel, match.Battlefield.GetSupportLine(playerA).GetInsertionGaps()[1]);
             Assert.Equal(PlayResultStatus.Success, result.Status);
 
             var hit = Assert.Single(captured);

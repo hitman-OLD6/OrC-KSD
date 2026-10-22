@@ -53,7 +53,7 @@ public sealed class CardLoadDiagTests : IDisposable
     public async Task ReadOnly_Passes_Pending_Gate_While_Write_Tools_Are_Rejected()
     {
         using var fixture = new SandboxFixture(McpServiceMode.Authoring);
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
         // 制造「挂起期」（执行器忙）：动作挂在可控的 TaskCompletionSource 上。
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -184,7 +184,7 @@ public sealed class CardLoadDiagTests : IDisposable
     {
         using var fixture = new SandboxFixture(McpServiceMode.Authoring);
 
-        var created = await fixture.InvokeAsync("sandbox.create");
+        var created = await fixture.CreateSandboxMatchAsync();
         Assert.True(created.Ok, created.Message);
 
         var result = await fixture.InvokeAsync("diag.card_load");

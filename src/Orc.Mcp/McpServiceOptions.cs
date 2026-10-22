@@ -64,10 +64,10 @@ public sealed class McpServiceOptions
     public int? Seed { get; init; }
 
     /// <summary>
-    /// agent 的座位（player 模式语义，R9d）：player 模式下 agent 占一个座位、视图按座位过滤隐藏信息。
-    /// 缺省＝null＝未指定（player 模式下的观察面将拒绝并提示需配置座位）。
+    /// 由**服务器进程内 AI 驱动**的座位集合（AI controller 属玩家面：绑 seat、不走协议）。
+    /// 缺省空集＝无 AI 座位（此时 AI 网关不做归属拒绝，行为与既有装配一致）。
     /// </summary>
-    public int? AgentSeat { get; init; }
+    public IReadOnlyList<int> AiSeats { get; init; } = [];
 
     /// <summary>
     /// 是否注册**写类**调试工具（无头沙盒 S3）。缺省 <c>true</c>＝保留服务层既有调用方行为；

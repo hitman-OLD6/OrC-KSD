@@ -75,7 +75,7 @@ public class KeywordEffectBatch4Tests
         Assert.Contains(
             match.Engine.Orchestration.BuildAuditChain().Nodes,
             node => node.StableKey == "闪击·部署置位");
-        var deploy = await match.PlayManager.PlayUnitAsync(blitz, match.Battlefield.PlayerASupportLine[1]);
+        var deploy = await match.PlayManager.PlayUnitAsync(blitz, match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);
         Assert.Equal(PlayResultStatus.Success, deploy.Status);
         Assert.True(blitz.GetData<CommandData>().CanMove);  // 部署置位（行为）
         Assert.True(blitz.GetData<CommandData>().CanAttack);

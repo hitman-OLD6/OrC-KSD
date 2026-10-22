@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "orc.across-the-pacific",
+  "source": "effects/atp.beachhead-supply.effect.prefab.json",
+  "assets": [
+    {
+      "guid": "d37bef3e-6d2f-2912-2af9-278cce4735bf",
+      "kind": "effect",
+      "id": "atp.beachhead-supply.effect",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

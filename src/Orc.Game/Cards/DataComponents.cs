@@ -29,8 +29,11 @@ public sealed class UnitStateData
     {
     }
 
-    /// <summary>所在位置（槽位引用；未部署＝null）。</summary>
-    public Slot? Position { get; set; }
+    /// <summary>所在阵线（有序列表模型：位置＝该线中的序号，现算；未入场＝null）。</summary>
+    public BattleLine? Line { get; set; }
+
+    /// <summary>是否在场（已入场＝所在线非空）。</summary>
+    public bool IsOnBoard => Line is not null;
 
     /// <summary>是否被摧毁（初始 false；摧毁判定/处理属后续批次）。</summary>
     public bool IsDestroyed { get; set; }

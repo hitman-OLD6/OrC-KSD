@@ -124,7 +124,7 @@ public class SandboxPrimitiveToolTests
     public async Task Points_ExceedsSlots_Warning()
     {
         using var fixture = new SandboxFixture();
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
         var result = await fixture.InvokeAsync("sandbox.points", """{"owner":0,"points":40}""");
 
@@ -137,9 +137,9 @@ public class SandboxPrimitiveToolTests
     public async Task Points_SameValue_NoSignal()
     {
         using var fixture = new SandboxFixture();
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
-        var view = await fixture.InvokeAsync("observe.view");
+        var view = await fixture.InvokeInContextAsync("observe.view");
         var current = view.Details!["players"]!.AsArray()[0]!["points"]!.GetValue<int>();
 
         var segmentsBefore = (await fixture.InvokeAsync("observe.segments")).Details!["cachedTotal"]!.GetValue<int>();
@@ -158,7 +158,7 @@ public class SandboxPrimitiveToolTests
     public async Task LegacySetPoints_ContractUnchanged()
     {
         using var fixture = new SandboxFixture();
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
         var legacy = await fixture.InvokeAsync("sandbox.set_points", """{"owner":0,"delta":3}""");
 
@@ -217,7 +217,7 @@ public class SandboxPrimitiveToolTests
     {
         if (!fixture.Service.Executor.HasMatch)
         {
-            var created = await fixture.InvokeAsync("sandbox.create");
+            var created = await fixture.CreateSandboxMatchAsync();
             Assert.True(created.Ok, created.Message);
         }
 

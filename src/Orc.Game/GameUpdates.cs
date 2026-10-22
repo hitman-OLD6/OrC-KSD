@@ -682,7 +682,7 @@ public static class GameUpdates
     }
 
     /// <summary>发射 unit.joined（载荷＝{ 单位, 位置 }；2B 加入路径调用点——单位化完成后）。</summary>
-    public static Task EmitUnitJoined(LogicEngine engine, Card unit, Slot position, CancellationToken ct = default, Card? source = null)
+    public static Task EmitUnitJoined(LogicEngine engine, Card unit, BoardPosition position, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(unit);
@@ -699,7 +699,7 @@ public static class GameUpdates
     }
 
     /// <summary>发射 unit.deployed（载荷＝{ 单位, 位置 }；2B 部署链调用点——单位化完成后）。</summary>
-    public static Task EmitUnitDeployed(LogicEngine engine, Card unit, Slot position, CancellationToken ct = default, Card? source = null)
+    public static Task EmitUnitDeployed(LogicEngine engine, Card unit, BoardPosition position, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(unit);
@@ -715,9 +715,9 @@ public static class GameUpdates
             ct);
     }
 
-    /// <summary>发射 unit.position.changed（载荷＝{ 单位, 原位置, 新位置 }；2C 起调用点＝移动执行段——槽位变更后、恰一次）。</summary>
+    /// <summary>发射 unit.position.changed（载荷＝{ 单位, 原位置, 新位置 }；2C 起调用点＝移动执行段——位置变更后、恰一次）。</summary>
     public static Task EmitUnitPositionChanged(
-        LogicEngine engine, Card unit, Slot oldPosition, Slot newPosition, CancellationToken ct = default, Card? source = null)
+        LogicEngine engine, Card unit, BoardPosition oldPosition, BoardPosition newPosition, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(unit);

@@ -127,7 +127,7 @@ public class KeywordEffectBatch1Tests
         await match.EndTurn(); // → T3（A）：卡未在场——回合开始不获得（若错误获得将积压、上场后可见）
 
         // 上场（加入路径）：上场时无积压加成（攻 2 基础——未在场期间未获得）；其后友方回合开始起获得。
-        await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.GetSupportLine(playerA)[1]);
+        await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.GetSupportLine(playerA).GetInsertionGaps()[1]);
         Assert.Equal(2, AttackOf(unit)); // 未在场期间未获得（无积压）
         await match.EndTurn(); // → T4（B）：敌方回合不加
         await match.EndTurn(); // → T5（A）：+1

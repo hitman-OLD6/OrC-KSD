@@ -100,7 +100,7 @@ public class TriggerRegistryTests
         Assert.Contains(lowLevel, entry => moveEnds.Any(end => end.Role == "触发端" && ReferenceEquals(entry.Trigger, end.Trigger)));
         Assert.Contains(lowLevel, entry => moveEnds.Any(end => end.Role == "处理端" && ReferenceEquals(entry.Trigger, end.Trigger)));
         Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.JoinBattlefieldAction.Deploy));
-        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.JoinBattlefieldAction.Join));
+        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.JoinBattlefieldAction.JoinSupportLine));
         Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.JoinBattlefieldAction.Handle));
         Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.Engine.OrderFlow.Trigger));
         Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.Engine.OrderFlow.FinalizeTrigger));

@@ -1,6 +1,7 @@
 using Orc.Cards;
 using Orc.Core;
 using Orc.Game;
+using Orc.Game.Board;
 using Orc.Game.Cards;
 using Orc.Game.Commanding;
 using Xunit;
@@ -52,7 +53,7 @@ public class KeywordEffectBatch3Tests
         Assert.False(effect.IsMounted);
         Assert.True(unit.Keywords.Has(KeywordIds.Blitz)); // 词条不动（效果独立卸载）
 
-        var result = await match.PlayManager.PlayUnitAsync(unit, line[1]);
+        var result = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps()[1]);
         Assert.Equal(PlayResultStatus.Success, result.Status);
         Assert.False(unit.GetData<CommandData>().CanMove);  // 部署已完成：未置位（效果已卸载）
         Assert.False(unit.GetData<CommandData>().CanAttack);
@@ -60,7 +61,7 @@ public class KeywordEffectBatch3Tests
         // 复装（同一实例再装载）：订阅重建——部署信号（分发）再至即置位。
         unit.AddEffect(effect);
         Assert.True(effect.IsMounted);
-        await GameUpdates.EmitUnitDeployed(match.Engine, unit, line[1]); // 模拟部署信号分发（对局内由部署链发射）
+        await GameUpdates.EmitUnitDeployed(match.Engine, unit, new BoardPosition(unit.GetData<UnitStateData>().Line!, unit.GetData<UnitStateData>().Line!.IndexOf(unit))); // 模拟部署信号分发（对局内由部署链发射）
         Assert.True(unit.GetData<CommandData>().CanMove);   // 复装恢复
         Assert.True(unit.GetData<CommandData>().CanAttack);
     }
@@ -82,7 +83,7 @@ public class KeywordEffectBatch3Tests
         Assert.False(unitX.Keywords.Has(KeywordIds.Blitz)); // 存在性清除（参值不可读）
         Assert.Null(FindEffect(unitX, BlitzEffectName));
 
-        var resultX = await match.PlayManager.PlayUnitAsync(unitX, line[1]);
+        var resultX = await match.PlayManager.PlayUnitAsync(unitX, line.GetInsertionGaps()[1]);
         Assert.Equal(PlayResultStatus.Success, resultX.Status);
         Assert.False(unitX.GetData<CommandData>().CanMove);
         Assert.False(unitX.GetData<CommandData>().CanAttack);
@@ -94,7 +95,7 @@ public class KeywordEffectBatch3Tests
         var effectY = Assert.IsType<DynamicPassiveEffect>(FindEffect(unitY, BlitzEffectName));
         Assert.True(effectY.IsMounted);
 
-        var resultY = await match.PlayManager.PlayUnitAsync(unitY, line[3]);
+        var resultY = await match.PlayManager.PlayUnitAsync(unitY, line.GetInsertionGaps()[3]);
         Assert.Equal(PlayResultStatus.Success, resultY.Status);
         Assert.True(unitY.GetData<CommandData>().CanMove);
         Assert.True(unitY.GetData<CommandData>().CanAttack);
@@ -114,7 +115,7 @@ public class KeywordEffectBatch3Tests
 
         // 注销前：订阅活着（重置两 bool → 部署信号分发 → 置位）。
         CommandTestKit.Activate(unit, false, false);
-        await GameUpdates.EmitUnitDeployed(match.Engine, unit, line[1]);
+        await GameUpdates.EmitUnitDeployed(match.Engine, unit, new BoardPosition(unit.GetData<UnitStateData>().Line!, unit.GetData<UnitStateData>().Line!.IndexOf(unit)));
         Assert.True(unit.GetData<CommandData>().CanMove);
 
         // 致死：死亡注销撤销行为（效果卸载随动）——不抛错；登记保留（照常可读）。
@@ -125,7 +126,7 @@ public class KeywordEffectBatch3Tests
 
         // 注销后不再产生订阅：重置两 bool → 部署信号分发 → 不再被处理（保持 false/false）。
         CommandTestKit.Activate(unit, false, false);
-        await GameUpdates.EmitUnitDeployed(match.Engine, unit, line[1]);
+        await GameUpdates.EmitUnitDeployed(match.Engine, unit, new BoardPosition(unit.GetData<UnitStateData>().Line!, unit.GetData<UnitStateData>().Line!.IndexOf(unit)));
         Assert.False(unit.GetData<CommandData>().CanMove);
         Assert.False(unit.GetData<CommandData>().CanAttack);
     }
@@ -147,7 +148,7 @@ public class KeywordEffectBatch3Tests
         var effect = Assert.IsType<DynamicPassiveEffect>(FindEffect(grantee, BlitzEffectName));
         Assert.True(effect.IsMounted);
 
-        var result = await match.PlayManager.PlayUnitAsync(grantee, line[1]);
+        var result = await match.PlayManager.PlayUnitAsync(grantee, line.GetInsertionGaps()[1]);
         Assert.Equal(PlayResultStatus.Success, result.Status);
         Assert.True(grantee.GetData<CommandData>().CanMove);
         Assert.True(grantee.GetData<CommandData>().CanAttack);
@@ -158,7 +159,7 @@ public class KeywordEffectBatch3Tests
         Assert.True(await revoked.Keywords.RevokeAsync(KeywordIds.Blitz));
         Assert.Null(FindEffect(revoked, BlitzEffectName));
 
-        var result2 = await match.PlayManager.PlayUnitAsync(revoked, line[3]);
+        var result2 = await match.PlayManager.PlayUnitAsync(revoked, line.GetInsertionGaps()[3]);
         Assert.Equal(PlayResultStatus.Success, result2.Status);
         Assert.False(revoked.GetData<CommandData>().CanMove);
         Assert.False(revoked.GetData<CommandData>().CanAttack);
@@ -177,7 +178,7 @@ public class KeywordEffectBatch3Tests
 
         // X 部署（真实）→ 置位 true/true（装载→部署生效）。
         var unitX = await CommandTestKit.InstantiateLoadedAsync(match, player, CommandTestKit.BlitzId, toHand: true);
-        var resultX = await match.PlayManager.PlayUnitAsync(unitX, line[1]);
+        var resultX = await match.PlayManager.PlayUnitAsync(unitX, line.GetInsertionGaps()[1]);
         Assert.Equal(PlayResultStatus.Success, resultX.Status);
         Assert.True(unitX.GetData<CommandData>().CanMove);
         Assert.True(unitX.GetData<CommandData>().CanAttack);
@@ -187,7 +188,7 @@ public class KeywordEffectBatch3Tests
 
         // Y 部署（真实）→ Y 自己置位；X 保持 false/false（其他单位部署时本单位不被置位——过滤成立）。
         var unitY = await CommandTestKit.InstantiateLoadedAsync(match, player, CommandTestKit.BlitzId, toHand: true);
-        var resultY = await match.PlayManager.PlayUnitAsync(unitY, line[3]);
+        var resultY = await match.PlayManager.PlayUnitAsync(unitY, line.GetInsertionGaps()[3]);
         Assert.Equal(PlayResultStatus.Success, resultY.Status);
         Assert.True(unitY.GetData<CommandData>().CanMove);   // Y 置位（自己）
         Assert.True(unitY.GetData<CommandData>().CanAttack);

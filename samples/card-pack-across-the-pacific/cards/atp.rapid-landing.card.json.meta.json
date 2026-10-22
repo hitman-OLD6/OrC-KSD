@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "orc.across-the-pacific",
+  "source": "cards/atp.rapid-landing.card.json",
+  "assets": [
+    {
+      "guid": "d1ddaa5e-2aa5-1d69-b37b-24f7a76260c5",
+      "kind": "card",
+      "id": "atp.rapid-landing",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

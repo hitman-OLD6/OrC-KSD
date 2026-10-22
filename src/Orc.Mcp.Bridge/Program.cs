@@ -31,6 +31,8 @@ internal static class Program
         {
             case BridgeConnectionState.TokenRejected:
                 return 2;
+            case BridgeConnectionState.AdmissionTimeout:
+                return 3;
             case BridgeConnectionState.NotConnected:
                 return 1;
         }

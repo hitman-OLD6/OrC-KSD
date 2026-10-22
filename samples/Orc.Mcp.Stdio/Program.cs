@@ -107,8 +107,9 @@ internal static class Program
                         ["name"] = ServerName,
                         ["version"] = ServerVersion,
                     },
-                    ["instructions"] = "OrC 卡牌引擎（沙盒/编辑器模式）：先 service.info 读限制清单，再 sandbox.create 建沙盒局，"
-                        + "用 docs.list/docs.read 读创作文档，card.load 逐卡注册，observe.* 观察，target.* 应答目标选择。",
+                    ["instructions"] = "OrC 卡牌引擎（沙盒/编辑器模式）：先 service.info 读限制清单；本进程只做"
+                        + "资产层与诊断（card.write/card.load/observe.*/target.*）。建局/毁局属于管理面"
+                        + "（match.start / room.abort），沙盒包脚手架由服务器 boot 段自动生成。",
                 });
 
             case "notifications/initialized":

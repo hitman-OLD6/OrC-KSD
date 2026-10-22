@@ -217,6 +217,31 @@ public sealed class TargeterBridgeAdapter : ITargeterBridge
     }
 
     /// <summary>
+    /// 收束当前待决请求（房间轮换用）：以"取消"结局完成等待中的应答，并清空待决状态。
+    /// <para>
+    /// 不中断已在引擎内执行的结算；仅保证**客户端不会收到永不完成的 <c>notify/target.request</c>**、
+    /// 动作 Task 不会永久挂起（S8 清理清单：<c>OldPendingTargeting_FailsWithRoomRotated</c>）。
+    /// </para>
+    /// </summary>
+    /// <param name="reason">失败原因（人读；写入 <see cref="Fault"/> 供诊断）。</param>
+    /// <returns>被收束的待决数量（0 或 1）。</returns>
+    public int FailAll(string reason)
+    {
+        TaskCompletionSource<SelectorEvent>? submit;
+        lock (_sync)
+        {
+            submit = _submit;
+            _submit = null;
+            if (submit is not null)
+            {
+                _fault ??= new InvalidOperationException(reason);
+            }
+        }
+
+        return submit is not null && submit.TrySetResult(new CancelEvent()) ? 1 : 0;
+    }
+
+    /// <summary>
     /// 接管当前待决请求（先到先服务：已被应答的请求拒绝接管）。语义＝把该会话的应答权交给 <paramref name="claimant"/>。
     /// </summary>
     /// <returns>接管成功＝true；失败＝false 并给出 <paramref name="reason"/>。</returns>
@@ -453,8 +478,7 @@ public sealed class TargeterBridgeAdapter : ITargeterBridge
         => value switch
         {
             null => "unknown",
-            Orc.Game.Board.Slot => "slot",
-            Orc.Game.Board.FormationGap => "formation-gap",
+            Orc.Game.Board.FormationGap => "deployGap",
             Orc.Game.Players.Hq => "hq",
             Orc.Game.Cards.UnitCard => "unit",
             Orc.Cards.Card => "card",

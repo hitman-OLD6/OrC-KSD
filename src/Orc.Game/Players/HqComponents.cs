@@ -17,8 +17,8 @@ public sealed class HqStateData
     /// 数值表现钳制不低于 0 在快照层、读取一律以有效值为准；≤0 由归零响应收敛）。</summary>
     public int Health { get; internal set; } = Player.InitialHqHealth;
 
-    /// <summary>占位槽引用（布局语义；入槽由对局/战场装配完成；未入槽＝null）。</summary>
-    public Slot? Position { get; internal set; }
+    /// <summary>所在阵线（布局语义；入线由对局/战场装配完成；未入线＝null）。</summary>
+    public BattleLine? Line { get; internal set; }
 }
 
 /// <summary>

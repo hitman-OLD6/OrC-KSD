@@ -17,7 +17,7 @@ namespace Orc.Game.Judicators;
 internal sealed class CombatInterceptionJudicator : Judicator<CombatInterceptionJudicator.InterceptionRule>
 {
     /// <summary>强类型 delegate（该判定器签名）：（攻击者, 目标槽位, 目标是否战斗机）→ 是否拦截。</summary>
-    public delegate bool InterceptionRule(UnitCard attacker, Slot targetSlot, bool targetIsFighter);
+    public delegate bool InterceptionRule(UnitCard attacker, BoardPosition target, bool targetIsFighter);
 
     private readonly Battlefield _battlefield;
     private readonly Func<Player, Player?> _enemyOf;
@@ -37,14 +37,14 @@ internal sealed class CombatInterceptionJudicator : Judicator<CombatInterception
     protected override Func<object[]?, object[]?> Adapt(InterceptionRule handler)
         => args => new object[]
         {
-            handler(Unpack<UnitCard>(args, 0), Unpack<Slot>(args, 1), Unpack<bool>(args, 2)),
+            handler(Unpack<UnitCard>(args, 0), Unpack<BoardPosition>(args, 1), Unpack<bool>(args, 2)),
         };
 
     /// <inheritdoc />
     public override object[]? Invoke(object[]? args) => Adapt(Evaluate)(args);
 
     /// <summary>拦截判定（原 <c>CommandManager.IsBlockedByEnemyFighter</c> 逐字迁移——顺序/短路/防御分支保持）。</summary>
-    private bool Evaluate(UnitCard attacker, Slot targetSlot, bool targetIsFighter)
+    private bool Evaluate(UnitCard attacker, BoardPosition target, bool targetIsFighter)
     {
         if (!CombatTypeGroups.IsBomber(attacker) || targetIsFighter)
         {
@@ -57,14 +57,14 @@ internal sealed class CombatInterceptionJudicator : Judicator<CombatInterception
             return false;
         }
 
-        if (ResolveLineOf(targetSlot) is not { } line)
+        if (ResolveLineOf(target) is not { } line)
         {
             return false; // 异常布局（防御）
         }
 
-        foreach (var slot in line)
+        foreach (var member in line.Members)
         {
-            if (slot.Occupant is UnitCard unit && !IsDead(unit)
+            if (member is UnitCard unit && !IsDead(unit)
                 && ReferenceEquals(unit.Owner, enemy) && CombatTypeGroups.IsFighter(unit))
             {
                 return true;
@@ -74,20 +74,20 @@ internal sealed class CombatInterceptionJudicator : Judicator<CombatInterception
         return false;
     }
 
-    /// <summary>槽位所属战线（三线判定；异常布局＝null——防御；原 <c>CommandManager.ResolveLineOf</c> 迁移）。</summary>
-    private BattleLine? ResolveLineOf(Slot slot)
+    /// <summary>位置所属战线（三线判定；异常布局＝null——防御）。</summary>
+    private BattleLine? ResolveLineOf(BoardPosition target)
     {
-        if (_battlefield.FrontLine.Contains(slot))
+        if (ReferenceEquals(target.Line, _battlefield.FrontLine))
         {
             return _battlefield.FrontLine;
         }
 
-        if (_battlefield.PlayerASupportLine.Contains(slot))
+        if (ReferenceEquals(target.Line, _battlefield.PlayerASupportLine))
         {
             return _battlefield.PlayerASupportLine;
         }
 
-        if (_battlefield.PlayerBSupportLine.Contains(slot))
+        if (ReferenceEquals(target.Line, _battlefield.PlayerBSupportLine))
         {
             return _battlefield.PlayerBSupportLine;
         }

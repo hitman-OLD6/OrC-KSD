@@ -31,7 +31,7 @@ public class HostIntegrationTests
     {
         using var fixture = new SandboxFixture();
 
-        var created = await fixture.InvokeAsync("sandbox.create");
+        var created = await fixture.CreateSandboxMatchAsync();
         Assert.True(created.Ok, created.Message);
 
         var match = fixture.Service.Executor.Match;
@@ -48,8 +48,8 @@ public class HostIntegrationTests
         var changes = new List<MatchLifecycleChange>();
         fixture.Service.MatchChanged += (_, args) => changes.Add(args.Change);
 
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
-        Assert.True((await fixture.InvokeAsync("sandbox.dispose")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
+        Assert.True((await fixture.DisposeSandboxMatchAsync()).Ok);
 
         Assert.Equal(new[] { MatchLifecycleChange.Created, MatchLifecycleChange.Disposed }, changes);
         Assert.Null(fixture.Service.ActiveMatch);
@@ -59,7 +59,7 @@ public class HostIntegrationTests
     public async Task TargetingSubscription_AndClaim_AreFirstComeFirstServed()
     {
         using var fixture = new SandboxFixture(McpServiceMode.Authoring);
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
         // 写卡 → 注册 → 造到手牌（预打出会发起选位，从而进入待决）。
         File.WriteAllText(
@@ -111,14 +111,14 @@ public class HostIntegrationTests
             }
         }
 
-        Assert.True((await fixture.InvokeAsync("sandbox.dispose")).Ok);
+        Assert.True((await fixture.DisposeSandboxMatchAsync()).Ok);
     }
 
     [Fact]
     public async Task SegmentConsumer_HostMode_StopsServicePulling()
     {
         using var fixture = new SandboxFixture();
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
         // 默认：服务层取段
         Assert.Equal(SegmentConsumer.Service, fixture.Service.SegmentConsumer);
@@ -144,7 +144,7 @@ public class HostIntegrationTests
     public async Task StrongTypedActions_ShareGateWithTools()
     {
         using var fixture = new SandboxFixture();
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
         var before = fixture.Service.ActiveMatch!.TurnNumber;
 
@@ -163,7 +163,7 @@ public class HostIntegrationTests
     public async Task ToolAndActionFaces_StayInSync()
     {
         using var fixture = new SandboxFixture();
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
         // 工具入口：match.end_turn；强类型入口：EndTurnAsync —— 同一实现的两条入口
         var viaTool = await fixture.InvokeAsync("match.end_turn");
@@ -177,7 +177,7 @@ public class HostIntegrationTests
     public async Task TargetingCancel_IsReportedAsCancelledSuccess()
     {
         using var fixture = new SandboxFixture();
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
         File.WriteAllText(
             Path.Combine(fixture.Service.Sandbox.CardsDirectory, "host.infantry.card.json"),

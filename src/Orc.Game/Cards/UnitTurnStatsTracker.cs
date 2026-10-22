@@ -107,9 +107,9 @@ public sealed class UnitTurnStatsTracker
                      _battlefield.PlayerASupportLine, _battlefield.FrontLine, _battlefield.PlayerBSupportLine,
                  })
         {
-            for (var i = 0; i < line.Count; i++)
+            for (var i = 0; i < line.Size; i++)
             {
-                if (line[i].Occupant is UnitCard unit
+                if (line[i] is UnitCard unit
                     && ReferenceEquals(unit.Owner, player)
                     && unit.TryGetData<ActionRecordData>(out var record))
                 {

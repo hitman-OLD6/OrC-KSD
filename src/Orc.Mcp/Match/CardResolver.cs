@@ -88,8 +88,8 @@ internal static class CardResolver
         return true;
     }
 
-    /// <summary>按玩家索引 ＋ 槽位序号解析支援线槽位。</summary>
-    public static bool TryResolveSupportSlot(Orc.Game.Match match, int ownerIndex, int slotIndex, out Slot? slot, out string error)
+    /// <summary>按玩家索引 ＋ 插入序号解析支援线空隙（有序列表模型：序号＝插入后的位置）。</summary>
+    public static bool TryResolveSupportSlot(Orc.Game.Match match, int ownerIndex, int slotIndex, out FormationGap? slot, out string error)
     {
         slot = null;
         error = string.Empty;
@@ -100,13 +100,14 @@ internal static class CardResolver
         }
 
         var line = match.Battlefield.GetSupportLine(player!);
-        if (slotIndex < 0 || slotIndex >= line.Count)
+        var gaps = line.GetInsertionGaps();
+        if (slotIndex < 0 || slotIndex >= gaps.Count)
         {
-            error = $"槽位序号越界（玩家 {ownerIndex} 支援线容量 {line.Count}，请求 {slotIndex}）。";
+            error = $"插入序号越界（玩家 {ownerIndex} 支援线元素 {line.Size} 个、可用位置 {gaps.Count} 个，请求 {slotIndex}）。";
             return false;
         }
 
-        slot = line[slotIndex];
+        slot = gaps[slotIndex];
         return true;
     }
 

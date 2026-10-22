@@ -42,20 +42,18 @@ internal static class ObserveTools
         service.AddTool(
             "observe.view",
             "observe",
-            "对局摘要视图：沙盒模式＝全知摘要（含双方手牌明细）；player 模式＝按座位过滤的投影视图（不含对手手牌明细）。"
-            + "panel=true 时无视模式强制返回投影面板（整枚 view ＋ actions），供 MCP 桥构造 seat.board。",
+            "读取当前对局视图（与推送**同形**）：绑 seat 的 viewer＝单座位视角帧；不绑 seat 的 viewer＝全知帧；"
+            + "调试面＝对局摘要（含双方手牌，供诊断）。视角由角色决定，不由参数决定。",
             """
             {
               "type": "object",
-              "properties": {
-                "seat": { "type": "integer", "minimum": 0, "maximum": 1, "description": "视角座位（缺省＝进程级 AgentSeat）" },
-                "panel": { "type": "boolean", "description": "true＝返回投影面板（view+actions）；沙盒摘要不含战线/槽位/攻击预览，桥需要面板形态" }
-              },
+              "properties": {},
               "additionalProperties": false
             }
             """,
-            (call, ct) => View(service, call.Arguments),
-            readOnly: true);
+            (call, ct) => Task.FromResult(View(service)),
+            readOnly: true,
+            requiredRole: ToolRole.Viewer);
     }
 
     private static Task<McpToolResult> Snapshot(McpService service)
@@ -138,107 +136,34 @@ internal static class ObserveTools
         };
     }
 
-    private static Task<McpToolResult> View(McpService service, JsonElement args)
+    /// <summary>
+    /// 视图拉取面（R7）：与推送同形，**视角由角色决定**（退役 <c>panel</c> 参数旁路）。
+    /// <list type="bullet">
+    ///   <item>调试面 → 对局摘要（含双方手牌，供诊断中间态）；</item>
+    ///   <item>绑 seat → 单座位视角帧；</item>
+    ///   <item>不绑 seat 的 viewer → 全知帧（两份座位视角打包）。</item>
+    /// </list>
+    /// </summary>
+    private static McpToolResult View(McpService service)
     {
-        var match = service.Executor.Match;
-        if (match is null)
+        if (service.Executor.Match is null)
         {
-            return Task.FromResult(McpToolResult.Failure(McpCodes.NotReady, "尚无活跃对局。"));
+            return McpToolResult.Failure(McpCodes.NotReady, "尚无活跃对局。");
         }
 
-        // R9d：player 模式＝按座位过滤的投影视图（不含对手手牌明细）；沙盒模式＝全知摘要。
-        // panel=true：沙盒模式下也可显式索取投影面板——seat.board 需要 view/actions，
-        // 而沙盒摘要只有 players[]（无战线、槽位、攻击预览），桥侧无法自行还原。
-        if (ToolArgs.OptionalBool(args, "panel") || service.Options.Mode != McpServiceMode.Authoring)
-        {
-            return Task.FromResult(ProjectedView(service, match, args));
-        }
+        var outcome = service.Caller.DebugFace
+            ? service.ProjectDebugSummary()
+            : service.Caller.Seat is { } seat
+                ? service.ProjectSeatFrame(seat)
+                : service.ProjectOmniscientFrame();
 
-        // 摘要面读 CurrentPlayer（换牌期尚为 null，引擎抛"回合尚未开始（当前行动方未定）"）。
-        // 这是阶段未就绪而非故障：按 not-ready 报告，别让桥的每次刷新把它记成 internal。
-        if (string.Equals(match.Phase.ToString(), "Mulligan", StringComparison.Ordinal))
-        {
-            return Task.FromResult(McpToolResult.Failure(
-                McpCodes.NotReady,
-                "对局尚未进入进行态（换牌阶段）——摘要视图暂不可用；需要面板请用 panel=true。"));
-        }
-
-        var players = new JsonArray();
-        foreach (var player in match.Players)
-        {
-            players.Add(new JsonObject
-            {
-                ["index"] = player.Index,
-                ["ref"] = player.ReferenceKey,
-                ["handCount"] = player.Hand.Count,
-                ["deckCount"] = player.Deck.Count,
-                ["points"] = player.Points,
-                ["pointSlots"] = player.PointSlots,
-                ["hqRef"] = player.Hq.Id.ToString("N"),
-                ["hqHealth"] = player.HqHealth,
-                ["hand"] = HandJson(player),
-            });
-        }
-
-        var details = new JsonObject
-        {
-            ["matchId"] = service.Options.MatchId,
-            ["state"] = match.State.ToString(),
-            ["phase"] = match.Phase.ToString(),
-            ["turn"] = match.TurnNumber,
-            ["currentPlayerIndex"] = match.CurrentPlayer?.Index,
-            ["winnerIndex"] = match.Winner?.Index,
-            ["endReason"] = match.EndReason?.ToString(),
-            ["players"] = players,
-        };
-
-        return Task.FromResult(McpToolResult.Success("对局摘要已读取。", details: details));
-    }
-
-    /// <summary>player 模式：按座位过滤的投影视图（不含对手手牌明细）。</summary>
-    private static McpToolResult ProjectedView(McpService service, Orc.Game.Match match, JsonElement args)
-    {
-        // 多客户端：视角优先取本次调用的 seat 参数（每个会话一个座位），缺省回落进程级 AgentSeat。
-        var seat = ToolArgs.OptionalInt(args, "seat") ?? service.Options.AgentSeat;
-        if (seat is null)
-        {
-            return McpToolResult.ModeDenied(
-                "player 模式的观察面需要指定座位（调用参数 seat 或选项 AgentSeat＝0/1）——否则无法产出按座位过滤的视图。");
-        }
-
-        if (seat is < 0 or > 1)
-        {
-            return McpToolResult.Failure(McpCodes.InvalidArguments, "AgentSeat 须为 0 或 1。");
-        }
-
-        // 统一走服务层投影面（整枚 view ＋ actions；只读执行面，选靶挂起期也可用）。
-        _ = match;
-        var projected = service.ProjectView(seat.Value);
-        if (projected.Payload is not JsonObject details)
+        if (outcome.Payload is not JsonObject details)
         {
             return McpToolResult.Failure(
-                projected.FailureCode ?? McpCodes.Internal,
-                projected.FailureMessage ?? "投影失败。");
+                outcome.FailureCode ?? McpCodes.Internal,
+                outcome.FailureMessage ?? "视图读取失败。");
         }
 
-        details["kind"] = "observe.view.player";
-        details["hiddenInfoNote"] = "player 模式只提供按座位过滤的信息（对手手牌明细不可见）。";
-        return McpToolResult.Success("按座位过滤的视图已读取。", details: details);
-    }
-
-    private static JsonArray HandJson(Orc.Game.Players.Player player)
-    {
-        var hand = new JsonArray();
-        foreach (var card in player.Hand)
-        {
-            hand.Add(new JsonObject
-            {
-                ["ref"] = card.Id.ToString("N"),
-                ["name"] = card.Name,
-                ["alive"] = card.Life.IsAlive,
-            });
-        }
-
-        return hand;
+        return McpToolResult.Success("视图已读取。", details: details);
     }
 }

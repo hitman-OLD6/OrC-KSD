@@ -177,7 +177,7 @@ public class C2ReferenceAndFailureTests
         recorder.Clear();
         var handBefore = playerA.Hand.Count;
         var deckBefore = playerA.Deck.Count;
-        var occupantsBefore = CommandTestKit.AllSlotsOf(match).Select(s => s.Occupant).ToArray();
+        var occupantsBefore = CommandTestKit.AllSlotsOf(match).Select(s => s).ToArray();
 
         // 复合调用（解析与选取分离——解析空＝失败、先于创建：无实例可回收）
         var result = await match.CardService.CreateAndPlaceToAdjacentAsync(
@@ -192,7 +192,7 @@ public class C2ReferenceAndFailureTests
         Assert.Equal(0, recorder.TotalCount());
         Assert.Equal(handBefore, playerA.Hand.Count);
         Assert.Equal(deckBefore, playerA.Deck.Count);
-        Assert.Equal(occupantsBefore, CommandTestKit.AllSlotsOf(match).Select(s => s.Occupant).ToArray());
+        Assert.Equal(occupantsBefore, CommandTestKit.AllSlotsOf(match).Select(s => s).ToArray());
     }
 
     // ---------- ③ 增强：创建后回收（放置期失败防御兜底——「无未归属残留」强证据） ----------
@@ -204,7 +204,7 @@ public class C2ReferenceAndFailureTests
         await match.Initialize();
         var playerA = match.Players[0];
 
-        var occupied = match.Battlefield.GetSupportLine(playerA)[1];
+        var occupied = match.Battlefield.GetSupportLine(playerA).GetInsertionGaps()[1];
         await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1); // 占位
 
         using var recorder = new UpdateRecorder(match.Engine);

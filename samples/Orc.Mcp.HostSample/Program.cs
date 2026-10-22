@@ -40,7 +40,6 @@ internal static class Program
             Mode = McpServiceMode.Authoring,
             SandboxRoot = sandboxRoot,
             Seed = 20261016,
-            AgentSeat = 0,
         });
 
         Console.WriteLine($"== 参考宿主启动：sandbox={sandboxRoot} ==");
@@ -89,7 +88,8 @@ internal static class Program
         // ---------- 会话流程 ----------
 
         await CallAsync(service, "service.info");
-        await CallAsync(service, "sandbox.create");
+        var created = await service.CreateSandboxMatchAsync();
+        Console.WriteLine($"[host] 进程内建沙盒局：ok={created.Ok} code={created.Code}");
 
         // 写一张卡 → 校验 → 逐卡注册（agent 通常走 MCP 工具；此处用同一 InvokeAsync 入口演示）
         var cardJson = """
@@ -162,7 +162,8 @@ internal static class Program
                 stillPending.SessionId, Array.Empty<int>(), cancel: true, TargeterBridgeAdapter.ClaimantHost, out _);
         }
 
-        await CallAsync(service, "sandbox.dispose");
+        var disposed = service.DisposeSandboxMatch();
+        Console.WriteLine($"[host] 进程内销毁沙盒局：ok={disposed.Ok} code={disposed.Code}");
 
         try
         {
@@ -188,7 +189,7 @@ internal static class Program
 
         try
         {
-            var view = projection.Provider.Project(match, match.Players[service.Options.AgentSeat ?? 0]);
+            var view = projection.Provider.Project(match, match.Players[ 0]);
             Console.WriteLine(
                 $"[帧 {frame}] 投影：回合={view.Turn} 相位={view.Phase} 我方手牌={view.SelfHandCount} 卡组={view.SelfDeckCount} "
                 + $"敌方手牌={view.EnemyHandCount?.ToString() ?? "?"} 指挥点={view.SelfKredits}/{view.SelfMaxKredits}");

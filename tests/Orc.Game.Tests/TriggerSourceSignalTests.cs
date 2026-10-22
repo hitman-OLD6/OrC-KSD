@@ -112,7 +112,7 @@ public class TriggerSourceSignalTests
         using var recorder = new UpdateRecorder(match.Engine);
         recorder.Clear();
 
-        var result = await match.PlayManager.PlayUnitAsync(unit, match.Battlefield.FrontLine[0]);
+        var result = await match.PlayManager.PlayUnitAsync(unit, match.Battlefield.FrontLine.GetInsertionGaps()[0]);
 
         Assert.Equal(PlayResultStatus.Success, result.Status);
         var payload = recorder.PayloadOf(GameUpdates.UnitDeployed);
@@ -132,7 +132,7 @@ public class TriggerSourceSignalTests
         using var recorder = new UpdateRecorder(match.Engine);
         recorder.Clear();
 
-        var result = await match.PlayManager.PlayUnitAsync(unit, match.Battlefield.FrontLine[0]);
+        var result = await match.PlayManager.PlayUnitAsync(unit, match.Battlefield.FrontLine.GetInsertionGaps()[0]);
 
         Assert.Equal(PlayResultStatus.Success, result.Status);
         var payload = recorder.PayloadOf(GameUpdates.CardPlayed);

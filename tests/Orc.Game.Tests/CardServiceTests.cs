@@ -109,7 +109,7 @@ public class CardServiceTests
         var match = S9Kit.CreateSceneMatch();
         await match.Initialize();
         var playerA = match.Players[0];
-        var slot = match.Battlefield.GetSupportLine(playerA)[3]; // 目标槽＝槽 3（避开 HQ 占位槽）
+        var slot = match.Battlefield.GetSupportLine(playerA).GetInsertionGaps()[3]; // 目标槽＝槽 3（避开 HQ 占位槽）
 
         using var recorder = new UpdateRecorder(match.Engine);
         var pointsBefore = playerA.Points;
@@ -123,9 +123,9 @@ public class CardServiceTests
         var unit = Assert.IsType<UnitCard>(result.Card);
 
         // 指定空槽加入＋单位化组件齐备（位置/类型从定义填充/指挥组件）
-        Assert.Same(unit, slot.Occupant);
+        Assert.Same(unit, slot);
         var state = unit.GetData<UnitStateData>();
-        Assert.Same(slot, state.Position);
+        Assert.Same(slot, state.Line);
         Assert.False(state.IsDestroyed);
         Assert.Equal(new[] { UnitType.Infantry }, state.UnitTypes);
         Assert.NotNull(unit.GetData<CommandData>());
@@ -156,7 +156,7 @@ public class CardServiceTests
         var playerA = match.Players[0];
 
         var (_, effect) = await S9Kit.PrepareEmitterAsync(match, playerA);
-        effect.TargetSlot = match.Battlefield.GetSupportLine(playerA)[3];
+        effect.TargetSlot = match.Battlefield.GetSupportLine(playerA).GetInsertionGaps()[3];
         using var recorder = new UpdateRecorder(match.Engine);
 
         await effect.CastAsync(match.Engine);
@@ -164,7 +164,7 @@ public class CardServiceTests
         // 上下文可达性专项：经效果/上下文路径完成一次该场景操作（调用真实发生）＋断言其结果（新实例入阵线）
         Assert.True(effect.ServiceResolved);
         Assert.Equal(CardPlaceStatus.Placed, effect.LastResult!.Status);
-        Assert.Same(effect.LastResult.Card, effect.TargetSlot!.Occupant);
+        Assert.Same(effect.LastResult.Card, effect.TargetSlot!);
         Assert.Equal(1, recorder.CountOf(GameUpdates.UnitJoined));
     }
 
@@ -213,8 +213,8 @@ public class CardServiceTests
         // 解析与选取分离：服务解析候选（口径同「邻位动态候选」单源）、调用方策略选取（缺省＝取首个）、选定后放置
         Assert.Equal(CardPlaceStatus.Placed, effect.LastResult!.Status);
         Assert.NotNull(effect.LastCandidates);
-        Assert.Equal(new[] { supportLine[1], supportLine[3] }, effect.LastCandidates!);
-        Assert.Same(effect.LastResult.Card, supportLine[1].Occupant);
+        Assert.Equal(new[] { supportLine.GetInsertionGaps()[1], supportLine.GetInsertionGaps()[3] }, effect.LastCandidates!);
+        Assert.Same(effect.LastResult.Card, supportLine.GetInsertionGaps()[1]);
 
         // unit.joined 恰一次；不经手牌
         Assert.Equal(1, recorder.CountOf(GameUpdates.UnitJoined));
@@ -244,7 +244,7 @@ public class CardServiceTests
         using var recorder = new UpdateRecorder(match.Engine);
         var handBefore = playerA.Hand.Count;
         var deckBefore = playerA.Deck.Count;
-        var occupantsBefore = CommandTestKit.AllSlotsOf(match).Select(slot => slot.Occupant).ToArray();
+        var occupantsBefore = CommandTestKit.AllSlotsOf(match).Select(slot => slot).ToArray();
 
         await effect.CastAsync(match.Engine);
 
@@ -255,7 +255,7 @@ public class CardServiceTests
         Assert.Null(effect.LastCandidates); // 选取环节未到达（解析空 → 不进入选取）
         Assert.Equal(handBefore, playerA.Hand.Count);
         Assert.Equal(deckBefore, playerA.Deck.Count);
-        Assert.Equal(occupantsBefore, CommandTestKit.AllSlotsOf(match).Select(slot => slot.Occupant).ToArray());
+        Assert.Equal(occupantsBefore, CommandTestKit.AllSlotsOf(match).Select(slot => slot).ToArray());
         Assert.Equal(0, recorder.TotalCount());
     }
 
@@ -393,7 +393,7 @@ public class CardServiceTests
         Assert.Equal(1, sourceState.DefenseLoss);
         Assert.Contains(UnitType.Bomber, sourceState.UnitTypes);
         Assert.NotEmpty(source.Modifiers.All);
-        Assert.Same(source, match.Battlefield.GetSupportLine(playerB)[1].Occupant);
+        Assert.Same(source, match.Battlefield.GetSupportLine(playerB).GetInsertionGaps()[1]);
 
         // （放入手牌时）card.hand.add 恰一次
         Assert.Equal(1, recorder.CountOf(GameUpdates.CardHandAdd));
@@ -413,7 +413,7 @@ public class CardServiceTests
         var match = S9Kit.CreateSceneMatch(effectRegistry: registry);
         await match.Initialize();
         var playerA = match.Players[0];
-        var slot = match.Battlefield.GetSupportLine(playerA)[1];
+        var slot = match.Battlefield.GetSupportLine(playerA).GetInsertionGaps()[1];
 
         // 原实例（步兵——槽 1；带实例状态：损伤 1 ＋ 类型增补〔Artillery〕＋ 修饰 +2 攻）
         var oldUnit = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
@@ -436,7 +436,7 @@ public class CardServiceTests
         var newUnit = Assert.IsType<UnitCard>(result.Card);
 
         // ① 新实例位于原槽位
-        Assert.Same(newUnit, slot.Occupant);
+        Assert.Same(newUnit, slot);
 
         // ② 静态（满状态：无损伤、无修饰；无原状态携带：类型＝目标定义〔不含原实例增补〕）
         var newState = newUnit.GetData<UnitStateData>();
@@ -448,7 +448,7 @@ public class CardServiceTests
 
         // ③ 原实例已离场且已销毁（非死亡路径：不冒充「被消灭」）
         Assert.False(oldUnit.Life.IsAlive);
-        Assert.Null(oldState.Position);
+        Assert.Null(oldState.Line);
         Assert.False(oldState.IsDestroyed);
 
         // ④ 信号：card.destroyed 恰一次 ＋ unit.joined 恰一次；无 card.died / card.discarded / unit.deployed
@@ -484,7 +484,7 @@ public class CardServiceTests
         var pincer = await CommandTestKit.InstantiateLoadedAsync(match, playerA, S9Kit.PincerUnitId, toHand: true);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         bridge.InteractionScript = TargeterTestKit.AutoCompleteWithFirstAllowed();
-        var deploy = await match.PlayManager.PlayUnitAsync(pincer, supportLine[1]);
+        var deploy = await match.PlayManager.PlayUnitAsync(pincer, supportLine.GetInsertionGaps()[1]);
         Assert.Equal(PlayResultStatus.Success, deploy.Status);
         Assert.Equal(4, S9Kit.AttackOf(friend)); // 2 + 2（配对加成）
 
@@ -500,7 +500,7 @@ public class CardServiceTests
         Assert.False(match.CommandManager.Pincers.IsPaired(friend));
 
         // 转换落位原位（新实例（轻步兵）占原槽）
-        Assert.Same(effect.LastResult.Card, supportLine[1].Occupant);
+        Assert.Same(effect.LastResult.Card, supportLine.GetInsertionGaps()[1]);
     }
 
     [Fact]
@@ -514,7 +514,7 @@ public class CardServiceTests
         var match = S9Kit.CreateSceneMatch(effectRegistry: registry);
         await match.Initialize();
         var playerA = match.Players[0];
-        var slot = match.Battlefield.GetSupportLine(playerA)[1];
+        var slot = match.Battlefield.GetSupportLine(playerA).GetInsertionGaps()[1];
 
         var oldUnit = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
         var oldState = oldUnit.GetData<UnitStateData>();
@@ -526,10 +526,10 @@ public class CardServiceTests
 
         // 「先判定/先就绪后替换」：目标定义不存在＝创建失败先于任何替换——原实例状态完好（「旧已毁、新未成」禁止）
         Assert.IsType<KeyNotFoundException>(effect.LastError);
-        Assert.Same(oldUnit, slot.Occupant);
+        Assert.Same(oldUnit, slot);
         Assert.True(oldUnit.Life.IsAlive);
         Assert.False(oldState.IsDestroyed);
-        Assert.Same(slot, oldState.Position);
+        Assert.Same(slot, oldState.Line);
         Assert.Equal(1, S9Kit.CountAliveUnitsOf(match, playerA));
     }
 
@@ -636,7 +636,7 @@ public class CardServiceTests
         var match = S9Kit.CreateSceneMatch();
         await match.Initialize();
         var playerA = match.Players[0];
-        var slot = match.Battlefield.GetSupportLine(playerA)[1];
+        var slot = match.Battlefield.GetSupportLine(playerA).GetInsertionGaps()[1];
         await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1); // 占用槽 1
 
         using var recorder = new UpdateRecorder(match.Engine);
@@ -711,7 +711,7 @@ public class CardServiceTests
 
         // 放置类别约束不匹配（非单位定义放置到支援线）＝业务失败（结果对象）——预防式：先判定不创建实例（零副作用）
         var result = await match.CardService.CreateAndPlaceToSupportLineAsync(
-            CommandTestKit.OrderCardId, playerA, match.Battlefield.GetSupportLine(playerA)[1]);
+            CommandTestKit.OrderCardId, playerA, match.Battlefield.GetSupportLine(playerA).GetInsertionGaps()[1]);
 
         Assert.Equal(CardPlaceStatus.Rejected, result.Status);
         Assert.Equal(CardPlaceFailureReason.CategoryMismatch, result.FailureReason);
@@ -811,7 +811,7 @@ public class CardServiceTests
         // 对局面动作缺省＝明确拒绝（不静默）：阵线放置 / 洗入
         var loose = (UnitCard)await standalone.CreateAsync(S9Kit.LightInfantryId, playerA);
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => standalone.PlaceToSupportLineAsync(loose, playerA, match.Battlefield.GetSupportLine(playerA)[1]));
+            () => standalone.PlaceToSupportLineAsync(loose, playerA, match.Battlefield.GetSupportLine(playerA).GetInsertionGaps()[1]));
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => standalone.CreateAndPlaceIntoDeckShuffledAsync(S9Kit.LightInfantryId, playerA));
 
@@ -848,13 +848,13 @@ public class CardServiceTests
         var supportLine = match.Battlefield.GetSupportLine(playerA);
 
         // 空线（仅 HQ 占位）：HQ 两侧邻位空槽 [1, 3] → 候选 [1, 3]
-        Assert.Equal(new[] { supportLine[1], supportLine[3] }, match.CardService.GetAdjacentEmptySlots(playerA));
+        Assert.Equal(new[] { supportLine.GetInsertionGaps()[1], supportLine.GetInsertionGaps()[3] }, match.CardService.GetAdjacentEmptySlots(playerA));
 
         // 单位落位后：HQ（槽 2）＋单位（槽 4）→ 候选 [1, 3]（去重、索引升序）
         await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 3);
-        Assert.Equal(new[] { supportLine[1], supportLine[3] }, match.CardService.GetAdjacentEmptySlots(playerA));
+        Assert.Equal(new[] { supportLine.GetInsertionGaps()[1], supportLine.GetInsertionGaps()[3] }, match.CardService.GetAdjacentEmptySlots(playerA));
 
         // 与既有「邻位动态候选」单源一致（同一实现，不另建规则）
-        Assert.Equal(supportLine.GetAdjacentEmptySlots().ToArray(), match.CardService.GetAdjacentEmptySlots(playerA));
+        Assert.Equal(supportLine.GetInsertionGaps().ToArray(), match.CardService.GetAdjacentEmptySlots(playerA));
     }
 }

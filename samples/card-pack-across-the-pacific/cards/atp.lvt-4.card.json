@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "atp.lvt-4",
+  "name": "LVT-4",
+  "components": [
+    {
+      "component": "typeCategory",
+      "type": [
+        "tank"
+      ]
+    },
+    {
+      "component": "factionCost",
+      "faction": "usa",
+      "kredits": 4
+    },
+    {
+      "component": "battleStats",
+      "operationCost": 2,
+      "attack": 4,
+      "defense": 5
+    },
+    {
+      "component": "tagData",
+      "rarity": "standard"
+    },
+    {
+      "component": "keywords",
+      "keywords": [
+        "闪击"
+      ]
+    },
+    {
+      "component": "effects",
+      "prefabs": [
+        "atp.lvt-4.landing"
+      ]
+    }
+  ]
+}

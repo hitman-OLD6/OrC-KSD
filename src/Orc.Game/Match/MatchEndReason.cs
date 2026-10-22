@@ -10,4 +10,10 @@ public enum MatchEndReason
 
     /// <summary>认输（玩家主动投降；胜者＝认输方之对手）。</summary>
     Concede = 1,
+
+    /// <summary>
+    /// 终止（管理员主动终止；**无胜者**——<c>Winner == null</c>）。
+    /// <para>与认输的区别：终止不产生胜者，因此不得用"代某一方认输"模拟（会凭空产生胜者）。</para>
+    /// </summary>
+    Aborted = 2,
 }

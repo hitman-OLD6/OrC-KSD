@@ -73,7 +73,7 @@ public class RandomEffectScenarioTests
         await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 3);
 
         var candidates = RandomSceneKit.CollectAliveUnits(match.Battlefield, playerA, sameSide: false); // 敌对方＝playerA 视角非己方
-        var slotsBefore = candidates.ToDictionary(unit => unit, unit => unit.GetData<UnitStateData>().Position);
+        var slotsBefore = candidates.ToDictionary(unit => unit, unit => unit.GetData<UnitStateData>().Line);
 
         var diedCount = 0;
         using var probe = match.Engine.Subscribe((type, _, _) =>
@@ -104,8 +104,8 @@ public class RandomEffectScenarioTests
             chosenIndex,
             diedCount,
             state.IsDestroyed,
-            state.Position is null,
-            slotsBefore[chosen]?.IsEmpty ?? false,
+            state.Line is null,
+            slotsBefore[chosen] is not null,
             others.All(unit => !unit.GetData<UnitStateData>().IsDestroyed));
     }
 
@@ -386,9 +386,9 @@ internal static class RandomSceneKit
         var result = new List<UnitCard>();
         foreach (var line in new[] { battlefield.PlayerASupportLine, battlefield.FrontLine, battlefield.PlayerBSupportLine })
         {
-            foreach (var slot in line)
+            foreach (var slot in line.Members)
             {
-                if (slot.Occupant is UnitCard unit
+                if (slot is UnitCard unit
                     && !unit.GetData<UnitStateData>().IsDestroyed
                     && unit.Owner is { } owner
                     && (ReferenceEquals(owner, side) == sameSide))

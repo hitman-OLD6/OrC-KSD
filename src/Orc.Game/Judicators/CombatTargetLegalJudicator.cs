@@ -25,9 +25,9 @@ internal sealed class CombatTargetLegalJudicator : Judicator<CombatTargetLegalJu
     private readonly Func<Player, Player?> _enemyOf;
     private readonly Func<UnitCard, bool> _isUnitGuarded;
     private readonly Func<Hq, bool> _isHqGuarded;
-    private readonly Func<UnitCard, Slot, bool> _rangeRule;
+    private readonly Func<UnitCard, BoardPosition, bool> _rangeRule;
     private readonly Func<UnitCard, bool> _guardEligibilityRule;
-    private readonly Func<UnitCard, Slot, bool, bool> _interceptionRule;
+    private readonly Func<UnitCard, BoardPosition, bool, bool> _interceptionRule;
 
     /// <summary>创建目标合法性判定器（装配期注入对局级只读设施引用与子规则条目调用通道）。</summary>
     /// <param name="enemyOf">敌我判定（归属环节；返回该玩家的对手，无对手＝null）。</param>
@@ -41,9 +41,9 @@ internal sealed class CombatTargetLegalJudicator : Judicator<CombatTargetLegalJu
         Func<Player, Player?> enemyOf,
         Func<UnitCard, bool> isUnitGuarded,
         Func<Hq, bool> isHqGuarded,
-        Func<UnitCard, Slot, bool> rangeRule,
+        Func<UnitCard, BoardPosition, bool> rangeRule,
         Func<UnitCard, bool> guardEligibilityRule,
-        Func<UnitCard, Slot, bool, bool> interceptionRule)
+        Func<UnitCard, BoardPosition, bool, bool> interceptionRule)
     {
         ArgumentNullException.ThrowIfNull(enemyOf);
         ArgumentNullException.ThrowIfNull(isUnitGuarded);
@@ -101,7 +101,7 @@ internal sealed class CombatTargetLegalJudicator : Judicator<CombatTargetLegalJu
 
         if (!target.TryGetData<UnitStateData>(out var targetState)
             || targetState.IsDestroyed
-            || targetState.Position is null)
+            || targetState.Line is null)
         {
             return false;
         }
@@ -117,7 +117,14 @@ internal sealed class CombatTargetLegalJudicator : Judicator<CombatTargetLegalJu
         }
 
         // 轰炸机拦截（后置项 C；经 C4 条目）：目标所在战线存在存活敌方战斗机时，该战线的非战斗机目标置黑
-        var targetPosition = targetState.Position!;
+        var targetLine = targetState.Line!;
+        var targetIndex = targetLine.IndexOf(target);
+        if (targetIndex < 0)
+        {
+            return false;
+        }
+
+        var targetPosition = new BoardPosition(targetLine, targetIndex);
         if (_interceptionRule(attacker, targetPosition, CombatTypeGroups.IsFighter(target)))
         {
             return false;
@@ -136,10 +143,12 @@ internal sealed class CombatTargetLegalJudicator : Judicator<CombatTargetLegalJu
             return false;
         }
 
-        if (hq.Position is not { } hqSlot)
+        if (hq.Line is not { } hqLine)
         {
-            return false; // 异常布局（防御：HQ 未入槽）
+            return false; // 异常布局（防御：HQ 未入线）
         }
+
+        var hqSlot = new BoardPosition(hqLine, hqLine.IndexOf(hq));
 
         if (_isHqGuarded(hq) && !_guardEligibilityRule(attacker))
         {

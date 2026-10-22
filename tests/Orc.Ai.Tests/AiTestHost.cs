@@ -46,12 +46,16 @@ internal sealed class AiTestHost : IDisposable
         var sandboxRoot = Path.Combine(Path.GetTempPath(), "orc-ai-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(sandboxRoot);
 
+        // 进程级注册由宿主 boot 段完成（刻意变化第 10 条）；测试宿主须自己做一次。
+        Orc.Plugins.BuiltIn.BuiltInPlugin.RegisterProcessDefaults();
+        Orc.Foundation.Actions.FoundationActions.Register();
+
         var service = new McpService(new McpServiceOptions
         {
             Mode = McpServiceMode.Player,
             SandboxRoot = sandboxRoot,
             Seed = seed,
-            AgentSeat = Seat,
+            AiSeats = [Seat],
         });
 
         var launch = new MatchLaunchOptions

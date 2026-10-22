@@ -13,7 +13,7 @@ namespace Orc.Server.Rooms;
 /// <c>lenient</c>＝放宽张数/同名上限/配国但**保留**卡池校验；<c>none</c>＝既有关闭开关的映射。
 /// </para>
 /// </summary>
-public sealed class DeckRulesValidator : IDeckValidator
+public sealed class DeckRulesValidator
 {
     private readonly Func<IReadOnlyDictionary<string, CardDefinition>> _pool;
     private readonly DeckRuleTier _tier;
@@ -33,7 +33,7 @@ public sealed class DeckRulesValidator : IDeckValidator
     /// <summary>当前档位（诊断/守卫测试用）。</summary>
     public DeckRuleTier Tier => _tier;
 
-    /// <inheritdoc />
+    /// <summary>校验一副卡组（通过＝null；否则为可读失败结果）。</summary>
     public McpToolResult? Validate(IReadOnlyList<string> deck, RoomDeckConfig? config)
     {
         if (_tier == DeckRuleTier.None)

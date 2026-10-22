@@ -109,7 +109,7 @@ public class CardSkeletonTests
             {
                 [GameUpdates.PayloadCard] = unit,
                 [GameUpdates.PayloadPlayer] = player,
-                [GameUpdates.PayloadPosition] = match.Battlefield.PlayerASupportLine[1],
+                [GameUpdates.PayloadPosition] = match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1],
             });
         Assert.Equal(ExecutionOutcome.Normal, stream.Outcome);
     }

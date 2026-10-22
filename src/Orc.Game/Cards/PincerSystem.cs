@@ -232,17 +232,17 @@ public static class PincerRules
             return result;
         }
 
-        foreach (var slot in battlefield.GetSupportLine(owner))
+        foreach (var slot in battlefield.GetSupportLine(owner).Members)
         {
-            if (slot.Occupant is UnitCard unit && IsEligibleCandidate(self, unit, registry))
+            if (slot is UnitCard unit && IsEligibleCandidate(self, unit, registry))
             {
                 result.Add(unit);
             }
         }
 
-        foreach (var slot in battlefield.FrontLine)
+        foreach (var slot in battlefield.FrontLine.Members)
         {
-            if (slot.Occupant is UnitCard unit && IsEligibleCandidate(self, unit, registry))
+            if (slot is UnitCard unit && IsEligibleCandidate(self, unit, registry))
             {
                 result.Add(unit);
             }

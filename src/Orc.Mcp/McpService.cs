@@ -8,6 +8,44 @@ using Orc.Mcp.Sandbox;
 namespace Orc.Mcp;
 
 /// <summary>
+/// 调用发起者视角（宿主填充；只承载"结果按谁裁剪"所需的最小信息）。
+/// </summary>
+/// <param name="Seat">绑定的座位（未绑＝null）。</param>
+/// <param name="DebugFace">是否调试面（可见全量声明与全知摘要）。</param>
+/// <param name="Omniscient">是否全知 viewer（可见双方视图，但**看不到**构筑与卡包声明）。</param>
+public sealed record CallerView(int? Seat = null, bool DebugFace = false, bool Omniscient = false)
+{
+    /// <summary>未绑定视角。</summary>
+    public static readonly CallerView Anonymous = new();
+
+    /// <summary>转成房间快照的视角请求（全知 viewer 不是"全量声明"的授权来源——R12 明确禁止）。</summary>
+    public Orc.Mcp.Room.RoomViewRequest ToRoomView() => new(Seat, DebugFace);
+}
+
+/// <summary>
+/// 本局卡池装配结果（S10）：成功时给出包集合与资产数；回退时说明"用了上一次成功的包集合"。
+/// </summary>
+/// <param name="Packages">本次装配的包目录（人读摘要）。</param>
+/// <param name="Definitions">装到的卡定义数。</param>
+/// <param name="Fallback">是否由"最后一次成功的包集合"回退装配。</param>
+/// <param name="Failure">失败原因（成功＝null）。</param>
+public sealed record MatchPoolReport(
+    IReadOnlyList<string> Packages,
+    int Definitions,
+    bool Fallback = false,
+    string? Failure = null)
+{
+    /// <summary>JSON 形态（<c>sandbox.state.pool</c>）。</summary>
+    public JsonNode ToJson() => new JsonObject
+    {
+        ["packages"] = new JsonArray(Packages.Select(p => (JsonNode)JsonValue.Create(p)!).ToArray()),
+        ["definitions"] = Definitions,
+        ["fallback"] = Fallback,
+        ["failure"] = Failure,
+    };
+}
+
+/// <summary>
 /// MCP 服务层（协议无关门面）。
 /// <para>
 /// 职责：①持有工具目录与统一返回外壳；②承载唯一活跃对局与对局执行器（单写者串行化）；
@@ -54,6 +92,12 @@ public sealed partial class McpService
     /// <summary>运行选项。</summary>
     public McpServiceOptions Options { get; }
 
+    /// <summary>
+    /// 当前调用的发起者视角（由宿主在**同一串行工作项内**设置并清除；服务层不感知会话模型）。
+    /// <para>只在工具需要"按角色构造结果"时读取（<c>room.info</c> / <c>observe.view</c>）。</para>
+    /// </summary>
+    public CallerView Caller { get; set; } = CallerView.Anonymous;
+
     /// <summary>房间控制面（未注入＝<c>null</c>，房间工具不登记）。</summary>
     public Orc.Mcp.Room.IRoomControl? RoomControl { get; }
 
@@ -86,6 +130,7 @@ public sealed partial class McpService
     /// <param name="handler">执行器。</param>
     /// <param name="sandboxOnly">是否沙盒专属（非沙盒模式不暴露）。</param>
     /// <param name="readOnly">是否只读（忙时仍可调用；写类默认不注册，见 <see cref="McpServiceOptions.AllowDebugWrites"/>）。</param>
+    /// <param name="requiredRole">角色要求（缺省＝按工具类推断，见 <see cref="InferRole"/>）。</param>
     public void AddTool(
         string name,
         string group,
@@ -93,7 +138,8 @@ public sealed partial class McpService
         string inputSchema,
         Func<McpToolCall, CancellationToken, Task<McpToolResult>> handler,
         bool sandboxOnly = false,
-        bool readOnly = false)
+        bool readOnly = false,
+        string? requiredRole = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(handler);
@@ -115,9 +161,45 @@ public sealed partial class McpService
             throw new InvalidOperationException($"工具名 '{name}' 已登记（重复登记被拒绝）。");
         }
 
-        var descriptor = new McpToolDescriptor(name, group, description, inputSchema);
+        var descriptor = new McpToolDescriptor(
+            name,
+            group,
+            description,
+            inputSchema,
+            requiredRole ?? InferRole(name, sandboxOnly));
         _entries.Add(name, new Entry(descriptor, sandboxOnly, readOnly, handler));
         _descriptors.Add(descriptor);
+    }
+
+    /// <summary>
+    /// 角色推断（**单一来源**）：不按角色划分的只读面＝<see cref="ToolRole.None"/>；
+    /// 调试类（含沙盒专属）＝<see cref="ToolRole.Debug"/>；
+    /// 引擎输入面（<c>play.*</c>/<c>command.*</c>/<c>match.*</c>/<c>mulligan.*</c>/<c>target.*</c>）＝<see cref="ToolRole.Controller"/>；
+    /// <c>observe.view</c>＝<see cref="ToolRole.Viewer"/>。
+    /// <para>角色是"态"的一部分，因此这是登记期的一次静态分类，不在调用期逐条猜。</para>
+    /// </summary>
+    public static string InferRole(string name, bool sandboxOnly)
+    {
+        if (string.Equals(name, "observe.view", StringComparison.Ordinal))
+        {
+            return ToolRole.Viewer;
+        }
+
+        if (sandboxOnly || Orc.Mcp.Tools.DebugToolCatalog.IsDebugTool(name))
+        {
+            return ToolRole.Debug;
+        }
+
+        if (name.StartsWith("play.", StringComparison.Ordinal)
+            || name.StartsWith("command.", StringComparison.Ordinal)
+            || name.StartsWith("match.", StringComparison.Ordinal)
+            || name.StartsWith("mulligan.", StringComparison.Ordinal)
+            || name.StartsWith("target.", StringComparison.Ordinal))
+        {
+            return ToolRole.Controller;
+        }
+
+        return ToolRole.None;
     }
 
     /// <summary>记录一条进程级变更留痕（工具返回值与 <c>sandbox.state</c> 均会呈现）。</summary>
@@ -126,6 +208,15 @@ public sealed partial class McpService
         ArgumentException.ThrowIfNullOrWhiteSpace(note);
         _processStateNotes.Add(note);
     }
+
+    /// <summary>
+    /// 本局卡池装配结果（S10 可观测面）：**不进 <c>room.info</c> 快照**（避免两处表达同一事实），
+    /// 只经 <c>sandbox.state</c> 与通道事件上报。
+    /// </summary>
+    public MatchPoolReport? Pool { get; set; }
+
+    /// <summary>卡池装配结果的 JSON 形态（未装配＝null）。</summary>
+    public JsonNode? PoolJson() => Pool?.ToJson();
 
     /// <summary>
     /// 解析 <see cref="Ref{T}"/> 的引擎引用键：

@@ -182,12 +182,12 @@ public sealed class RetriggerSystem
 
         try
         {
-            if (!unit.TryGetData<UnitStateData>(out var state) || state.Position is null)
+            if (!unit.TryGetData<UnitStateData>(out var state) || state.Line is null)
             {
                 return; // 防御（接收侧已校验「在场存活」）：非在场＝无操作
             }
 
-            await unit.InvokeDeployKeywordAsync(unit.Owner, state.Position, ct);
+            await unit.InvokeDeployKeywordAsync(unit.Owner, null, ct);
         }
         finally
         {
@@ -243,7 +243,7 @@ public sealed class RetriggerSystem
     private static bool IsOnFieldAlive(UnitCard unit)
         => unit.TryGetData<UnitStateData>(out var state)
             && !state.IsDestroyed
-            && state.Position is not null;
+            && state.Line is not null;
 
     /// <summary>重入跳过记录（「跳过并记录」——记录形态：事件流条目；source「再触发」）。</summary>
     private void RecordReentrySkip(UnitCard unit, RetriggerChain chain)

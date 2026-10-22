@@ -279,7 +279,7 @@ public class PlayChainCommandTests
         // 预打出段（handler 内）把唯一 1 点花掉 → 打出段复验：点数不足 ⇒ 打出链中止（仅本次取消＋留痕）。
         command.AddPrePlayHandler("预打出段内花点", async (view, ctx, ct) =>
         {
-            var spent = await match.PlayManager.PlayUnitAsync(spender, line[1]);
+            var spent = await match.PlayManager.PlayUnitAsync(spender, line.GetInsertionGaps()[1]);
             Assert.Equal(PlayResultStatus.Success, spent.Status);
         });
 

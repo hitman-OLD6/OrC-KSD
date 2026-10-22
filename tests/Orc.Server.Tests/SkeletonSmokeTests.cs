@@ -27,7 +27,7 @@ public class SkeletonSmokeTests
         Assert.Equal(2, options.SeatCount);
         Assert.Equal(0, options.Port);
         Assert.Equal(TimeSpan.FromSeconds(60), options.DisconnectGrace);
-        Assert.Equal(TimeSpan.Zero, options.LobbySeatRetention);
+        Assert.All(options.Seats, seat => Assert.Equal(SeatKind.Agent, seat.Kind));
     }
 
     [Fact]

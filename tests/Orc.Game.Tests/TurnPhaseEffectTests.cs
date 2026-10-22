@@ -72,14 +72,14 @@ public class TurnPhaseEffectTests
         await match.Initialize();
         var playerA = match.Players[0];
         var unit = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
-        var originalSlot = match.Battlefield.PlayerASupportLine[1];
-        var displacedSlot = match.Battlefield.PlayerASupportLine[3];
+        var originalSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1];
+        var displacedSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps()[3];
 
         // 模拟「被效果临时移位」：单位从原槽移到另一空槽（真实对象、真实槽位变化）。
-        originalSlot.Clear();
-        displacedSlot.Place(unit);
-        unit.GetData<UnitStateData>().Position = displacedSlot;
-        Assert.Same(unit, displacedSlot.Occupant);
+        originalSlot.Line?.TryRemove(unit);
+        displacedSlot.Line.TryInsertAt(displacedSlot.Ordinal, unit);
+        unit.GetData<UnitStateData>().Line = displacedSlot.Line;
+        Assert.Same(unit, displacedSlot);
 
         // 注册「下个己方回合开始」监听：到点执行「位置恢复」动作（模拟）＋执行后自清理。
         var executions = 0;
@@ -94,9 +94,9 @@ public class TurnPhaseEffectTests
             }
 
             executions += 1;
-            displacedSlot.Clear();
-            originalSlot.Place(unit);
-            unit.GetData<UnitStateData>().Position = originalSlot;
+            displacedSlot.Line?.TryRemove(unit);
+            originalSlot.Line.TryInsertAt(originalSlot.Ordinal, unit);
+            unit.GetData<UnitStateData>().Line = originalSlot.Line;
             subscription!.Dispose();
             return Task.CompletedTask;
         });
@@ -104,25 +104,25 @@ public class TurnPhaseEffectTests
         // 负控（硬性）：敌方回合不触发——单位仍在移位处。
         await match.EndTurn(); // → 回合 2（B）
         Assert.Equal(0, executions);
-        Assert.Same(unit, displacedSlot.Occupant);
-        Assert.True(originalSlot.IsEmpty);
+        Assert.Same(unit, displacedSlot);
+        Assert.True(originalSlot.IsEmpty());
 
         // 到点：己方回合开始 → 恢复执行一次（真实位置副作用）。
         await match.EndTurn(); // → 回合 3（A）
         Assert.Equal(1, executions);
-        Assert.Same(unit, originalSlot.Occupant);
-        Assert.True(displacedSlot.IsEmpty);
-        Assert.Same(originalSlot, unit.GetData<UnitStateData>().Position);
+        Assert.Same(unit, originalSlot);
+        Assert.True(displacedSlot.IsEmpty());
+        Assert.Same(originalSlot, unit.GetData<UnitStateData>().Line);
 
         // 自清理：再移位后，后续己方回合不再触发（单位保持移位处——未被第二次恢复）。
         await match.EndTurn(); // → 回合 4（B）
-        originalSlot.Clear();
-        displacedSlot.Place(unit);
-        unit.GetData<UnitStateData>().Position = displacedSlot;
+        originalSlot.Line?.TryRemove(unit);
+        displacedSlot.Line.TryInsertAt(displacedSlot.Ordinal, unit);
+        unit.GetData<UnitStateData>().Line = displacedSlot.Line;
         await match.EndTurn(); // → 回合 5（A）
         Assert.Equal(1, executions);
-        Assert.Same(unit, displacedSlot.Occupant); // 未被恢复——handler 已自清理
-        Assert.True(originalSlot.IsEmpty);
+        Assert.Same(unit, displacedSlot); // 未被恢复——handler 已自清理
+        Assert.True(originalSlot.IsEmpty());
     }
 
     // ---------- 场景③：结束响应——「回合结束时」到点执行「弃牌」（模拟消灭/弃牌类） ----------

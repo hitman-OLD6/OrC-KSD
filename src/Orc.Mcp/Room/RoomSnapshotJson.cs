@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 namespace Orc.Mcp.Room;
 
 /// <summary>
-/// 房间快照的**唯一序列化来源**：<c>room.info</c> 的 details 与 <c>notify/room</c> 的载荷共用。
+/// 房间快照的**唯一序列化来源**：<c>room.info</c> 的 details 与 <c>notify/room.seats</c> 的座位段共用字段名约定。
 /// <para>两处各写一份是最容易漂移的地方（字段增删只改一处即漏），故集中在这里。</para>
 /// </summary>
 public static class RoomSnapshotJson
@@ -18,4 +18,13 @@ public static class RoomSnapshotJson
     /// <summary>快照 → 协议载荷（camelCase；null 字段省略）。</summary>
     public static JsonNode? ToNode(RoomSnapshot snapshot)
         => JsonSerializer.SerializeToNode(snapshot, Json);
+
+    /// <summary>单个座位 → JSON（<c>notify/room.seats</c> 的座位段；调用方负责剔除 deck/packages）。</summary>
+    public static JsonObject SeatToNode(RoomSeatSnapshot seat) => new()
+    {
+        ["seat"] = seat.Seat,
+        ["occupied"] = seat.Occupied,
+        ["state"] = seat.State,
+        ["displayName"] = seat.DisplayName,
+    };
 }

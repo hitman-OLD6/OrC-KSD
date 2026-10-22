@@ -83,6 +83,11 @@ public static class JudicatorNames
     /// 移动可用性与移动复验共用同一条目——改写后两调用点同步生效。</summary>
     public const string MoveFrontlineEnemy = "move.frontline-enemy";
 
+    /// <summary>部署位置候选判定（签名＝（玩家, 单位）→ <c>IReadOnlyList&lt;FormationGap&gt;</c>）：
+    /// 己方支援线 ＋〔<c>deploy.frontline</c> 词条且前线无敌方存活单位时〕前线；候选为临时空隙（N 元素 ⇒ N+1，满员＝空）。
+    /// 包装器改写＝整体替换「可部署位置」规则（含能否上前线）。</summary>
+    public const string DeployPositionCandidates = "deploy.position.candidates";
+
     // ---------- E1（效果运行期）：无头选靶判定器（一条；内置注册段固定注册——无条件可用） ----------
 
     /// <summary>效果无头选靶判定（签名＝（视角卡，<c>EffectSelector</c>）→ <c>IReadOnlyList&lt;Card&gt;</c>）：

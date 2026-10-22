@@ -810,6 +810,21 @@ public sealed class Match
         // 打出管理器（2B 加性：随管理器群生成——打出链服务与交互入口；回合管理器为反制「仅己方回合」真源；
         // 后置项 B 加性：注入对局生命周期——终局门禁）
         var turnOwnerEntry = _judicators.Resolve(JudicatorNames.ActionTurnOwner);
+        _judicators.Register(
+            JudicatorNames.DeployPositionCandidates,
+            new DeployPositionCandidatesJudicator(
+                _battlefieldManager.Battlefield,
+                owner => _commandManager.EnemyOfPlayer(owner)));
+
+        // R4a: deployment candidates via judicator (rewritable); PlayManager only consumes the provider.
+        IReadOnlyList<FormationGap> DeploymentCandidates(UnitCard unit)
+        {
+            var invoked = _judicators.Invoke(
+                JudicatorNames.DeployPositionCandidates, new object[] { unit.Owner!, unit }, unit.Owner?.Index);
+            return invoked is { Length: > 0 } && invoked[0] is IReadOnlyList<FormationGap> gaps
+                ? gaps
+                : Array.Empty<FormationGap>();
+        }
         _playManager = new PlayManager(
             Engine,
             _targeterManager,
@@ -817,7 +832,8 @@ public sealed class Match
             _turnManager,
             _lifecycle,
             CanAcceptInput,
-            player => CombatJudicatorInvoker.InvokeBool(turnOwnerEntry, player.Index, new object[] { player }));
+            player => CombatJudicatorInvoker.InvokeBool(turnOwnerEntry, player.Index, new object[] { player }),
+            deploymentCandidates: DeploymentCandidates);
 
         // 沙盒调试原语族（引擎保留触发器）：管理器群建齐后装配——六原语各注册唯一内置 handler、立即封闭；
         // 授权事实来自构造期（MatchOptions.SandboxAuthorized，缺省未授权）。未授权时原语入口一律拒绝、零状态变更。
@@ -973,6 +989,33 @@ public sealed class Match
         var opponent = players[(player.Index + 1) % 2];
         _lifecycle.End(opponent, MatchEndReason.Concede);
         return ConcedeResult.Accepted();
+    }
+
+    /// <summary>
+    /// 终止对局（管理员主动终止；**无胜者**）：走与 <see cref="Concede"/> 相同的终局收尾路径
+    /// （<see cref="MatchLifecycle.End"/>），但 <c>Winner = null</c>、原因＝<see cref="MatchEndReason.Aborted"/>。
+    /// <para>
+    /// 与认输的区别是硬性的：终止不产生胜者，因此**不得**用"代某一方认输"模拟（会凭空产生胜者，
+    /// 污染战绩与回放）。重复终止＝拒绝（零副作用、状态不推进）。
+    /// </para>
+    /// <para>
+    /// **相位不设限**（与 <see cref="Concede"/> 不同）：准备期／换牌期／进行期都可终止——
+    /// 管理员收回房间不该被"还没进入进行态"挡住。
+    /// </para>
+    /// </summary>
+    /// <returns>是否被接受（<c>false</c>＝已终局）。</returns>
+    /// <exception cref="InvalidOperationException">对局尚未就绪（玩家管理器不可用）。</exception>
+    public bool Abort()
+    {
+        _ = PlayerManager.Players; // 就绪门禁（未 Initialize＝抛错）
+
+        if (_lifecycle.IsEnded)
+        {
+            return false;
+        }
+
+        _lifecycle.End(null, MatchEndReason.Aborted);
+        return true;
     }
 
     /// <summary>结束回合（主路径；无参、自动取当前行动方；仅"进行"态可调用；准备/换牌/终局后拒绝）。</summary>

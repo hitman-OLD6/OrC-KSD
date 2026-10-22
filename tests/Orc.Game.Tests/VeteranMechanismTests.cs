@@ -434,7 +434,7 @@ public class VeteranMechanismTests
         var definitionBefore = unit.Definition;
         var deployCostBefore = unit.Modifiers.GetEffectiveValue(CardStatFields.DeployCost);
         var typesBefore = state.UnitTypes.ToArray();
-        var positionBefore = state.Position;
+        var positionBefore = state.Line;
         var turnsBefore = unit.TurnsInPlay;
         CommandTestKit.Activate(unit); // 行动状态置位（升级不得重置）
 
@@ -502,7 +502,7 @@ public class VeteranMechanismTests
         Assert.Equal(typesBefore, state.UnitTypes);
 
         // 操作与状态保持：位置/指挥状态/在场回合数不因升级重置。
-        Assert.Same(positionBefore, state.Position);
+        Assert.Same(positionBefore, state.Line);
         Assert.Equal(turnsBefore, unit.TurnsInPlay);
         Assert.True(unit.GetData<CommandData>().CanMove);
         Assert.True(unit.GetData<CommandData>().CanAttack);
@@ -638,7 +638,7 @@ public class VeteranMechanismTests
             // 无「结果类」信号〔card.stat.changed / unit.upgraded〕、无其它残余）。
             Assert.Equal(2, recorder.Updates.Count(u => u.Type == Updates.EffectRemoved));
             Assert.DoesNotContain(recorder.Updates, u => u.Type != Updates.EffectRemoved);
-            Assert.True(unit.GetData<UnitStateData>().Position is not null); // 单位保持可正常操作
+            Assert.True(unit.GetData<UnitStateData>().Line is not null); // 单位保持可正常操作
 
             // 可再次发动（结构未变——再次得到同类的执行段失败；单位未被半态污染）。
             await Assert.ThrowsAsync<InvalidOperationException>(() => unit.InvokeVeteranTriggerAsync());

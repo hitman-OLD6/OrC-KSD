@@ -70,8 +70,8 @@ public class ToolContractTests
 
         var names = fixture.Service.Tools.Select(tool => tool.Name).ToArray();
 
-        Assert.Contains("sandbox.create", names);
         Assert.Contains("sandbox.emit", names);
+        Assert.Contains("sandbox.state", names);
         Assert.Contains("docs.list", names);
         Assert.Contains("diag.report", names);
         Assert.Contains("target.submit", names);
@@ -85,15 +85,16 @@ public class ToolContractTests
         var names = fixture.Service.Tools.Select(tool => tool.Name).ToArray();
 
         Assert.DoesNotContain("sandbox.create", names);
+        Assert.DoesNotContain("sandbox.dispose", names);
         Assert.DoesNotContain("sandbox.emit", names);
         Assert.DoesNotContain("diag.report", names);
 
         // 文档读取对两种模式都可见。
         Assert.Contains("docs.list", names);
 
-        var result = await fixture.InvokeAsync("sandbox.create");
+        var result = await fixture.CreateSandboxMatchAsync();
         Assert.False(result.Ok);
-        Assert.Equal(McpCodes.UnknownTool, result.Code);
+        Assert.Equal(McpCodes.ModeDenied, result.Code);
     }
 
     [Fact]

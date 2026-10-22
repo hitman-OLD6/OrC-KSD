@@ -85,10 +85,10 @@ internal static class SandboxTestKit
         => match.Engine.References.TryResolve(reference, out var value) ? value : null;
 
     /// <summary>玩家支援线指定索引的空槽（越界/占用＝断言失败）。</summary>
-    public static Orc.Game.Board.Slot EmptySupportSlot(Match match, Player player, int index)
+    public static Orc.Game.Board.FormationGap EmptySupportSlot(Match match, Player player, int index)
     {
-        var slot = match.Battlefield.GetSupportLine(player)[index];
-        Assert.True(slot.IsEmpty, $"支援线槽 {index} 应保持空槽（测试前置）。");
+        var slot = match.Battlefield.GetSupportLine(player).GetInsertionGaps()[index];
+        Assert.True(slot.IsEmpty(), $"支援线槽 {index} 应保持空槽（测试前置）。");
         return slot;
     }
 
@@ -115,13 +115,13 @@ internal static class SandboxTestKit
         static void AppendLine(System.Text.StringBuilder target, string label, Orc.Game.Board.BattleLine line)
         {
             target.Append($"{label}[");
-            for (var i = 0; i < line.Count; i++)
+            for (var i = 0; i < line.Size; i++)
             {
-                var occupant = line[i].Occupant;
+                var occupant = line[i];
                 target.Append(occupant is null
                     ? "-"
                     : $"{occupant.GetType().Name}:{(occupant as Orc.Core.Entity)?.Name}");
-                target.Append(i == line.Count - 1 ? ']' : ',');
+                target.Append(i == line.Size - 1 ? ']' : ',');
             }
 
             target.Append(';');

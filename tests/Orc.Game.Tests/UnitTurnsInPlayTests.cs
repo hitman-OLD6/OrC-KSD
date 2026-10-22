@@ -121,17 +121,17 @@ public class UnitTurnsInPlayTests
         await match.EndTurn(); // 回合 2（B）
         await match.EndTurn(); // 回合 3（A）→ 2
         Assert.Equal(2, unit.TurnsInPlay);
-        var originalSlot = unit.GetData<UnitStateData>().Position!;
+        var originalSlot = unit.GetData<UnitStateData>().Line!;
 
         // S9 转换组合＝离场＋销毁＋按定义重建（加入路径）＋放回原位置
         await match.CommandManager.LeaveBattlefieldAsync(unit);
         await match.Engine.DestroyCard(unit);
-        var result = await match.CardService.CreateAndPlaceToSupportLineAsync(CommandTestKit.InfantryId, playerA, originalSlot);
+        var result = await match.CardService.CreateAndPlaceToSupportLineAsync(CommandTestKit.InfantryId, playerA, originalSlot.GetInsertionGaps()[0]);
 
         Assert.Equal(CardPlaceStatus.Placed, result.Status);
         var rebuilt = (UnitCard)result.Card!;
         Assert.Equal(1, rebuilt.TurnsInPlay); // 转换重建的新实例＝计数重置（静态重建、无原状态携带）
-        Assert.Same(originalSlot, rebuilt.GetData<UnitStateData>().Position); // 放回原位置
+        Assert.Same(originalSlot, rebuilt.GetData<UnitStateData>().Line); // 放回原位置
     }
 
     [Fact]

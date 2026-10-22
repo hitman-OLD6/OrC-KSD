@@ -88,7 +88,13 @@ public sealed class OrcClient : IAsyncDisposable
             : Task.CompletedTask;
     }
 
-    /// <summary>握手：协商线协议版本与契约版本。</summary>
+    /// <summary>连接标识（<c>initialize</c> 的响应里返回；管理员与 <c>session.attach</c> 均以此指代本连接）。</summary>
+    public string? ConnectionId { get; private set; }
+
+    /// <summary>当前房间标识（轮换后由 <c>notify/room.rotated</c> 更新）。</summary>
+    public string? RoomId { get; private set; }
+
+    /// <summary>握手：协商线协议版本与契约版本；保存 <c>connectionId</c> 与首个 <c>roomId</c>。</summary>
     public async Task<InitializeResult> InitializeAsync(InitializeParams parameters, CancellationToken ct = default)
     {
         var response = await CallRawAsync(
@@ -101,9 +107,63 @@ public sealed class OrcClient : IAsyncDisposable
             throw new InvalidOperationException($"握手失败：{error.Code} {error.Message}");
         }
 
-        return response.Result?.Deserialize<InitializeResult>(ProtocolJson.Options)
+        var result = response.Result?.Deserialize<InitializeResult>(ProtocolJson.Options)
             ?? throw new InvalidOperationException("握手响应缺少 result。");
+
+        ConnectionId = result.ConnectionId;
+        RoomId = result.RoomId;
+        return result;
     }
+
+    /// <summary>
+    /// 申请角色（角色 ＋ 座位 ＋ 卡组 ＋ 卡包声明一条报文带齐）。
+    /// <para>
+    /// **立即返回**（<c>state:"pending"</c>；调试面立即生效）——不为等管理员批准而挂起请求，
+    /// 批准结果经 <c>notify/admission</c> 到达。
+    /// </para>
+    /// </summary>
+    public async Task<SessionAttachResult> AttachAsync(SessionAttachParams parameters, CancellationToken ct = default)
+    {
+        var response = await CallRawAsync(
+            ProtocolMethods.SessionAttach,
+            JsonSerializer.SerializeToNode(parameters, ProtocolJson.Options),
+            ct).ConfigureAwait(false);
+
+        if (response.Error is { } error)
+        {
+            throw new InvalidOperationException($"session.attach 失败：{error.Code} {error.Message}");
+        }
+
+        var result = response.Result?.Deserialize<SessionAttachResult>(ProtocolJson.Options)
+            ?? throw new InvalidOperationException("session.attach 响应缺少 result。");
+
+        if (result.Seat is not null)
+        {
+            // 批准响应同时经 notify/admission 到达；此处只兜底保存 seat 便于诊断。
+            LastSeat = result.Seat;
+        }
+
+        return result;
+    }
+
+    /// <summary>撤回申请／释放座位（房间态）。</summary>
+    public async Task DetachAsync(CancellationToken ct = default)
+    {
+        var response = await CallRawAsync(ProtocolMethods.SessionDetach, null, ct).ConfigureAwait(false);
+        if (response.Error is { } error)
+        {
+            throw new InvalidOperationException($"session.detach 失败：{error.Code} {error.Message}");
+        }
+
+        LastSeat = null;
+        SeatToken = null;
+    }
+
+    /// <summary>最近一次成功绑定/恢复的座位（未绑＝null）。</summary>
+    public int? LastSeat { get; private set; }
+
+    /// <summary>座位令牌（批准时经 <c>notify/admission</c> 下发；用于断线重连恢复）。</summary>
+    public string? SeatToken { get; internal set; }
 
     /// <summary>工具目录。</summary>
     public async Task<IReadOnlyList<ToolDescriptorPayload>> ListToolsAsync(CancellationToken ct = default)

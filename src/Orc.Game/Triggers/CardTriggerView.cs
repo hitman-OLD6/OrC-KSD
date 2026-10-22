@@ -25,14 +25,10 @@ public class CardTriggerView
     [Read]
     public virtual object? Player { get; set; }
 
-    /// <summary>目标槽位（可选；2B 加性扩展）：部署 / 加入 / 单位化链的目标空槽位（Slot 对象）。</summary>
+    /// <summary>目标插入空隙（可选；有序列表模型）：部署 / 加入 / 单位化链的目标位置（<see cref="FormationGap"/>）。</summary>
     [Optional]
     [Read]
-    public virtual Slot? Position { get; set; }
-
-    [Optional]
-    [Read]
-    public virtual FormationGap? FormationGap { get; set; }
+    public virtual FormationGap? Position { get; set; }
 
     /// <summary>预打出捕获箱（可选；2B 加性扩展）：指令预打出 handler 经此提交捕获值（由打出链创建并随触发数据注入）。</summary>
     [Optional]

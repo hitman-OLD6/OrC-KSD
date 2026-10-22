@@ -40,17 +40,21 @@ public sealed class MatchLifecycle
     internal void MarkInProgress() => State = MatchState.InProgress;
 
     /// <summary>
-    /// 置终局（记录胜者与原因；仅"进行"态生效——重复／非进行态调用＝幂等忽略，防御）。
-    /// 调用时点＝HQ 伤害结算点或认输入口（当刻置结束＋胜者）；当次结算收尾照常完成（内部步骤不经门禁）。
+    /// 置终局（记录胜者与原因；已终局＝幂等忽略，防御）。
+    /// 调用时点＝HQ 伤害结算点／认输入口／管理员终止；当次结算收尾照常完成（内部步骤不经门禁）。
+    /// <para>
+    /// **相位不设限**：准备期与换牌期同样可以置终局——管理员终止（<c>Match.Abort</c>）在任何相位都必须生效，
+    /// 否则"开局后尚未进入进行态"的房间无法被收回。是否允许某个**动作入口**发起终局，由该入口自己判定
+    /// （例如 <c>Concede</c> 仍要求进行相位），本方法只管"置终局"这一事实。
+    /// </para>
     /// </summary>
-    /// <param name="winner">胜者（使对方 HQ 归零／对方认输的一方）。</param>
+    /// <param name="winner">胜者（使对方 HQ 归零／对方认输的一方）；<c>null</c>＝无胜者（终止）。</param>
     /// <param name="reason">终局原因。</param>
-    internal void End(Player winner, MatchEndReason reason)
+    internal void End(Player? winner, MatchEndReason reason)
     {
-        ArgumentNullException.ThrowIfNull(winner);
-        if (State != MatchState.InProgress)
+        if (State == MatchState.Ended)
         {
-            return; // 幂等：已终局/未进行＝忽略（防御）
+            return; // 幂等：已终局＝忽略（防御）
         }
 
         Winner = winner;

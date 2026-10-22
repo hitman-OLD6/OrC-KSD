@@ -60,9 +60,9 @@ public class CommandLockInTests
 
         // 交互允许集＝移动候选（前线空槽）——永不含支援线内部操作候选（无后撤/横移路径的交互面锁定）。
         Assert.Equal(new[] { front[1].Ref, front[2].Ref, front[3].Ref, front[4].Ref }, description.AllowedTargets);
-        Assert.DoesNotContain(match.Battlefield.PlayerASupportLine[2].Ref, description.AllowedTargets);
-        Assert.DoesNotContain(match.Battlefield.PlayerASupportLine[3].Ref, description.AllowedTargets);
-        Assert.DoesNotContain(match.Battlefield.PlayerBSupportLine[2].Ref, description.AllowedTargets);
+        Assert.DoesNotContain(match.Battlefield.PlayerASupportLine.GetInsertionGaps()[2].Ref, description.AllowedTargets);
+        Assert.DoesNotContain(match.Battlefield.PlayerASupportLine.GetInsertionGaps()[3].Ref, description.AllowedTargets);
+        Assert.DoesNotContain(match.Battlefield.PlayerBSupportLine.GetInsertionGaps()[2].Ref, description.AllowedTargets);
 
         responder.Cancel(description.RequestId);
         var result = await task;

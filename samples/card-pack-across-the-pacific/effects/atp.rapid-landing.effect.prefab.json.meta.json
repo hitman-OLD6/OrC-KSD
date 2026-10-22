@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "orc.across-the-pacific",
+  "source": "effects/atp.rapid-landing.effect.prefab.json",
+  "assets": [
+    {
+      "guid": "ab27ca12-c0e4-b502-ef17-c925f0b5f1ec",
+      "kind": "effect",
+      "id": "atp.rapid-landing.effect",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

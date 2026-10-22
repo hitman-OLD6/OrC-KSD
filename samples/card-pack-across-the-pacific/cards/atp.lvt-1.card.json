@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "atp.lvt-1",
+  "name": "LVT-1",
+  "components": [
+    {
+      "component": "typeCategory",
+      "type": [
+        "tank"
+      ]
+    },
+    {
+      "component": "factionCost",
+      "faction": "usa",
+      "kredits": 3
+    },
+    {
+      "component": "battleStats",
+      "operationCost": 1,
+      "attack": 3,
+      "defense": 4
+    },
+    {
+      "component": "tagData",
+      "rarity": "standard"
+    },
+    {
+      "component": "keywords",
+      "keywords": [
+        "闪击"
+      ]
+    },
+    {
+      "component": "effects",
+      "prefabs": [
+        "atp.lvt-1.landing"
+      ]
+    }
+  ]
+}

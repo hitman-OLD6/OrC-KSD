@@ -154,7 +154,7 @@ public class JudicatorAssemblyTests
 
         var attacker = await CommandTestKit.PrepareOnSupportAsync(match, match.Players[0], CommandTestKit.InfantryId, 1);
         var defender = await CommandTestKit.PrepareOnFrontAsync(match, match.Players[1], CommandTestKit.InfantryId, 1);
-        var targetSlot = defender.GetData<Orc.Game.Cards.UnitStateData>().Position!;
+        var targetSlot = defender.GetData<Orc.Game.Cards.UnitStateData>().Line!;
 
         bool RangeAvailable() => (bool)match.Judicators
             .Resolve(JudicatorNames.CombatRange)

@@ -7,7 +7,8 @@ using Orc.Game.Players;
 namespace Orc.Game.Actions;
 
 /// <summary>
-/// 加入战场**触发端**视图（S9）：部署与加入共用同一视图类型（两段差异只在 band 内的步骤，不在视图）。
+/// 加入战场**触发端**视图（S9；有序列表模型）：部署与两个加入端共用同一视图——落位由 <see cref="Gap"/> 承载
+/// （线＋插入序号＋快照；快照失效即拒绝），两段差异只在 band 内的步骤，不在视图。
 /// </summary>
 [ContextView]
 public class JoinBattlefieldTriggerView
@@ -16,9 +17,9 @@ public class JoinBattlefieldTriggerView
     [Read]
     public virtual UnitCard Card { get; set; } = null!;
 
-    /// <summary>目标槽位（必填；须存在且为空）。</summary>
+    /// <summary>目标插入空隙（必填；须为当前快照的有效空隙）。</summary>
     [Read]
-    public virtual Slot Slot { get; set; } = null!;
+    public virtual FormationGap Gap { get; set; } = null!;
 
     /// <summary>部署方（部署入口必填；加入入口可空——加入不要求归属）。</summary>
     [Optional]
@@ -37,7 +38,7 @@ public class JoinBattlefieldTriggerView
 }
 
 /// <summary>
-/// 加入战场**处理端**视图（S9）：共享处理端只读「入场单位 + 目标槽位」，无入口类型标志。
+/// 加入战场**处理端**视图（S9；有序列表模型）：共享处理端只读「入场单位 + 目标空隙」，无入口类型标志。
 /// </summary>
 [ContextView]
 public class JoinBattlefieldHandleView
@@ -46,9 +47,9 @@ public class JoinBattlefieldHandleView
     [Read]
     public virtual UnitCard Card { get; set; } = null!;
 
-    /// <summary>目标槽位（必填）。</summary>
+    /// <summary>目标插入空隙（必填）。</summary>
     [Read]
-    public virtual Slot Slot { get; set; } = null!;
+    public virtual FormationGap Gap { get; set; } = null!;
 
     /// <summary>部署方（可空——加入入口不要求归属；处理端不使用）。</summary>
     [Optional]

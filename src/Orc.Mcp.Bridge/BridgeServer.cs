@@ -225,13 +225,25 @@ public sealed class BridgeServer
         if (connection != BridgeConnectionState.Ready)
         {
             // 服务端退出 → not-connected（桥退出 0）；令牌失效 → unauthorized（桥退出 2）。
-            ExitCode = connection == BridgeConnectionState.TokenRejected ? 2 : 0;
+            ExitCode = connection switch
+            {
+                BridgeConnectionState.TokenRejected => 2,
+                BridgeConnectionState.AdmissionTimeout => 3,
+                _ => 0,
+            };
             _stop = true;
 
-            var code = connection == BridgeConnectionState.TokenRejected ? "unauthorized" : "not-connected";
-            var message = connection == BridgeConnectionState.TokenRejected
-                ? "座位令牌失效（实例可能已重启），请重新读取 agent.token 并重启桥。"
-                : "未连接服务端（端口已关闭）。";
+            var code = connection == BridgeConnectionState.TokenRejected
+                ? "invalid-token"
+                : connection == BridgeConnectionState.AdmissionTimeout
+                    ? "not-admitted"
+                    : "not-connected";
+            var message = connection switch
+            {
+                BridgeConnectionState.TokenRejected => "座位令牌失效（实例可能已重启），请重新申请并让管理员批准。",
+                BridgeConnectionState.AdmissionTimeout => "等待管理员批准超时：请让管理员执行 conn.admit。",
+                _ => "未连接服务端（端口已关闭）。",
+            };
 
             await WriteToolResultAsync(output, id, Failure(code, message), isError: true).ConfigureAwait(false);
             return;
@@ -341,17 +353,8 @@ public sealed class BridgeServer
     /// </summary>
     private async Task<JsonNode> BuildBoardAsync(CancellationToken ct)
     {
-        // panel=true：沙盒（Authoring）模式下 observe.view 默认只回摘要（players[]），
-        // 没有 view/actions，本方法会拿到空面板。显式索取投影面板才能拿到战线/槽位/攻击预览。
-        var payload = await _transport
-            .CallAsync("observe.view", new JsonObject { ["panel"] = true }, ct)
-            .ConfigureAwait(false);
-
-        if (!payload.Ok)
-        {
-            // 服务端未支持 panel 参数时退回摘要形态：此时面板字段为空但不硬失败。
-            payload = await _transport.CallAsync("observe.view", new JsonObject(), ct).ConfigureAwait(false);
-        }
+        // 视角由角色决定（S11：退役 panel 参数旁路）：绑座连接拿到单座位帧 `{perspective, view, actions}`。
+        var payload = await _transport.CallAsync("observe.view", new JsonObject(), ct).ConfigureAwait(false);
 
         if (!payload.Ok || payload.Details is not JsonObject details)
         {

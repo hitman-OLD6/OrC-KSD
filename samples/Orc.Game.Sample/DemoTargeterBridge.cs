@@ -191,7 +191,7 @@ internal sealed class DemoTargeterBridge : ITargeterBridge
         Orc.Game.Players.Hq hq => Describe(hq.Owner),
         Orc.Game.Players.Player player => player.Index == 0 ? "玩家A" : "玩家B",
         Orc.Cards.Card card => card.Name,
-        Orc.Game.Board.Slot slot => slot.IsEmpty ? "空槽" : $"槽（占：{Describe(slot.Occupant)}）",
+        Orc.Game.Board.FormationGap gap => $"插入位置[{gap.Ordinal}]",
         _ => value.ToString() ?? value.GetType().Name,
     };
 }

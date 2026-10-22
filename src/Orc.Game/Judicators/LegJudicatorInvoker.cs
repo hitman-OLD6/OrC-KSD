@@ -14,11 +14,11 @@ namespace Orc.Game.Judicators;
 internal static class LegJudicatorInvoker
 {
     /// <summary>经注册表条目句柄调用并解包（对局路径；每次调用经统一解析点取栈顶——moding 动态生效）。</summary>
-    public static LegEligibilityFailure? InvokeLeg(JudicatorRegistration registration, UnitCard unit, Slot? position)
+    public static LegEligibilityFailure? InvokeLeg(JudicatorRegistration registration, UnitCard unit, BoardPosition? position)
         => UnpackLeg(registration.Invoke(new object[] { unit, position! }), registration.Name);
 
     /// <summary>经内置实例主方法调用并解包（独立构造路径；无注册表、无改写通道）。</summary>
-    public static LegEligibilityFailure? InvokeLeg(Judicator judicator, UnitCard unit, Slot? position)
+    public static LegEligibilityFailure? InvokeLeg(Judicator judicator, UnitCard unit, BoardPosition? position)
         => UnpackLeg(judicator.Invoke(new object[] { unit, position! }), judicator.GetType().Name);
 
     private static LegEligibilityFailure? UnpackLeg(object[]? raw, string source)

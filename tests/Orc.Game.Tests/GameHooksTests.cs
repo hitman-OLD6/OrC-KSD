@@ -71,13 +71,13 @@ public class GameHooksTests
         using var recorder = new UpdateRecorder(engine);
         var unit = new UnitCard(engine, new CardDefinition("单位", 1, 2, 3, 4, faction: Faction.Germany, rarity: Rarity.Standard));
         var line = new BattleLine(4);
-        var oldPosition = line[0];
-        var newPosition = line[1];
+        var oldPosition = line.GetInsertionGaps()[0];
+        var newPosition = line.GetInsertionGaps()[1];
 
         await GameUpdates.EmitCardDied(engine, unit);
-        await GameUpdates.EmitUnitJoined(engine, unit, oldPosition);
-        await GameUpdates.EmitUnitDeployed(engine, unit, newPosition);
-        await GameUpdates.EmitUnitPositionChanged(engine, unit, oldPosition, newPosition);
+        await GameUpdates.EmitUnitJoined(engine, unit, new BoardPosition(oldPosition.Line, oldPosition.Ordinal));
+        await GameUpdates.EmitUnitDeployed(engine, unit, new BoardPosition(newPosition.Line, newPosition.Ordinal));
+        await GameUpdates.EmitUnitPositionChanged(engine, unit, new BoardPosition(oldPosition.Line, oldPosition.Ordinal), new BoardPosition(newPosition.Line, newPosition.Ordinal));
 
         Assert.Equal(
             new[] { GameUpdates.CardDied, GameUpdates.UnitJoined, GameUpdates.UnitDeployed, GameUpdates.UnitPositionChanged },
@@ -172,7 +172,7 @@ public class GameHooksTests
         await Assert.ThrowsAsync<ArgumentNullException>(() => GameUpdates.EmitCardLoad(engine, player, null!));
         await Assert.ThrowsAsync<ArgumentNullException>(() => GameUpdates.EmitCardDied(engine, null!));
         await Assert.ThrowsAsync<ArgumentNullException>(() => GameUpdates.EmitUnitJoined(engine, unit, null!));
-        await Assert.ThrowsAsync<ArgumentNullException>(() => GameUpdates.EmitUnitPositionChanged(engine, unit, null!, line[1]));
+        await Assert.ThrowsAsync<ArgumentNullException>(() => GameUpdates.EmitUnitPositionChanged(engine, unit, null!, new BoardPosition(line, 0)));
     }
 
     // ---------- 03-hook定义 S6：清单层 ↔ 代码一致性核对 ----------

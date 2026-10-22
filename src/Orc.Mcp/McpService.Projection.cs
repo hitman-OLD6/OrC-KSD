@@ -21,10 +21,14 @@ public sealed partial class McpService
     };
 
     /// <summary>
-    /// 产出「视图 ＋ 动作可用性」载荷（按座位过滤）。
-    /// <para>载荷字段：<c>seat</c>、<c>view</c>（整枚 UiMatchView）、<c>actions</c>、以及若干扁平标量（兼容旧 <c>observe.view</c>）。</para>
+    /// 产出**单座位视角帧**（绑 seat 的 viewer / 兼任连接的 viewer 面）。
+    /// <para>帧形状：<c>{kind:"view.updated", perspective:{mode:"seat",seat:N}, view, actions}</c>。</para>
+    /// <para>
+    /// 刻意变化第 2 条：不再输出扁平标量兼容字段（<c>turn</c>/<c>selfHandCount</c>/…）——
+    /// 帧形状只保留 <c>perspective</c> ＋ <c>view</c>/<c>views</c> ＋ <c>actions</c> 一套真源。
+    /// </para>
     /// </summary>
-    public ActionOutcome ProjectView(int seat)
+    public ActionOutcome ProjectSeatFrame(int seat)
     {
         if (seat is not (0 or 1))
         {
@@ -53,49 +57,159 @@ public sealed partial class McpService
                 }
 
                 var view = provider.Project(m, m.Players[seat]);
-                var payload = new JsonObject
+                return ActionOutcome.Completed(new JsonObject
                 {
                     ["kind"] = "view.updated",
-                    ["seat"] = seat,
-                    ["matchId"] = view.MatchId,
+                    ["perspective"] = new JsonObject
+                    {
+                        ["mode"] = "seat",
+                        ["seat"] = seat,
+                    },
                     ["view"] = JsonSerializer.SerializeToNode(view, ViewJson),
                     ["actions"] = ComputeActions(m, seat),
-
-                    // 兼容既有 observe.view 的扁平标量
-                    ["turn"] = view.Turn,
-                    ["phase"] = view.Phase,
-                    ["activePlayerSide"] = view.ActivePlayerSide,
-                    ["selfHandCount"] = view.SelfHandCount,
-                    ["selfDeckCount"] = view.SelfDeckCount,
-                    ["enemyHandCount"] = view.EnemyHandCount,
-                    ["enemyDeckCount"] = view.EnemyDeckCount,
-                    ["selfKredits"] = view.SelfKredits,
-                    ["selfMaxKredits"] = view.SelfMaxKredits,
-                    ["selfCounterCount"] = view.SelfCounterCount,
-                    ["resultTitle"] = view.ResultTitle,
-                };
-
-                return ActionOutcome.Completed(payload);
+                });
             });
         }
         catch (Exception ex)
         {
-            // Mulligan / Preparing 期投影面还没有"当前玩家"（ComputeActions 依赖 CurrentPlayer）：
-            // 这不是故障而是阶段未就绪——按 not-ready 报告，别记 internal 污染 summary.errorCount。
-            // 注：`Orc.Game.Match` 命名空间与 `Match` 类型同名，此处无法书写枚举全名，故按相位名比较。
-            var notStarted = string.Equals(match.Phase.ToString(), "Mulligan", StringComparison.Ordinal)
-                || string.Equals(match.State.ToString(), "Preparing", StringComparison.Ordinal);
-            if (notStarted)
-            {
-                return ActionOutcome.Failed(
-                    McpCodes.NotReady,
-                    $"对局尚未进入进行态（相位 {match.Phase} / 状态 {match.State}）——按座位投影暂不可用。");
-            }
-
-            return ex is InvalidOperationException
-                ? ActionOutcome.Failed(McpCodes.EngineRejected, ex.Message)
-                : ActionOutcome.Failed(McpCodes.Internal, $"投影失败：{ex.GetType().Name}: {ex.Message}");
+            return ProjectionFailure(match, ex);
         }
+    }
+
+    /// <summary>
+    /// 产出**全知帧**（不绑 seat 的 viewer）：**同一次投影**内产出两份座位视角并打包下发，
+    /// 每份仍是既有 <see cref="Orc.UI.Contracts.UiMatchView"/>（不新增"与视角无关的视图类型"）。
+    /// <para>帧形状：<c>{kind:"view.updated", perspective:{mode:"omniscient"}, views:[{seat,view,actions},…]}</c>。</para>
+    /// </summary>
+    public ActionOutcome ProjectOmniscientFrame()
+    {
+        if (!TryGetActiveMatch(out var match))
+        {
+            return ActionOutcome.Failed(McpCodes.NotReady, "无活跃对局。");
+        }
+
+        if (!match.UiProjections.HasProvider)
+        {
+            return ActionOutcome.Failed(McpCodes.NotSupported, "该对局未装配 UI 投影提供者（无法产出全知视图）。");
+        }
+
+        try
+        {
+            return Executor.ReadOnly(m =>
+            {
+                var provider = m.UiProjections.CreateProvider(null, Options.MatchId, null);
+                if (provider is null)
+                {
+                    return ActionOutcome.Failed(McpCodes.NotSupported, "投影提供者不可用（CreateProvider 返回空）。");
+                }
+
+                var views = new JsonArray();
+                for (var seat = 0; seat < 2; seat++)
+                {
+                    var view = provider.Project(m, m.Players[seat]);
+                    views.Add(new JsonObject
+                    {
+                        ["seat"] = seat,
+                        ["view"] = JsonSerializer.SerializeToNode(view, ViewJson),
+                        ["actions"] = ComputeActions(m, seat),
+                    });
+                }
+
+                return ActionOutcome.Completed(new JsonObject
+                {
+                    ["kind"] = "view.updated",
+                    ["perspective"] = new JsonObject { ["mode"] = "omniscient" },
+                    ["views"] = views,
+                });
+            });
+        }
+        catch (Exception ex)
+        {
+            return ProjectionFailure(match, ex);
+        }
+    }
+
+    /// <summary>
+    /// 调试面的对局摘要（含双方手牌明细）：诊断中间态用，**不是**"全知 viewer 的输出"。
+    /// <para>同样走只读执行面（消费者上下文守卫），避免绕过单写者语义直接读引擎。</para>
+    /// </summary>
+    public ActionOutcome ProjectDebugSummary()
+    {
+        if (!TryGetActiveMatch(out var match))
+        {
+            return ActionOutcome.Failed(McpCodes.NotReady, "无活跃对局。");
+        }
+
+        try
+        {
+            return Executor.ReadOnly(m =>
+            {
+                var players = new JsonArray();
+                foreach (var player in m.Players)
+                {
+                    var hand = new JsonArray();
+                    foreach (var card in player.Hand)
+                    {
+                        hand.Add(new JsonObject
+                        {
+                            ["ref"] = card.Id.ToString("N"),
+                            ["name"] = card.Name,
+                            ["alive"] = card.Life.IsAlive,
+                        });
+                    }
+
+                    players.Add(new JsonObject
+                    {
+                        ["index"] = player.Index,
+                        ["ref"] = player.ReferenceKey,
+                        ["handCount"] = player.Hand.Count,
+                        ["deckCount"] = player.Deck.Count,
+                        ["points"] = player.Points,
+                        ["pointSlots"] = player.PointSlots,
+                        ["hqRef"] = player.Hq.Id.ToString("N"),
+                        ["hqHealth"] = player.HqHealth,
+                        ["hand"] = hand,
+                    });
+                }
+
+                return ActionOutcome.Completed(new JsonObject
+                {
+                    ["kind"] = "observe.summary",
+                    ["matchId"] = Options.MatchId,
+                    ["state"] = m.State.ToString(),
+                    ["phase"] = m.Phase.ToString(),
+                    ["turn"] = m.TurnNumber,
+                    ["currentPlayerIndex"] = m.CurrentPlayer?.Index,
+                    ["winnerIndex"] = m.Winner?.Index,
+                    ["endReason"] = m.EndReason?.ToString(),
+                    ["players"] = players,
+                });
+            });
+        }
+        catch (Exception ex)
+        {
+            return ProjectionFailure(match, ex);
+        }
+    }
+
+    /// <summary>
+    /// 投影失败分类：换牌／准备期没有"当前玩家"不是故障（按 not-ready），其余按引擎拒绝或内部故障。
+    /// </summary>
+    private static ActionOutcome ProjectionFailure(Orc.Game.Match match, Exception ex)
+    {
+        // 注：`Orc.Game.Match` 命名空间与 `Match` 类型同名，此处无法书写枚举全名，故按相位名比较。
+        var notStarted = string.Equals(match.Phase.ToString(), "Mulligan", StringComparison.Ordinal)
+            || string.Equals(match.State.ToString(), "Preparing", StringComparison.Ordinal);
+        if (notStarted)
+        {
+            return ActionOutcome.Failed(
+                McpCodes.NotReady,
+                $"对局尚未进入进行态（相位 {match.Phase} / 状态 {match.State}）——投影暂不可用。");
+        }
+
+        return ex is InvalidOperationException
+            ? ActionOutcome.Failed(McpCodes.EngineRejected, ex.Message)
+            : ActionOutcome.Failed(McpCodes.Internal, $"投影失败：{ex.GetType().Name}: {ex.Message}");
     }
 
     /// <summary>
@@ -166,7 +280,7 @@ public sealed partial class McpService
                     // 候选＝引擎目的地（前沿空槽；后撤语义下为己方支援线空槽）——不再自行枚举前线空槽。
                     foreach (var candidate in availability.Move.Candidates)
                     {
-                        var destination = candidate.IsAlive ? candidate.Value as Orc.Game.Board.Slot : null;
+                        var destination = candidate.IsAlive ? candidate.Value as Orc.Game.Board.FormationGap : null;
                         if (destination is null)
                         {
                             continue;
@@ -265,34 +379,31 @@ public sealed partial class McpService
         Orc.Game.Players.Player player,
         Orc.Game.Board.Battlefield battlefield)
     {
-        foreach (var slot in battlefield.FrontLine)
+        foreach (var slot in battlefield.FrontLine.Members)
         {
-            if (slot.Occupant is Orc.Game.Cards.UnitCard unit && ReferenceEquals(unit.Owner, player))
+            if (slot is Orc.Game.Cards.UnitCard unit && ReferenceEquals(unit.Owner, player))
             {
                 yield return unit;
             }
         }
 
-        foreach (var slot in battlefield.GetSupportLine(player))
+        foreach (var slot in battlefield.GetSupportLine(player).Members)
         {
-            if (slot.Occupant is Orc.Game.Cards.UnitCard unit)
+            if (slot is Orc.Game.Cards.UnitCard unit)
             {
                 yield return unit;
             }
         }
     }
 
-    /// <summary>槽位在该线中的序号（引用同一性定位；不在该线＝false）。</summary>
+    /// <summary>插入空隙在该线中的序号（线身份 ＋ 序号；不属于该线＝false）。</summary>
     private static bool TryLocateSlot(
-        IReadOnlyList<Orc.Game.Board.Slot> line, Orc.Game.Board.Slot slot, out int index)
+        Orc.Game.Board.BattleLine line, Orc.Game.Board.FormationGap slot, out int index)
     {
-        for (var i = 0; i < line.Count; i++)
+        if (ReferenceEquals(slot.Line, line))
         {
-            if (ReferenceEquals(line[i], slot))
-            {
-                index = i;
-                return true;
-            }
+            index = slot.Ordinal;
+            return true;
         }
 
         index = -1;

@@ -48,7 +48,7 @@ public class OperateCostRecheckTests
         // 真实移动：复验通过（有效 1 ≤ 1）→ 执行 → 扣费读有效值（1 点扣 1；读实时值 2 会扣成负）
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         var moveResult = await CommandTestKit.RunCommandAsync(
-            match, bridge, unit, match.Battlefield.FrontLine[0].Ref);
+            match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps()[0].Ref);
         Assert.Equal(CommandResultStatus.Success, moveResult.Status);
         Assert.Equal(0, playerA.Points);
 
@@ -90,13 +90,13 @@ public class OperateCostRecheckTests
         await unit.Modifiers.AddModifierAsync(new AddModifier(CardStatFields.OperateCost, 3, source));
         Assert.True(responder.Complete(
             description.RequestId,
-            TargeterTestKit.Selection(TargeterTestKit.PrimarySlot(description), match.Battlefield.FrontLine[0].Ref)));
+            TargeterTestKit.Selection(TargeterTestKit.PrimarySlot(description), match.Battlefield.FrontLine.GetInsertionGaps()[0].Ref)));
         var revalidated = await task;
 
         Assert.Equal(CommandResultStatus.Failed, revalidated.Status);
         Assert.Equal(CommandFailureReason.ExecutionRejected, revalidated.FailureReason);
         // 零副作用：未移动、未扣费、两 bool 未变
-        Assert.Same(match.Battlefield.GetSupportLine(player)[1], unit.GetData<UnitStateData>().Position);
+        Assert.Same(match.Battlefield.GetSupportLine(player).GetInsertionGaps()[1], unit.GetData<UnitStateData>().Line);
         Assert.Equal(2, player.Points);
         Assert.True(unit.GetData<CommandData>().CanMove);
 
@@ -104,7 +104,7 @@ public class OperateCostRecheckTests
         await unit.Modifiers.RemoveBySourceAsync(source);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         var moved = await CommandTestKit.RunCommandAsync(
-            match, bridge, unit, match.Battlefield.FrontLine[0].Ref);
+            match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps()[0].Ref);
         Assert.Equal(CommandResultStatus.Success, moved.Status);
         Assert.Equal(1, player.Points);
     }

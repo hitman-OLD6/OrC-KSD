@@ -123,8 +123,8 @@ public sealed class UiProjectionProvider : IUiProjectionProvider
             EnemyDeckCount = opponent?.Deck.Count,
             SelfCounterCount = viewer.Hand.Count(h => h is CardBase c
                 && c.TryGetData<CounterActivationData>(out var a) && a.IsActive),
-            FrontLineSlotCount = match.Battlefield.FrontLine.Count,
-            SupportLineSlotCount = match.Battlefield.GetSupportLine(viewer.Index).Count,
+            FrontLineSlotCount = match.Battlefield.FrontLine.Capacity,
+            SupportLineSlotCount = match.Battlefield.GetSupportLine(viewer.Index).Capacity,
             SelfHand = hand,
             SelfLine = selfLine,
             SelfHq = selfHq,
@@ -212,9 +212,9 @@ public sealed class UiProjectionProvider : IUiProjectionProvider
 
     private UiCardView HqOf(Match match, Player owner, Player viewer, Dictionary<string, Card> index)
     {
-        var slot = owner.Hq.Position;
+        var hqLine = owner.Hq.Line;
         index[KeyOf(owner.Hq)] = owner.Hq;
-        return Read(match, owner.Hq, viewer, "support", slot?.Index ?? 0);
+        return Read(match, owner.Hq, viewer, "support", hqLine?.IndexOf(owner.Hq) ?? 0);
     }
 
     private IEnumerable<UiCardView> Row(
@@ -222,9 +222,9 @@ public sealed class UiProjectionProvider : IUiProjectionProvider
     {
         var battlefield = match.Battlefield;
         var line = front ? battlefield.FrontLine : battlefield.GetSupportLine(owner.Index);
-        for (var i = 0; i < line.Count; i++)
+        for (var i = 0; i < line.Size; i++)
         {
-            if (line[i].Occupant is UnitCard unit && ReferenceEquals(unit.Owner, owner))
+            if (line[i] is UnitCard unit && ReferenceEquals(unit.Owner, owner))
             {
                 index[KeyOf(unit)] = unit;
                 yield return Read(match, unit, viewer, front ? "frontline" : "support", i);

@@ -30,7 +30,7 @@ public class SandboxEndToEndTests
         using var fixture = new SandboxFixture();
 
         // ① 建局：脚手架 + 占位卡
-        var created = await fixture.InvokeAsync("sandbox.create");
+        var created = await fixture.CreateSandboxMatchAsync();
         Assert.True(created.Ok, created.Message);
         Assert.True(File.Exists(fixture.Service.Sandbox.ManifestFile));
         Assert.True(File.Exists(fixture.Service.Sandbox.PlaceholderCardFile));
@@ -52,7 +52,7 @@ public class SandboxEndToEndTests
         Assert.False(string.IsNullOrWhiteSpace(cardRef));
 
         // ④ 观察：手牌含该卡
-        var view = await fixture.InvokeAsync("observe.view");
+        var view = await fixture.InvokeInContextAsync("observe.view");
         Assert.True(view.Ok);
         var hand = view.Details!["players"]!.AsArray()[0]!["hand"]!.AsArray();
         Assert.Contains(hand, node => node!["ref"]!.GetValue<string>() == cardRef);
@@ -79,7 +79,7 @@ public class SandboxEndToEndTests
         Assert.True(segments.Details!["cacheCapacity"]!.GetValue<int>() > 0);
 
         // ⑨ 销毁对局
-        var disposed = await fixture.InvokeAsync("sandbox.dispose");
+        var disposed = await fixture.DisposeSandboxMatchAsync();
         Assert.True(disposed.Ok, disposed.Message);
         Assert.Null(fixture.Service.Executor.Match);
     }
@@ -89,9 +89,9 @@ public class SandboxEndToEndTests
     {
         using var fixture = new SandboxFixture();
 
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
-        var second = await fixture.InvokeAsync("sandbox.create");
+        var second = await fixture.CreateSandboxMatchAsync();
         Assert.False(second.Ok);
         Assert.Equal(McpCodes.EngineRejected, second.Code);
     }
@@ -100,7 +100,7 @@ public class SandboxEndToEndTests
     public async Task Emit_WithoutSubscriber_ReturnsWarning()
     {
         using var fixture = new SandboxFixture();
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
         var emitted = await fixture.InvokeAsync("sandbox.emit", """{"event":"totally.unknown.event"}""");
 
@@ -113,12 +113,12 @@ public class SandboxEndToEndTests
     public async Task EndTurn_AdvancesTurn()
     {
         using var fixture = new SandboxFixture();
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
-        var before = (await fixture.InvokeAsync("observe.view")).Details!["turn"]!.GetValue<int>();
+        var before = (await fixture.InvokeInContextAsync("observe.view")).Details!["turn"]!.GetValue<int>();
         var ended = await fixture.InvokeAsync("match.end_turn");
         Assert.True(ended.Ok, ended.Message);
-        var after = (await fixture.InvokeAsync("observe.view")).Details!["turn"]!.GetValue<int>();
+        var after = (await fixture.InvokeInContextAsync("observe.view")).Details!["turn"]!.GetValue<int>();
 
         Assert.True(after >= before);
     }
@@ -127,7 +127,7 @@ public class SandboxEndToEndTests
     public async Task SetPoints_ChangesPlayerPoints()
     {
         using var fixture = new SandboxFixture();
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
         var result = await fixture.InvokeAsync("sandbox.set_points", """{"owner":0,"delta":3}""");
 
@@ -139,7 +139,7 @@ public class SandboxEndToEndTests
     public async Task DiagReport_AggregatesState()
     {
         using var fixture = new SandboxFixture();
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
         var report = await fixture.InvokeAsync("diag.report");
 
@@ -157,7 +157,7 @@ public class SandboxEndToEndTests
     public async Task SandboxState_ReportsDirtyProcessState()
     {
         using var fixture = new SandboxFixture();
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
         var state = await fixture.InvokeAsync("sandbox.state");
 
@@ -171,7 +171,7 @@ public class SandboxEndToEndTests
     public async Task CardList_ShowsParsedCardsAndFailures()
     {
         using var fixture = new SandboxFixture();
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
         var list = await fixture.InvokeAsync("card.list");
 

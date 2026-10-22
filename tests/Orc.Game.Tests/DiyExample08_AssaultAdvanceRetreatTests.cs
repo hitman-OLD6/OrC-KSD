@@ -28,7 +28,7 @@ public class DiyExample08_AssaultAdvanceRetreatTests
         var unit = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
         // 敌方目标在支援线（前线为空 → 满足推进条件）；轰炸机防御 2，被我方 2 攻击毁。
         await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.BomberId, 1);
-        Assert.DoesNotContain(match.Battlefield.FrontLine, slot => !slot.IsEmpty);
+        Assert.DoesNotContain(match.Battlefield.FrontLine.Members, slot => !slot.IsEmpty());
 
         // 推进走 MoveAsync（S6 效果移动入口：不扣指挥点、不动行动位、不受压制阻断；落地经底层移动动作）。
         CommandTestKit.Activate(unit);
@@ -37,7 +37,7 @@ public class DiyExample08_AssaultAdvanceRetreatTests
         var outcome = await AssaultFlow.RunAsync(match, unit);
 
         Assert.Equal(AssaultOutcome.Advanced, outcome);
-        Assert.Contains(match.Battlefield.FrontLine, slot => ReferenceEquals(slot.Occupant, unit));
+        Assert.Contains(match.Battlefield.FrontLine.Members, slot => ReferenceEquals(slot, unit));
         Assert.Equal(hqBefore - 3, playerB.Hq.Health);
     }
 
@@ -58,9 +58,9 @@ public class DiyExample08_AssaultAdvanceRetreatTests
         var outcome = await AssaultFlow.RunAsync(match, unit);
 
         Assert.Equal(AssaultOutcome.Retreated, outcome);
-        var position = unit.GetData<UnitStateData>().Position;
+        var position = unit.GetData<UnitStateData>().Line;
         Assert.NotNull(position);
-        Assert.Contains(match.Battlefield.GetSupportLine(playerA), slot => ReferenceEquals(slot, position));
+        Assert.Contains(match.Battlefield.GetSupportLine(playerA).Members, slot => ReferenceEquals(slot, position));
         Assert.Equal(hqBefore, playerB.Hq.Health); // 撤退分支不造成总部伤害
 
         // 反击已发生：我方防御 5 → 3（战斗不是单向伤害）。
@@ -87,7 +87,7 @@ public class DiyExample08_AssaultAdvanceRetreatTests
 
         Assert.Equal(AssaultOutcome.Died, outcome);
         Assert.True(unit.GetData<UnitStateData>().IsDestroyed);
-        Assert.Null(unit.GetData<UnitStateData>().Position);
+        Assert.Null(unit.GetData<UnitStateData>().Line);
         Assert.Equal(hqBefore, playerB.Hq.Health);
     }
 
@@ -133,8 +133,8 @@ public class DiyExample08_AssaultAdvanceRetreatTests
             var enemy = match.Players.First(player => !ReferenceEquals(player, owner));
 
             // ④ 推进条件＝前线无存活敌方单位。
-            var enemyOnFront = match.Battlefield.FrontLine.Any(slot =>
-                slot.Occupant is CardBase occupant
+            var enemyOnFront = match.Battlefield.FrontLine.Members.Any(slot =>
+                slot is CardBase occupant
                 && ReferenceEquals(occupant.Owner, enemy)
                 && !occupant.GetData<UnitStateData>().IsDestroyed);
 
@@ -146,7 +146,7 @@ public class DiyExample08_AssaultAdvanceRetreatTests
             }
 
             // ⑤ 否则撤退：移回己方支援线空槽（不是回手牌）。S6：指定槽效果入口（零资源消耗）。
-            var destination = match.Battlefield.GetSupportLine(owner).First(slot => slot.IsEmpty);
+            var destination = match.Battlefield.GetSupportLine(owner).GetInsertionGaps()[0];
             await match.CommandManager.MoveUnitAsync(unit, destination, ct);
             return AssaultOutcome.Retreated;
         }

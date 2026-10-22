@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "atp.lvt-2",
+  "name": "LVT-2",
+  "components": [
+    {
+      "component": "typeCategory",
+      "type": [
+        "tank"
+      ]
+    },
+    {
+      "component": "factionCost",
+      "faction": "usa",
+      "kredits": 2
+    },
+    {
+      "component": "battleStats",
+      "operationCost": 1,
+      "attack": 2,
+      "defense": 3
+    },
+    {
+      "component": "tagData",
+      "rarity": "standard"
+    },
+    {
+      "component": "effects",
+      "prefabs": [
+        "atp.lvt-2.aura"
+      ]
+    }
+  ]
+}

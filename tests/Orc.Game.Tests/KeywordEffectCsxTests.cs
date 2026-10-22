@@ -115,7 +115,7 @@ public class KeywordEffectCsxTests
             Assert.True(effect.IsMounted);
 
             // 真实部署（部署链 → unit.deployed）→ 置位（覆盖部署初值 false/false——行为等价基线）。
-            var result = await match.PlayManager.PlayUnitAsync(unit, line[1]);
+            var result = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps()[1]);
             Assert.Equal(PlayResultStatus.Success, result.Status);
             Assert.True(unit.GetData<CommandData>().CanMove);
             Assert.True(unit.GetData<CommandData>().CanAttack);

@@ -1,4 +1,4 @@
-﻿using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.CodeAnalysis;
 using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Actions;
@@ -118,7 +118,7 @@ public sealed class MatchCardService
     private readonly LogicEngine _engine;
     private readonly CardLibrary _library;
     private readonly Func<Player, BattleLine>? _supportLineProvider;
-    private readonly Func<UnitCard, Slot, CancellationToken, Task<PlayResult>>? _joinUnitAction;
+    private readonly Func<UnitCard, FormationGap, CancellationToken, Task<PlayResult>>? _joinUnitAction;
     private readonly Func<Player, CancellationToken, Task>? _shuffleDeckAction;
     private readonly Func<MatchState>? _stateProvider;
     private readonly Func<IAddToHandAction?>? _addToHandActionProvider;
@@ -144,7 +144,7 @@ public sealed class MatchCardService
         LogicEngine engine,
         CardLibrary library,
         Func<Player, BattleLine>? supportLineProvider = null,
-        Func<UnitCard, Slot, CancellationToken, Task<PlayResult>>? joinUnitAction = null,
+        Func<UnitCard, FormationGap, CancellationToken, Task<PlayResult>>? joinUnitAction = null,
         Func<Player, CancellationToken, Task>? shuffleDeckAction = null,
         Func<MatchState>? stateProvider = null,
         CardEffectRegistry? effectRegistry = null,
@@ -322,7 +322,7 @@ public sealed class MatchCardService
     /// <exception cref="ArgumentException">槽位不在目标玩家支援线内（前置契约不符——明确拒绝）。</exception>
     /// <exception cref="InvalidOperationException">门禁；未加载归属；跨玩家；重复归属；已销毁；阵线面未装配。</exception>
     public async Task<CardPlaceResult> PlaceToSupportLineAsync(
-        UnitCard card, Player player, Slot slot, CancellationToken ct = default)
+        UnitCard card, Player player, FormationGap slot, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(card);
         ArgumentNullException.ThrowIfNull(player);
@@ -400,11 +400,11 @@ public sealed class MatchCardService
     /// </summary>
     /// <exception cref="ArgumentNullException">player 为 null。</exception>
     /// <exception cref="InvalidOperationException">门禁；支援线查询面未装配。</exception>
-    public IReadOnlyList<Slot> GetAdjacentEmptySlots(Player player)
+    public IReadOnlyList<FormationGap> GetAdjacentEmptySlots(Player player)
     {
         ArgumentNullException.ThrowIfNull(player);
         EnsureInProgress();
-        return RequireSupportLine(player).GetAdjacentEmptySlots();
+        return RequireSupportLine(player).GetInsertionGaps();
     }
 
     // ---------- 复合操作（「创建并放置」——官方主形态；失败自动回收已创建实例） ----------
@@ -424,7 +424,7 @@ public sealed class MatchCardService
     /// </summary>
     /// <exception cref="KeyNotFoundException">定义不存在/未注册（输入契约无效——明确失败）。</exception>
     public Task<CardPlaceResult> CreateAndPlaceToSupportLineAsync(
-        string definitionId, Player player, Slot slot, CancellationToken ct = default)
+        string definitionId, Player player, FormationGap slot, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(definitionId);
         ArgumentNullException.ThrowIfNull(player);
@@ -472,7 +472,7 @@ public sealed class MatchCardService
     /// <exception cref="ArgumentException">选取的槽位不在解析候选集内（调用方错误——明确拒绝）。</exception>
     /// <exception cref="KeyNotFoundException">定义不存在/未注册。</exception>
     public async Task<CardPlaceResult> CreateAndPlaceToAdjacentAsync(
-        string definitionId, Player player, Func<IReadOnlyList<Slot>, Slot?> slotSelector,
+        string definitionId, Player player, Func<IReadOnlyList<FormationGap>, FormationGap?> slotSelector,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(definitionId);
@@ -600,7 +600,7 @@ public sealed class MatchCardService
                     $"单位 '{card.Name}' 已死亡/已毁（不可放置——尸体不构成可放置对象）。");
             }
 
-            if (state.Position is not null)
+            if (state.Line is not null)
             {
                 throw new InvalidOperationException(
                     $"单位 '{card.Name}' 已在场（重复放置被拒绝——实例唯一归属不变量）。");
@@ -634,9 +634,9 @@ public sealed class MatchCardService
                 "支援线查询面未装配（独立构造场景不支持阵线面——装配性错误）。");
 
     /// <summary>线内槽位归属校验（引用相等——线内索引枚举）。</summary>
-    private static bool ContainsSlot(BattleLine line, Slot slot)
+    private static bool ContainsSlot(BattleLine line, FormationGap slot)
     {
-        foreach (var candidate in line)
+        foreach (var candidate in line.Members)
         {
             if (ReferenceEquals(candidate, slot))
             {

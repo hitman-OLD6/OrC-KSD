@@ -98,14 +98,14 @@ public sealed class Hq : Card
     /// <summary>有效血量（读面；跑链落定后的缓存——「始终读有效值」；未跑过链＝本体值）。</summary>
     public int Health => Modifiers.GetEffectiveValue(CardStatFields.HqHealth);
 
-    /// <summary>占位槽（布局语义——邻位/守护/轰炸机拦截基准；入槽由对局/战场装配完成；未入槽＝null）。</summary>
-    public Slot? Position => GetData<HqStateData>().Position;
+    /// <summary>所在阵线（布局语义——邻位/守护/轰炸机拦截基准；入线由对局/战场装配完成；未入线＝null）。</summary>
+    public BattleLine? Line => GetData<HqStateData>().Line;
 
-    /// <summary>装配入槽（对局/战场装配调用——布局语义；记录占位槽引用；不改槽位占用者，占用由装配方完成）。</summary>
-    internal void AttachToSlot(Slot slot)
+    /// <summary>装配入线（对局/战场装配调用——布局语义；记录所在线；不改线内容，入列由装配方完成）。</summary>
+    internal void AttachToLine(BattleLine line)
     {
-        ArgumentNullException.ThrowIfNull(slot);
-        GetData<HqStateData>().Position = slot;
+        ArgumentNullException.ThrowIfNull(line);
+        GetData<HqStateData>().Line = line;
     }
 
     // ---------- 管线挂载面（改写 / 介入；可挂可卸、按来源撤销） ----------

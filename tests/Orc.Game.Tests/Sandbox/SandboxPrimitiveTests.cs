@@ -1,5 +1,6 @@
 using Orc.Cards;
 using Orc.Core;
+using Orc.Game.Board;
 using Orc.Game.Cards;
 using Orc.Game.Players;
 using Orc.Game.Judicators;
@@ -76,7 +77,7 @@ public sealed class SandboxPrimitiveTests
         // 占位者：对手支援线 0 号槽。
         var occupant = await match.CardService.CreateAsync(SandboxTestKit.UnitId, opponent);
         await match.CardService.PlaceToSupportLineAsync(
-            (UnitCard)occupant, opponent, match.Battlefield.GetSupportLine(opponent)[0]);
+            (UnitCard)occupant, opponent, match.Battlefield.GetSupportLine(opponent).GetInsertionGaps()[0]);
 
         var before = SandboxTestKit.Snapshot(match);
         var blocked = await match.Sandbox.InstantiateAsync(SandboxTestKit.UnitId, player, "frontline", 0);
@@ -92,7 +93,7 @@ public sealed class SandboxPrimitiveTests
 
         // 槽位被占（把新单位放到已占位槽）——硬门槛之一。
         var second = await match.CardService.CreateAsync(SandboxTestKit.UnitId, opponent);
-        var target = match.Battlefield.GetSupportLine(opponent)[1];
+        var target = match.Battlefield.GetSupportLine(opponent).GetInsertionGaps()[1];
         var third = await match.CardService.CreateAsync(SandboxTestKit.UnitId, opponent);
         await match.CardService.PlaceToSupportLineAsync((UnitCard)third, opponent, target);
 
@@ -243,9 +244,9 @@ public sealed class SandboxPrimitiveTests
         Assert.Contains(Updates.CardPlaced, updates);
         Assert.Contains(GameUpdates.UnitJoined, updates);
 
-        var slot = match.Battlefield.GetSupportLine(player)[4];
-        Assert.NotNull(slot.Occupant);
-        Assert.Equal(result.Ref, ((Card)slot.Occupant!).Id.ToString("N"));
+        var slot = match.Battlefield.GetSupportLine(player).GetInsertionGaps()[4];
+        Assert.NotNull(slot);
+        Assert.Equal(result.Ref, ((FormationGap)slot!).Id.ToString("N"));
     }
 
     [Fact]
@@ -263,10 +264,10 @@ public sealed class SandboxPrimitiveTests
         Assert.Contains(Updates.CardPlaced, updates);
         Assert.Contains(GameUpdates.UnitJoined, updates);
 
-        var slot = match.Battlefield.FrontLine[1];
-        var unit = Assert.IsType<UnitCard>(slot.Occupant);
+        var slot = match.Battlefield.FrontLine.GetInsertionGaps()[1];
+        var unit = Assert.IsType<UnitCard>(slot);
         Assert.Equal(result.Ref, unit.Id.ToString("N"));
-        Assert.Equal(slot, unit.GetData<UnitStateData>().Position);
+        Assert.Same(slot.Line, unit.GetData<UnitStateData>().Line);
         Assert.False(unit.GetData<UnitStateData>().IsDestroyed);
     }
 
@@ -316,7 +317,7 @@ public sealed class SandboxPrimitiveTests
         Assert.Contains(Updates.CardPlaced, updates);
         Assert.Contains(GameUpdates.UnitJoined, updates);
         Assert.DoesNotContain(card, player.Hand); // 不得「既在手牌又在场」
-        Assert.Same(card, match.Battlefield.GetSupportLine(player)[4].Occupant);
+        Assert.Same(card, match.Battlefield.GetSupportLine(player).GetInsertionGaps()[4]);
     }
 
     [Fact]
@@ -329,11 +330,11 @@ public sealed class SandboxPrimitiveTests
         var result = await match.Sandbox.UnitizeAsync(card, "frontline", 3);
 
         Assert.True(result.Ok, result.Reason);
-        var slot = match.Battlefield.FrontLine[3];
-        var unit = Assert.IsType<UnitCard>(slot.Occupant);
+        var slot = match.Battlefield.FrontLine.GetInsertionGaps()[3];
+        var unit = Assert.IsType<UnitCard>(slot);
         var state = unit.GetData<UnitStateData>();
-        Assert.Same(slot, state.Position);
-        Assert.Equal(3, state.Position!.Index);
+        Assert.Same(slot, state.Line);
+        Assert.Equal(3, state.Line!.IndexOf(unit));
         Assert.False(state.IsDestroyed);
     }
 
@@ -354,8 +355,8 @@ public sealed class SandboxPrimitiveTests
         var result = await match.Sandbox.UnitizeAsync(mine, "support", 0);
 
         Assert.True(result.Ok, result.Reason);
-        Assert.Same(enemy, match.Battlefield.GetSupportLine(opponent)[0].Occupant);
-        Assert.Same(mine, match.Battlefield.GetSupportLine(player)[0].Occupant);
+        Assert.Same(enemy, match.Battlefield.GetSupportLine(opponent).GetInsertionGaps()[0]);
+        Assert.Same(mine, match.Battlefield.GetSupportLine(player).GetInsertionGaps()[0]);
     }
 
     [Fact]
@@ -385,16 +386,16 @@ public sealed class SandboxPrimitiveTests
         var match = await SandboxTestKit.CreateMatchAsync();
         var player = match.Players[0];
         var unit = await CommandTestKit.PrepareOnSupportAsync(match, player, SandboxTestKit.UnitId, 0);
-        var origin = unit.GetData<UnitStateData>().Position!;
+        var origin = unit.GetData<UnitStateData>().Line!;
 
         var updates = SandboxTestKit.TrackUpdates(match);
         var result = await match.Sandbox.MoveAsync(unit, "frontline", 2);
 
         Assert.True(result.Ok, result.Reason);
         Assert.Contains(GameUpdates.UnitPositionChanged, updates);
-        Assert.True(origin.IsEmpty);
-        Assert.Same(unit, match.Battlefield.FrontLine[2].Occupant);
-        Assert.Same(match.Battlefield.FrontLine[2], unit.GetData<UnitStateData>().Position);
+        Assert.Equal(0, origin.Size);
+        Assert.Same(unit, match.Battlefield.FrontLine.GetInsertionGaps()[2]);
+        Assert.Same(match.Battlefield.FrontLine.GetInsertionGaps()[2], unit.GetData<UnitStateData>().Line);
     }
 
     [Fact]
@@ -404,10 +405,10 @@ public sealed class SandboxPrimitiveTests
         var player = match.Players[0];
         var mover = await CommandTestKit.PrepareOnSupportAsync(match, player, SandboxTestKit.UnitId, 0);
         var blocker = await CommandTestKit.PrepareOnSupportAsync(match, player, SandboxTestKit.UnitId, 1);
-        var blockedSlot = blocker.GetData<UnitStateData>().Position!;
+        var blockedSlot = blocker.GetData<UnitStateData>().Line!;
 
         var before = SandboxTestKit.Snapshot(match);
-        var result = await match.Sandbox.MoveAsync(mover, "support", blockedSlot.Index);
+        var result = await match.Sandbox.MoveAsync(mover, "support", blockedSlot.Size);
 
         Assert.False(result.Ok);
         Assert.Equal(SandboxFailure.TargetSlotOccupied, result.Reason);
@@ -439,7 +440,7 @@ public sealed class SandboxPrimitiveTests
         var match = await SandboxTestKit.CreateMatchAsync();
         var player = match.Players[0];
         var unit = await CommandTestKit.PrepareOnSupportAsync(match, player, SandboxTestKit.UnitId, 0);
-        var slot = unit.GetData<UnitStateData>().Position!;
+        var slot = unit.GetData<UnitStateData>().Line!;
 
         var updates = SandboxTestKit.TrackUpdates(match);
         var result = await match.Sandbox.RemoveAsync(unit);
@@ -447,7 +448,7 @@ public sealed class SandboxPrimitiveTests
         Assert.True(result.Ok, result.Reason);
         Assert.Contains(GameUpdates.CardDying, updates); // 死亡链（不是一步式销毁）
         Assert.Contains(GameUpdates.CardDied, updates);
-        Assert.True(slot.IsEmpty);
+        Assert.Equal(0, slot.Size);
         Assert.True(unit.GetData<UnitStateData>().IsDestroyed);
     }
 

@@ -38,6 +38,7 @@ public sealed class SerialWorkQueue : IAsyncDisposable
     private readonly Task _loop;
     private readonly int _capacity;
     private long _sequence;
+    private int _running;
 
     public SerialWorkQueue(int capacity = 512)
     {
@@ -63,6 +64,36 @@ public sealed class SerialWorkQueue : IAsyncDisposable
                 return _queue.Count;
             }
         }
+    }
+
+    /// <summary>正在执行的工作项数量（0 或 1；诊断与轮换 drain 用）。</summary>
+    public int RunningCount => Volatile.Read(ref _running);
+
+    /// <summary>
+    /// 等待队列排空（**只等不杀**）：既有工作项自然完成、新的不再入队由调用方负责。
+    /// <para>返回 <c>true</c>＝已排空；<c>false</c>＝超时（此时仍在途的工作项**不**被中断——轮换顺序要求"先 drain 再销毁"）。</para>
+    /// </summary>
+    public async Task<bool> WaitForIdleAsync(TimeSpan timeout, CancellationToken ct = default)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (PendingCount == 0 && RunningCount == 0)
+            {
+                return true;
+            }
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(20), ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+        }
+
+        return PendingCount == 0 && RunningCount == 0;
     }
 
     /// <summary>投递工作项并等待结果。</summary>
@@ -119,7 +150,15 @@ public sealed class SerialWorkQueue : IAsyncDisposable
 
             using (Orc.Mcp.Execution.ConsumerContext.Enter())
             {
-                await item.ExecuteAsync().ConfigureAwait(false);
+                Interlocked.Increment(ref _running);
+                try
+                {
+                    await item.ExecuteAsync().ConfigureAwait(false);
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _running);
+                }
             }
         }
     }

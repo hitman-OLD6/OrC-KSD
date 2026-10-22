@@ -65,60 +65,61 @@ public sealed class GameEnvironment
     // ---------- ② 环境现算查询面（纯只读；不触发重跑、无副作用） ----------
 
     /// <summary>
-    /// 读取卡的位置槽位（纯读；未在场/无位置＝null、不抛错）：
-    /// 持有单位数据组件（已单位化）＝单位状态位置；HQ 实体＝占位槽（布局语义）；其余＝null。
+    /// 读取卡所在阵线（纯读；未入场/不在任何线＝null、不抛错）：
+    /// 持有单位数据组件（已单位化）＝单位所在线；HQ 实体＝所在线（布局语义）；其余＝null。
     /// </summary>
     /// <exception cref="ArgumentNullException">card 为 null。</exception>
-    public Slot? GetPositionOf(Card card) => PositionOf(card);
+    public BattleLine? GetPositionOf(Card card) => PositionOf(card);
 
     /// <summary>
-    /// 读取卡的位置槽位（静态只读形态——供无环境实例的调用方〔如判定器〕复用同一口径）：
-    /// 持有单位数据组件＝单位状态位置；HQ 实体＝占位槽；其余＝null。
+    /// 读取卡所在阵线（静态只读形态——供无环境实例的调用方〔如判定器〕复用同一口径）。
     /// </summary>
     /// <exception cref="ArgumentNullException">card 为 null。</exception>
-    public static Slot? PositionOf(Card card)
+    public static BattleLine? PositionOf(Card card)
     {
         ArgumentNullException.ThrowIfNull(card);
 
         if (card.TryGetData<UnitStateData>(out var state))
         {
-            return state.Position;
+            return state.Line;
         }
 
-        return card is Hq hq ? hq.Position : null;
+        return card is Hq hq ? hq.Line : null;
+    }
+
+    /// <summary>读取卡在其阵线中的位置序号（未入场＝-1）。</summary>
+    /// <exception cref="ArgumentNullException">card 为 null。</exception>
+    public static int PositionIndexOf(Card card)
+    {
+        ArgumentNullException.ThrowIfNull(card);
+        return PositionOf(card) is { } line ? line.IndexOf(card) : -1;
     }
 
     /// <summary>
-    /// 判定卡是否位于「前线」（中立共享的前线线——中间那条线的任一槽位；与视角无关）。
-    /// 未在场/无位置＝不满足（false——自然产出原值、不抛错）；判定随位置实时变化（随动由「事件 → 重跑」保证）。
+    /// 判定卡是否位于「前线」（中立共享的前线线；与视角无关）。
+    /// 未入场/不在线＝不满足（false——自然产出原值、不抛错）；判定随位置实时变化（随动由「事件 → 重跑」保证）。
     /// 概念区分：「在前线」（位置判定）≠「前线占据」（推进前置的状态判定——两概念勿混）。
     /// </summary>
     /// <exception cref="ArgumentNullException">card 为 null。</exception>
     public bool IsOnFrontLine(Card card)
     {
         ArgumentNullException.ThrowIfNull(card);
-        return GetPositionOf(card) is { } position && ContainsSlot(Battlefield.FrontLine, position);
+        return ReferenceEquals(PositionOf(card), Battlefield.FrontLine);
     }
 
     /// <summary>
-    /// 读取卡所在战线（纯读；未在场/无位置＝null、不抛错）。
-    /// 用途：战线归属判定（如「位于某玩家支援线」＝与 <c>Battlefield.GetSupportLine(player)</c> 引用同一性比较）。
+    /// 读取卡所在阵线（纯读；未入场＝null、不抛错）。
+    /// 用途：阵线归属判定（如「位于某玩家支援线」＝与 <c>Battlefield.GetSupportLine(player)</c> 引用同一性比较）。
     /// </summary>
     /// <exception cref="ArgumentNullException">card 为 null。</exception>
     public BattleLine? GetLineOf(Card card)
     {
         ArgumentNullException.ThrowIfNull(card);
-        var position = GetPositionOf(card);
-        if (position is null || !TryLocate(position, out var line, out _))
-        {
-            return null;
-        }
-
-        return line;
+        return PositionOf(card);
     }
 
     /// <summary>
-    /// 判定两卡是否相邻（同线、索引差 1 的直接邻位——隔空槽不相邻、跨线不算；与 2C 守护判定既有口径一致）。
+    /// 判定两卡是否相邻（同线、位置序号差 1 的直接邻位；跨线不算；与 2C 守护判定既有口径一致）。
     /// 任一无位置＝不满足（false）；HQ 参与相邻关系（「相邻」关系对 HQ 成立——关系与计数分离，见 <see cref="GetAdjacentUnits"/>）。
     /// </summary>
     /// <exception cref="ArgumentNullException">a 或 b 为 null。</exception>
@@ -126,7 +127,7 @@ public sealed class GameEnvironment
 
     /// <summary>
     /// 相邻判定的静态形态（同一口径；供判定器等无环境实例的调用方复用）：
-    /// 同线、索引差 1 的直接邻位——隔空槽不相邻、跨线不算；任一无位置＝false；HQ 参与相邻关系。
+    /// 同线、位置序号差 1 的直接邻位；任一无位置＝false；HQ 参与相邻关系。
     /// </summary>
     /// <exception cref="ArgumentNullException">battlefield / a / b 为 null。</exception>
     public static bool AreAdjacent(Battlefield battlefield, Card a, Card b)
@@ -135,33 +136,42 @@ public sealed class GameEnvironment
         ArgumentNullException.ThrowIfNull(a);
         ArgumentNullException.ThrowIfNull(b);
 
-        var positionA = PositionOf(a);
-        var positionB = PositionOf(b);
-        if (positionA is null || positionB is null)
+        var line = PositionOf(a);
+        if (line is null || !ReferenceEquals(line, PositionOf(b)))
         {
             return false;
         }
 
-        if (!TryLocate(battlefield, positionA, out var line, out var indexA))
+        if (!ReferenceEquals(line, battlefield.PlayerASupportLine)
+            && !ReferenceEquals(line, battlefield.FrontLine)
+            && !ReferenceEquals(line, battlefield.PlayerBSupportLine))
         {
             return false;
         }
 
-        return TryLocateInLine(line, positionB, out var indexB) && Math.Abs(indexA - indexB) == 1;
+        var indexA = line.IndexOf(a);
+        var indexB = line.IndexOf(b);
+        return indexA >= 0 && indexB >= 0 && Math.Abs(indexA - indexB) == 1;
     }
 
     /// <summary>
-    /// 读取卡的相邻单位（左右紧邻——同线索引差 1 的直接邻位；隔空槽不相邻；跨线不算）。
-    /// 计数对象＝单位：空槽不计数、HQ 不计数（HQ 非单位——关系与计数分离）、已死亡单位不计数；
+    /// 读取卡的相邻单位（左右紧邻——同线位置序号差 1；跨线不算）。
+    /// 计数对象＝单位：HQ 不计数（HQ 非单位——关系与计数分离）、已死亡单位不计数；
     /// 不分敌我（凡左右紧邻的单位均计入——谓词可进一步收窄）。
-    /// 顺序＝索引升序（左邻在前、右邻在后）；未在场/无位置＝空列表（不抛错）。
+    /// 顺序＝位置序号升序（左邻在前、右邻在后）；未入场＝空列表（不抛错）。
     /// </summary>
     /// <exception cref="ArgumentNullException">card 为 null。</exception>
     public IReadOnlyList<UnitCard> GetAdjacentUnits(Card card)
     {
         ArgumentNullException.ThrowIfNull(card);
-        var position = GetPositionOf(card);
-        if (position is null || !TryLocate(position, out var line, out var index))
+        var line = PositionOf(card);
+        if (line is null)
+        {
+            return Array.Empty<UnitCard>();
+        }
+
+        var index = line.IndexOf(card);
+        if (index < 0)
         {
             return Array.Empty<UnitCard>();
         }
@@ -339,65 +349,15 @@ public sealed class GameEnvironment
             });
     }
 
-    /// <summary>线内定位（引用同一性；命中＝true＋出索引）。</summary>
-    private static bool TryLocateInLine(BattleLine line, Slot slot, out int index)
-    {
-        for (var i = 0; i < line.Count; i++)
-        {
-            if (ReferenceEquals(line[i], slot))
-            {
-                index = i;
-                return true;
-            }
-        }
-
-        index = -1;
-        return false;
-    }
-
-    /// <summary>战线定位（三线逐线查找；命中＝true＋出线与索引）。</summary>
-    private bool TryLocate(Slot slot, out BattleLine line, out int index)
-        => TryLocate(Battlefield, slot, out line, out index);
-
-    /// <summary>战线定位的静态形态（同一口径；供静态相邻判定复用）。</summary>
-    private static bool TryLocate(Battlefield battlefield, Slot slot, out BattleLine line, out int index)
-    {
-        if (TryLocateInLine(battlefield.PlayerASupportLine, slot, out index))
-        {
-            line = battlefield.PlayerASupportLine;
-            return true;
-        }
-
-        if (TryLocateInLine(battlefield.FrontLine, slot, out index))
-        {
-            line = battlefield.FrontLine;
-            return true;
-        }
-
-        if (TryLocateInLine(battlefield.PlayerBSupportLine, slot, out index))
-        {
-            line = battlefield.PlayerBSupportLine;
-            return true;
-        }
-
-        line = null!;
-        index = -1;
-        return false;
-    }
-
-    /// <summary>线内包含判定（引用同一性）。</summary>
-    private static bool ContainsSlot(BattleLine line, Slot slot)
-        => TryLocateInLine(line, slot, out _);
-
-    /// <summary>邻位单位收集（越界/空槽/HQ/已死亡＝不计数）。</summary>
+    /// <summary>邻位单位收集（越界/HQ/已死亡＝不计数）。</summary>
     private static void CollectAdjacentUnit(BattleLine line, int index, List<UnitCard> result)
     {
-        if (index < 0 || index >= line.Count)
+        if (index < 0 || index >= line.Size)
         {
             return;
         }
 
-        if (line[index].Occupant is UnitCard unit && !IsDead(unit))
+        if (line[index] is UnitCard unit && !IsDead(unit))
         {
             result.Add(unit);
         }

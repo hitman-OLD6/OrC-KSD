@@ -117,8 +117,8 @@ public class JudicatorValidationTests
         var moveTrigger = match.CommandManager.UnitMoveTrigger;
         var attackTrigger = match.CommandManager.UnitAttackTrigger;
         var empty = Array.Empty<Ref<Entity>>();
-        var oldSlot = match.Battlefield.GetSupportLine(player)[1];
-        var newSlot = match.Battlefield.FrontLine[0];
+        var oldSlot = match.Battlefield.GetSupportLine(player).GetInsertionGaps()[1];
+        var newSlot = match.Battlefield.FrontLine.GetInsertionGaps()[0];
 
         // 基线：移动合法输入通过（默认复验逻辑真实求值）；空输入双侧拒绝。
         Assert.True(moveTrigger.Validate(new[] { unit.Ref, oldSlot.Ref, newSlot.Ref }));
@@ -200,8 +200,8 @@ public class JudicatorValidationTests
             match.Players,
             () => match.CurrentPlayer);
 
-        var oldSlot = match.Battlefield.GetSupportLine(player)[1];
-        var newSlot = match.Battlefield.FrontLine[0];
+        var oldSlot = match.Battlefield.GetSupportLine(player).GetInsertionGaps()[1];
+        var newSlot = match.Battlefield.FrontLine.GetInsertionGaps()[0];
         Assert.True(commandManager.UnitMoveTrigger.Validate(new[] { unit.Ref, oldSlot.Ref, newSlot.Ref })); // 默认复验逻辑在跑（合法场景通过）
 
         CommandTestKit.Activate(unit, canMove: false);

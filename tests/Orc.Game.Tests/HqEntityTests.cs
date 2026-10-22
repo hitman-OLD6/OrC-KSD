@@ -36,15 +36,15 @@ public class HqEntityTests
         // a) 双方各一 HQ 实体；居中槽占位者＝HQ 实体（Player 不再作为占位者）
         Assert.NotNull(playerA.Hq);
         Assert.NotNull(playerB.Hq);
-        Assert.Same(playerA.Hq, lineA[Battlefield.HqSlotIndex].Occupant);
-        Assert.Same(playerB.Hq, lineB[Battlefield.HqSlotIndex].Occupant);
-        Assert.IsNotType<Player>(lineA[Battlefield.HqSlotIndex].Occupant); // 否定：占位者不再是 Player
-        Assert.NotSame(playerA, lineA[Battlefield.HqSlotIndex].Occupant);
+        Assert.Same(playerA.Hq, lineA[0]);
+        Assert.Same(playerB.Hq, lineB[0]);
+        Assert.IsNotType<Player>(lineA[0]); // 否定：占位者不再是 Player
+        Assert.NotSame(playerA, lineA[0]);
 
         // b) Player 持 HQ 引用（双向互持）；布局语义锚点（占位槽引用）就绪
         Assert.Same(playerA, playerA.Hq.Owner);
-        Assert.Same(lineA[Battlefield.HqSlotIndex], playerA.Hq.Position);
-        Assert.Same(lineB[Battlefield.HqSlotIndex], playerB.Hq.Position);
+        Assert.Same(lineA[0], playerA.Hq.Line);
+        Assert.Same(lineB[0], playerB.Hq.Line);
 
         // g) Player.HqHealth 转发读面可用（只读、初值 20＝不依赖入槽的读面口径；实体读面同值）
         Assert.Equal(Player.InitialHqHealth, playerA.HqHealth);
@@ -52,8 +52,8 @@ public class HqEntityTests
         Assert.Equal(Player.InitialHqHealth, playerB.HqHealth);
 
         // 邻位候选回归：HQ 计入被占位（支援线邻位＝槽 1）
-        Assert.Equal(new[] { 1, 3 }, lineA.GetAdjacentEmptySlots().Select(s => s.Index));
-        Assert.Equal(new[] { 1, 3 }, lineB.GetAdjacentEmptySlots().Select(s => s.Index));
+        Assert.Equal(new[] { 0, 1 }, lineA.GetInsertionGaps().Select(s => s.Ordinal));
+        Assert.Equal(new[] { 0, 1 }, lineB.GetInsertionGaps().Select(s => s.Ordinal));
     }
 
     [Fact]
@@ -72,8 +72,8 @@ public class HqEntityTests
         Assert.Contains(playerB.Hq.Ref, report.Attack.Candidates);
 
         // h) 否定（显式）：不存在「槽引用形态的 HQ 目标」产出（不留双承载的必要证据）
-        Assert.DoesNotContain(match.Battlefield.PlayerBSupportLine[Battlefield.HqSlotIndex].Ref, report.Attack.Candidates);
-        Assert.DoesNotContain(match.Battlefield.PlayerASupportLine[Battlefield.HqSlotIndex].Ref, report.Attack.Candidates); // 己方 HQ 槽亦不产出
+        Assert.DoesNotContain(match.Battlefield.PlayerBSupportLine.GetInsertionGaps()[0].Ref, report.Attack.Candidates);
+        Assert.DoesNotContain(match.Battlefield.PlayerASupportLine.GetInsertionGaps()[0].Ref, report.Attack.Candidates); // 己方 HQ 槽亦不产出
     }
 
     [Fact]
@@ -174,7 +174,7 @@ public class HqEntityTests
         // 不入死亡/销毁链（Q2 语义）：不发 card.died / card.destroyed；不置「已毁」、不清槽位、不注销效果/修饰
         Assert.DoesNotContain(GameUpdates.CardDied, recorder.Types);
         Assert.DoesNotContain(Orc.Core.Updates.CardDestroyed, recorder.Types);
-        Assert.Same(hq, match.Battlefield.PlayerBSupportLine[Battlefield.HqSlotIndex].Occupant); // 占位保留（居中槽）
+        Assert.Same(hq, match.Battlefield.PlayerBSupportLine.GetInsertionGaps()[0]); // 占位保留（居中槽）
         Assert.Single(hq.Modifiers.All); // 修饰器保留（不因归零清理）
         Assert.IsType<AddModifier>(hq.Modifiers.All[0]);
         Assert.Single(hq.LethalInterventions); // 挂钩保留（挂载物冻结保持）

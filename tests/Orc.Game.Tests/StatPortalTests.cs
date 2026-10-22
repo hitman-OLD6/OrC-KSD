@@ -176,7 +176,7 @@ public class StatPortalTests
         await unit.Modifiers.RemoveBySourceAsync(source);
 
         Assert.True(unit.GetData<UnitStateData>().IsDestroyed);
-        Assert.True(match.Battlefield.PlayerASupportLine[1].IsEmpty); // 清位
+        Assert.True(match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1].IsEmpty()); // 清位
         var died = Assert.Single(recorder.Updates, u => u.Type == GameUpdates.CardDied);
         Assert.Same(unit, died.Payload![GameUpdates.PayloadCard]);
         // 「先数值变化、后死亡信号」：防御变化集中触发（1 → 钳制 0）先于 card.died 到达订阅者；
@@ -205,7 +205,7 @@ public class StatPortalTests
 
         Assert.Empty(unit.Modifiers.All);
         Assert.True(unit.GetData<UnitStateData>().IsDestroyed);
-        Assert.True(match.Battlefield.PlayerASupportLine[1].IsEmpty);
+        Assert.True(match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1].IsEmpty());
     }
 
     // ---------- ③+ 死亡冻结与死亡清理（轮 3／轮 4 口径） ----------

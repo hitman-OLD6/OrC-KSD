@@ -45,7 +45,7 @@ internal static class Program
             Mode = McpServiceMode.Player,
             SandboxRoot = sandboxRoot,
             Seed = 20261017,
-            AgentSeat = AiSeat,
+            AiSeats = [AiSeat],
         });
 
         IUiProjectionProvider? projection = null;

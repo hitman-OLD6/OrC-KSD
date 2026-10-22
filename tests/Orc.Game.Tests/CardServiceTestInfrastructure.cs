@@ -135,7 +135,7 @@ internal sealed class CardServiceSceneEffect : ActiveEffect<CardServiceCastView>
     public CommandManager? CommandManager { get; set; }
 
     /// <summary>目标槽位（ToSupportLine）。</summary>
-    public Slot? TargetSlot { get; set; }
+    public FormationGap? TargetSlot { get; set; }
 
     /// <summary>源卡（CopyToHand / Transform / AddUnitType）。</summary>
     public CardBase? Source { get; set; }
@@ -144,7 +144,7 @@ internal sealed class CardServiceSceneEffect : ActiveEffect<CardServiceCastView>
     public string AddedType { get; set; } = UnitType.Tank;
 
     /// <summary>选取策略（ToAdjacent；缺省＝取首个候选——策略由调用方定）。</summary>
-    public Func<IReadOnlyList<Slot>, Slot?> SlotSelector { get; set; } = slots => slots[0];
+    public Func<IReadOnlyList<FormationGap>, FormationGap?> SlotSelector { get; set; } = slots => slots[0];
 
     // ---------- 观测面 ----------
 
@@ -155,7 +155,7 @@ internal sealed class CardServiceSceneEffect : ActiveEffect<CardServiceCastView>
     public CardPlaceResult? LastResult { get; private set; }
 
     /// <summary>最近一次相邻解析的候选集（回调未到达＝null——空解析时选取不发生）。</summary>
-    public IReadOnlyList<Slot>? LastCandidates { get; private set; }
+    public IReadOnlyList<FormationGap>? LastCandidates { get; private set; }
 
     /// <summary>最近一次异常（异常隔离前提下的可断言面；无＝null）。</summary>
     public Exception? LastError { get; private set; }
@@ -234,7 +234,7 @@ internal sealed class CardServiceSceneEffect : ActiveEffect<CardServiceCastView>
                 {
                     if (Source is not UnitCard source
                         || !source.TryGetData<UnitStateData>(out var sourceState)
-                        || sourceState.Position is not { } slot)
+                        || sourceState.Line is not { } slot)
                     {
                         return;
                     }
@@ -248,7 +248,7 @@ internal sealed class CardServiceSceneEffect : ActiveEffect<CardServiceCastView>
                     // ③ 销毁（杀＋card.destroyed＋资源清理——配套销毁面）
                     await Engine!.DestroyCard(source);
                     // ④ 放回原位置（统一放置面——同槽位）
-                    LastResult = await service.PlaceToSupportLineAsync(newCard, owner, slot, ct);
+                    LastResult = await service.PlaceToSupportLineAsync(newCard, owner, slot.GetInsertionGaps()[0], ct);
                     break;
                 }
 

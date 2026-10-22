@@ -97,14 +97,14 @@ public sealed class AuraDeclaration
     {
         if (Host is Hq hq)
         {
-            return hq.Position is not null;
+            return hq.Line is not null;
         }
 
         if (Host is CardBase card)
         {
             return card.TryGetData<UnitStateData>(out var state)
                 && !state.IsDestroyed
-                && state.Position is not null;
+                && state.Line is not null;
         }
 
         return false;

@@ -14,7 +14,7 @@ public class ProjectionTests
     [Fact]
     public async Task ObserveView_OutsideConsumerContext_IsRejected()
     {
-        using var fixture = new SandboxFixture(McpServiceMode.Player, room: null, agentSeat: 0);
+        using var fixture = new SandboxFixture(McpServiceMode.Player, room: null, aiSeats: [0]);
         await CreateMatchAsync(fixture);
 
         var result = await fixture.InvokeAsync("observe.view");
@@ -26,19 +26,23 @@ public class ProjectionTests
     [Fact]
     public async Task ObserveView_ReturnsFullViewAndActions_InsideConsumerContext()
     {
-        using var fixture = new SandboxFixture(McpServiceMode.Player, room: null, agentSeat: 0);
+        using var fixture = new SandboxFixture(McpServiceMode.Player, room: null, aiSeats: [0]);
         await CreateMatchAsync(fixture);
 
         McpToolResult result;
+        fixture.Service.Caller = new CallerView(Seat: 0);
         using (ConsumerContext.Enter())
         {
             result = await fixture.InvokeAsync("observe.view");
         }
 
+        fixture.Service.Caller = CallerView.Anonymous;
+
         Assert.True(result.Ok, result.Message);
 
         var details = result.Details!;
-        Assert.Equal(0, details["seat"]!.GetValue<int>());
+        Assert.Equal("seat", details["perspective"]!["mode"]!.GetValue<string>());
+        Assert.Equal(0, details["perspective"]!["seat"]!.GetValue<int>());
 
         // 整枚投影：手牌与战线数组都在
         var view = details["view"]!;

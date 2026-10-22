@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "orc.across-the-pacific",
+  "source": "cards/atp.lvt-2.card.json",
+  "assets": [
+    {
+      "guid": "ce9fc415-96f3-4765-5c5d-24ab0ddb47f6",
+      "kind": "card",
+      "id": "atp.lvt-2",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

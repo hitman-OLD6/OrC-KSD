@@ -1,4 +1,4 @@
-﻿using Orc.Cards;
+using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Actions;
 using Orc.Game.Board;
@@ -88,7 +88,7 @@ public sealed class CommandManager
     private readonly Func<UnitCard, Ref<Entity>, bool> _combatTargetLegal; // K1：目标合法性判定通道（（攻击者, 目标引用）→ bool——对局＝combat.target.legal 条目句柄；缺省＝内置默认）
     private readonly Func<UnitCard, UnitCard, bool> _combatCounterEligibility; // K2：反击资格判定通道（（攻击者, 目标）→ bool——对局＝combat.counter.eligibility 条目句柄；缺省＝内置默认）
     private readonly Func<UnitCard, UnitCard, bool> _combatAmbushCondition; // K2：伏击条件判定通道（（被攻击单位, 攻击者）→ bool——对局＝combat.ambush.condition 条目句柄；缺省＝内置默认）
-    private readonly Func<UnitCard, Slot?, LegEligibilityFailure?> _moveLegEligibility; // K3：move leg 资格判定通道（（单位, 源位置）→ 结果〔null＝通过〕——对局＝move.leg.eligibility 条目句柄；缺省＝内置默认）
+    private readonly Func<UnitCard, BoardPosition?, LegEligibilityFailure?> _moveLegEligibility; // K3：move leg 资格判定通道（（单位, 源位置）→ 结果〔null＝通过〕——对局＝move.leg.eligibility 条目句柄；缺省＝内置默认）
     private readonly Func<UnitCard, LegEligibilityFailure?> _attackLegEligibility; // K3：attack leg 资格判定通道（（单位）→ 结果〔null＝通过〕——对局＝attack.leg.eligibility 条目句柄；缺省＝内置默认）
     private readonly Func<Player, bool> _moveFrontlineEnemy; // K3：推进前置判定通道（（所有者）→ bool——对局＝move.frontline-enemy 条目句柄；缺省＝内置默认）
     private readonly Trigger<CardTriggerView> _defenseDepletionTrigger; // W2b：防御归零检查（被动；挂载于更新总线）
@@ -153,7 +153,7 @@ public sealed class CommandManager
         Func<UnitCard, Ref<Entity>, bool>? combatTargetLegal = null,
         Func<UnitCard, UnitCard, bool>? combatCounterEligibility = null,
         Func<UnitCard, UnitCard, bool>? combatAmbushCondition = null,
-        Func<UnitCard, Slot?, LegEligibilityFailure?>? moveLegEligibility = null,
+        Func<UnitCard, BoardPosition?, LegEligibilityFailure?>? moveLegEligibility = null,
         Func<UnitCard, LegEligibilityFailure?>? attackLegEligibility = null,
         Func<Player, bool>? moveFrontlineEnemy = null,
         Func<Player, Entity?, Entity?, bool>? inputAllowed = null,
@@ -448,7 +448,7 @@ public sealed class CommandManager
                 $"单位 '{unit.Name}' 已死亡/已毁（离场动作被拒绝——前置契约不符）。");
         }
 
-        if (state.Position is not { } slot)
+        if (state.Line is not { } line)
         {
             throw new InvalidOperationException(
                 $"单位 '{unit.Name}' 当前不在场（离场动作被拒绝——前置契约不符）。");
@@ -456,8 +456,8 @@ public sealed class CommandManager
 
         await GameUpdates.EmitCardLeaving(_engine,unit,"leave",ct);
         // ① 槽位释放（变空槽）→ ② 不再在场（Position 置空——「有位置」判据失效）
-        slot.Clear();
-        state.Position = null;
+        line.TryRemove(unit);
+        state.Line = null;
 
         // ③ 离场失效通知（关系类观察者——既有「离场失效通知」面；死亡路径之外的第二接入点，转换路径接入）
         await PincerRules.OnUnitLeftBattlefieldAsync(unit, _pincers, ct);
@@ -742,7 +742,7 @@ public sealed class CommandManager
                 CommandActionAvailability.Blocked(CommandBlockReason.InteractionBlocked));
 
         // K3：leg 资格先行（共享条件源——可用性与复验四调用点同源）；移动的位置参数＝当前位置（仅推进语义）。
-        var moveLegFailure = _moveLegEligibility(unit, unit.GetData<UnitStateData>().Position);
+        var moveLegFailure = _moveLegEligibility(unit, PositionOf(unit));
         var attackLegFailure = _attackLegEligibility(unit);
 
         // 流程级资格原因＝leg 结果的分类提取（NonOwnerTurn/OwnerInvalid/UnitDead——两侧 leg 流程段同源、结果一致；
@@ -766,19 +766,16 @@ public sealed class CommandManager
 
         // 推进前置（后置项 C；K3：经 move.frontline-enemy 条目——与复验同源）：前线不存在存活敌方单位方可推进
         //（空前线或己方已占；敌方清空后实时恢复）
-        if (!CommandMovementRules.IsRetreat(_battlefield, unit, unit.GetData<UnitStateData>().Position) && _moveFrontlineEnemy(owner))
+        if (!CommandMovementRules.IsRetreat(_battlefield, unit, PositionOf(unit)) && _moveFrontlineEnemy(owner))
         {
             return CommandActionAvailability.Blocked(CommandBlockReason.NoCandidates);
         }
 
         // 移动候选＝前线任意空槽（不被邻位动态规则约束；无后撤/横移候选）
         var candidates = new List<Ref<Entity>>();
-        foreach (var slot in CommandMovementRules.Destinations(_battlefield, unit, unit.GetData<UnitStateData>().Position))
+        foreach (var gap in CommandMovementRules.Destinations(_battlefield, unit, PositionOf(unit)))
         {
-            if (slot.IsEmpty)
-            {
-                candidates.Add(slot.Ref);
-            }
+            candidates.Add(gap.Ref);
         }
 
         return candidates.Count == 0
@@ -821,18 +818,18 @@ public sealed class CommandManager
         }
 
         var enemyLine = _battlefield.GetSupportLine(enemy);
-        for (var i = 0; i < enemyLine.Count; i++)
+        for (var i = 0; i < enemyLine.Size; i++)
         {
-            if (enemyLine[i].Occupant is UnitCard target && _combatTargetLegal(attacker, target.Ref))
+            if (enemyLine[i] is UnitCard target && _combatTargetLegal(attacker, target.Ref))
             {
                 result.Add(target.Ref);
             }
         }
 
         var frontLine = _battlefield.FrontLine;
-        for (var i = 0; i < frontLine.Count; i++)
+        for (var i = 0; i < frontLine.Size; i++)
         {
-            if (frontLine[i].Occupant is UnitCard target && _combatTargetLegal(attacker, target.Ref))
+            if (frontLine[i] is UnitCard target && _combatTargetLegal(attacker, target.Ref))
             {
                 result.Add(target.Ref);
             }
@@ -842,7 +839,7 @@ public sealed class CommandManager
         // HQ 目标产出；槽位关系仅用于布局语义判定〔守护/轰炸机拦截/范围矩阵——经 HQ 占位槽〕）。
         // HQ 的槽位以棋盘为准查询（W3-4：HQ 居中占槽 2，不再假定 0）。
         var hqIndex = Battlefield.IndexOfHq(enemyLine);
-        if (hqIndex >= 0 && enemyLine[hqIndex].Occupant is Hq hq && _combatTargetLegal(attacker, hq.Ref))
+        if (hqIndex >= 0 && enemyLine[hqIndex] is Hq hq && _combatTargetLegal(attacker, hq.Ref))
         {
             result.Add(hq.Ref);
         }
@@ -907,9 +904,9 @@ public sealed class CommandManager
 
     private void MaintainGuardForLine(BattleLine line)
     {
-        for (var i = 0; i < line.Count; i++)
+        for (var i = 0; i < line.Size; i++)
         {
-            if (line[i].Occupant is not UnitCard unit || IsDead(unit))
+            if (line[i] is not UnitCard unit || IsDead(unit))
             {
                 continue;
             }
@@ -934,7 +931,7 @@ public sealed class CommandManager
     private void MaintainHqGuard(BattleLine supportLine)
     {
         var index = Battlefield.IndexOfHq(supportLine);
-        if (index < 0 || supportLine[index].Occupant is not Hq hq)
+        if (index < 0 || supportLine[index] is not Hq hq)
         {
             return;
         }
@@ -948,13 +945,13 @@ public sealed class CommandManager
 
     private static bool IsGuardianAt(BattleLine line, int index, Player owner)
     {
-        if (index < 0 || index >= line.Count)
+        if (index < 0 || index >= line.Size)
         {
             return false;
         }
 
         // 守护者判定＝双通道并行（批 4）：IsGuard 代码通道或「守护」词条（现势词条面——加载/授予-移除-复装/升级随动）。
-        return line[index].Occupant is UnitCard guardian
+        return line[index] is UnitCard guardian
             && (guardian.Definition.IsGuard || KeywordRules.HasKeyword(guardian, KeywordIds.Guard))
             && !IsDead(guardian)
             && ReferenceEquals(guardian.Owner, owner);
@@ -978,9 +975,9 @@ public sealed class CommandManager
 
     private static void RefreshLine(BattleLine line, Player player)
     {
-        for (var i = 0; i < line.Count; i++)
+        for (var i = 0; i < line.Size; i++)
         {
-            if (line[i].Occupant is not UnitCard unit || IsDead(unit))
+            if (line[i] is not UnitCard unit || IsDead(unit))
             {
                 continue;
             }
@@ -1010,9 +1007,9 @@ public sealed class CommandManager
 
     private static void AdvanceLine(BattleLine line, Player player)
     {
-        for (var i = 0; i < line.Count; i++)
+        for (var i = 0; i < line.Size; i++)
         {
-            if (line[i].Occupant is UnitCard unit && !IsDead(unit) && ReferenceEquals(unit.Owner, player))
+            if (line[i] is UnitCard unit && !IsDead(unit) && ReferenceEquals(unit.Owner, player))
             {
                 unit.AdvanceTurnsInPlay(); // 单位侧内部防御（未单位化/已死亡＝无操作）
             }
@@ -1129,7 +1126,7 @@ public sealed class CommandManager
             await DispatchAttackAsync(unit, selected, box, ctx, ct, triggerCard);
             return;
         }
-        else if (selectedEntity is Slot slot && slot.IsEmpty)
+        else if (selectedEntity is FormationGap)
         {
             await DispatchMoveAsync(unit, selected, box, ctx, ct, triggerCard);
             return;
@@ -1144,8 +1141,8 @@ public sealed class CommandManager
         CancellationToken ct, Card? triggerCard)
     {
         var state = unit.GetData<UnitStateData>();
-        var oldSlot = state.Position;
-        if (oldSlot is null)
+        var oldPosition = PositionOf(unit);
+        if (oldPosition is null)
         {
             box.Result = CommandResult.Failure(CommandFailureReason.CommandFlowFault);
             return;
@@ -1155,7 +1152,7 @@ public sealed class CommandManager
         var data = new Dictionary<string, object?>
         {
             [CommandDataKeys.Unit] = unit.Ref,
-            [CommandDataKeys.OldPosition] = oldSlot.Ref,
+            [CommandDataKeys.OldPosition] = oldPosition.Ref,
             [CommandDataKeys.NewPosition] = newPositionRef,
         };
         // X1 兼容入口（R9）：逐层手工透传保留；帧继承已覆盖（不写键时子帧继承父帧值），
@@ -1230,7 +1227,7 @@ public sealed class CommandManager
     private async Task HandleUnitMoveAsync(UnitMoveTriggerView view, Context ctx, CancellationToken ct)
     {
         if (view.Unit is not { IsAlive: true } unitRef || unitRef.Value is not UnitCard unit
-            || view.NewPosition is not { IsAlive: true } newRef || newRef.Value is not Slot newSlot
+            || view.NewPosition is not { IsAlive: true } newRef || newRef.Value is not FormationGap newSlot
             || view.OldPosition is not { IsAlive: true })
         {
             ctx.Interrupt(); // 载荷缺失（结构性错误）：链中止、移动不发生
@@ -1298,7 +1295,7 @@ public sealed class CommandManager
     /// </summary>
     internal async Task<bool> AttackByEffectAsync(UnitCard unit,Orc.Cards.Card target,CancellationToken ct,bool bypassRange=false)
     {
-        if(_lifecycle?.IsActionAllowed==false||!unit.TryGetData<UnitStateData>(out var state)||state.IsDestroyed||state.Position is null)return false;
+        if(_lifecycle?.IsActionAllowed==false||!unit.TryGetData<UnitStateData>(out var state)||state.IsDestroyed||state.Line is null)return false;
         await using var scope=_engine.BeginAction();
         var result=await AttackAction.EffectAsync(unit,target.Ref,bypassRange,triggerCard:unit,ct).ConfigureAwait(false);
         return result.Targets[0].Outcome==ActionOutcomeKind.Applied;
@@ -1309,11 +1306,11 @@ public sealed class CommandManager
     /// 不发 <c>unit.acted</c>、不要求 <c>CanMove</c>、**不受压制阻断**（压制只决定「能否被指挥」，R16）。
     /// 前置只判「单位在场未毁、目标槽存在/为空/非原槽、方向约束＝己方支援线」；落地经底层移动动作。
     /// </summary>
-    internal async Task<bool> MoveUnitAsync(UnitCard unit, Slot destination, CancellationToken ct = default)
+    internal async Task<bool> MoveUnitAsync(UnitCard unit, FormationGap destination, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(unit);
         ArgumentNullException.ThrowIfNull(destination);
-        if (unit.Owner is not { } owner || !_battlefield.GetSupportLine(owner).Contains(destination)) return false;
+        if (unit.Owner is not { } owner || !ReferenceEquals(destination.Line, _battlefield.GetSupportLine(owner))) return false;
 
         return await EffectMoveAsync(unit, destination, ct).ConfigureAwait(false);
     }
@@ -1322,11 +1319,11 @@ public sealed class CommandManager
     /// 效果移动的**共用执行体**（S6）：两个入口重载都走这里 → <see cref="MoveAction.EffectAsync"/>（同一底层动作）。
     /// 前置只判「单位在场未毁、目标槽存在/为空/非原槽」；方向约束由各重载自己表达。
     /// </summary>
-    private async Task<bool> EffectMoveAsync(UnitCard unit, Slot destination, CancellationToken ct)
+    private async Task<bool> EffectMoveAsync(UnitCard unit, FormationGap destination, CancellationToken ct)
     {
         if (_lifecycle?.IsEnded == true) return false;
-        if (!unit.TryGetData<UnitStateData>(out var state) || state.IsDestroyed || state.Position is not { } oldSlot) return false;
-        if (ReferenceEquals(oldSlot, destination) || !destination.IsEmpty) return false;
+        if (!unit.TryGetData<UnitStateData>(out var state) || state.IsDestroyed || state.Line is null) return false;
+        if (!destination.IsCurrent) return false;
 
         await using var scope = _engine.BeginAction();
         var result = await MoveAction.EffectAsync(unit, destination, triggerCard: null, ct).ConfigureAwait(false);
@@ -1372,7 +1369,7 @@ public sealed class CommandManager
         ArgumentNullException.ThrowIfNull(unit);
         ArgumentException.ThrowIfNullOrWhiteSpace(zone);
 
-        if (unit.GetData<UnitStateData>().Position is null)
+        if (unit.GetData<UnitStateData>().Line is null)
         {
             return false;
         }
@@ -1388,14 +1385,11 @@ public sealed class CommandManager
             return false;
         }
 
-        Slot? target = null;
-        foreach (var slot in line)
+        FormationGap? target = null;
+        foreach (var gap in line.GetInsertionGaps())
         {
-            if (slot.IsEmpty)
-            {
-                target = slot;
-                break;
-            }
+            target = gap;
+            break;
         }
 
         if (target is null)
@@ -1528,6 +1522,18 @@ public sealed class CommandManager
     /// 内置默认实例经实例主方法调用（独立路径无注册表——无改写通道；
     /// 与对局路径「经条目句柄」形态同构、不内联副本）。
     /// </summary>
+    /// <summary>璇诲彇鍗曚綅褰撳墠浣嶇疆锛堢嚎锛嬪簭鍙凤紱鏈湪鍦猴紳null锛夈€?/summary>
+    private static BoardPosition? PositionOf(UnitCard unit)
+    {
+        if (!unit.TryGetData<UnitStateData>(out var state) || state.Line is not { } line)
+        {
+            return null;
+        }
+
+        var index = line.IndexOf(unit);
+        return index < 0 ? null : new BoardPosition(line, index);
+    }
+
     private static Func<UnitCard, UnitCard, bool> CreateBuiltInCombatAmbushCondition()
     {
         var ambushCondition = new CombatAmbushConditionJudicator();
@@ -1539,7 +1545,7 @@ public sealed class CommandManager
     /// 内置默认实例经实例主方法调用（独立路径无注册表——无改写通道；
     /// 与对局路径「经条目句柄」形态同构、不内联副本）。
     /// </summary>
-    private Func<UnitCard, Slot?, LegEligibilityFailure?> CreateBuiltInMoveLegEligibility()
+    private Func<UnitCard, BoardPosition?, LegEligibilityFailure?> CreateBuiltInMoveLegEligibility()
     {
         var judicator = new LegEligibilityJudicator(_currentPlayerProvider, _battlefield, isMove: true);
         return (unit, position) => LegJudicatorInvoker.InvokeLeg(judicator, unit, position);

@@ -74,8 +74,8 @@ internal static class PlayChainTestKit
         => _ => Task.FromResult<IReadOnlyList<object?>>(AllSlotsOf(match).Select(slot => (object?)slot.Ref).ToArray());
 
     /// <summary>全战场槽位（三线顺序枚举）。</summary>
-    public static IEnumerable<Slot> AllSlotsOf(Match match)
-        => match.Battlefield.PlayerASupportLine
-            .Concat(match.Battlefield.FrontLine)
-            .Concat(match.Battlefield.PlayerBSupportLine);
+    public static IEnumerable<Orc.Cards.Card> AllSlotsOf(Match match)
+        => match.Battlefield.PlayerASupportLine.Members
+            .Concat(match.Battlefield.FrontLine.Members)
+            .Concat(match.Battlefield.PlayerBSupportLine.Members);
 }

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "atp.beachhead-supply",
+  "name": "滩头补给",
+  "components": [
+    {
+      "component": "typeCategory",
+      "type": [
+        "order"
+      ]
+    },
+    {
+      "component": "factionCost",
+      "faction": "usa",
+      "kredits": 2
+    },
+    {
+      "component": "tagData",
+      "rarity": "standard"
+    },
+    {
+      "component": "effects",
+      "prefabs": [
+        "atp.beachhead-supply.effect"
+      ]
+    }
+  ]
+}

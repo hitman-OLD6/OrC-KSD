@@ -86,9 +86,9 @@ public class DiyExample04_BomberAuraTests
                          environment.Battlefield.FrontLine,
                      })
             {
-                foreach (var slot in line)
+                foreach (var slot in line.Members)
                 {
-                    if (slot.Occupant is UnitCard unit
+                    if (slot is UnitCard unit
                         && !ReferenceEquals(unit.Owner, owner)
                         && unit.Definition.UnitTypes.Contains("bomber"))
                     {

@@ -152,15 +152,7 @@ internal static class ShapeTools
                             }
 
                             var line = m.Battlefield.GetSupportLine(player);
-                            Slot? empty = null;
-                            for (var i = 0; i < line.Count; i++)
-                            {
-                                if (line[i].Occupant is null)
-                                {
-                                    empty = line[i];
-                                    break;
-                                }
-                            }
+                            var empty = line.GetInsertionGaps().FirstOrDefault();
 
                             if (empty is null)
                             {
@@ -169,7 +161,7 @@ internal static class ShapeTools
 
                             var placeResult = await m.CardService.PlaceToSupportLineAsync(unit, player, empty, ct).ConfigureAwait(false);
                             payload["zone"] = "support";
-                            payload["slotIndex"] = empty.Index;
+                            payload["slotIndex"] = empty.Ordinal;
                             payload["placeStatus"] = placeResult.Status.ToString();
                             break;
 

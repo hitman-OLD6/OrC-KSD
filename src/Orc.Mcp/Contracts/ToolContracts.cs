@@ -3,13 +3,37 @@ using System.Text.Json;
 namespace Orc.Mcp.Contracts;
 
 /// <summary>
+/// 工具的角色要求（**能力由角色决定，不由工具名散落判断**）：判定＝"连接角色集合 ⊇ 工具要求"。
+/// </summary>
+public static class ToolRole
+{
+    /// <summary>不要求任何角色（<c>service.*</c>/<c>docs.*</c>/<c>room.info</c>）。</summary>
+    public const string None = "none";
+
+    /// <summary>玩家面 controller（绑 seat 的输入端）。</summary>
+    public const string Controller = "controller";
+
+    /// <summary>viewer（绑 seat＝脱敏；不绑 seat＝全知）。</summary>
+    public const string Viewer = "viewer";
+
+    /// <summary>调试面 controller（不绑 seat；仍须满足回环判据）。</summary>
+    public const string Debug = "debug";
+}
+
+/// <summary>
 /// 工具描述符（工具目录条目；MCP <c>tools/list</c> 的数据来源）。
 /// </summary>
 /// <param name="Name">工具名（命名空间前缀 + 全小写下划线，如 <c>sandbox.create</c>）。</param>
 /// <param name="Group">分组（<c>sandbox</c>/<c>card</c>/<c>pack</c>/<c>target</c>/<c>match</c>/<c>diag</c>/<c>docs</c>/<c>service</c>）。</param>
 /// <param name="Description">面向 agent 的一句话说明（说明用途与主要约束）。</param>
 /// <param name="InputSchema">输入 JSON Schema（手写常量；MCP 参数校验来源）。</param>
-public sealed record McpToolDescriptor(string Name, string Group, string Description, string InputSchema);
+/// <param name="RequiredRole">角色要求（见 <see cref="ToolRole"/>；缺省＝不要求）。</param>
+public sealed record McpToolDescriptor(
+    string Name,
+    string Group,
+    string Description,
+    string InputSchema,
+    string RequiredRole = ToolRole.None);
 
 /// <summary>一次工具调用（协议无关形态：工具名 ＋ 参数 JSON）。</summary>
 public readonly record struct McpToolCall(string Name, JsonElement Arguments);

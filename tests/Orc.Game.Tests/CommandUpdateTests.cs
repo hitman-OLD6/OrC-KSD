@@ -67,17 +67,17 @@ public class CommandUpdateTests
         var target = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.WeakId, 0);
         CommandTestKit.Activate(attacker);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
-        var targetSlot = match.Battlefield.FrontLine[0];
+        var targetSlot = match.Battlefield.FrontLine.GetInsertionGaps()[0];
 
         // 发射时点探针：card.died 到达时死亡状态已就绪（消费者查询不到半死状态）。
-        var probes = new List<(bool SlotFreed, bool Destroyed, bool PositionCleared)>();
+        var probes = new List<(bool SlotFreed, bool Destroyed, bool LineCleared)>();
         using var probe = match.Engine.Subscribe((type, payload, _) =>
         {
             if (type == GameUpdates.CardDied)
             {
                 var card = (UnitCard)payload![GameUpdates.PayloadCard]!;
                 var state = card.GetData<UnitStateData>();
-                probes.Add((targetSlot.IsEmpty, state.IsDestroyed, state.Position is null));
+                probes.Add((targetSlot.IsEmpty(), state.IsDestroyed, state.Line is null));
             }
 
             return Task.CompletedTask;
@@ -89,7 +89,7 @@ public class CommandUpdateTests
         var state = Assert.Single(probes);
         Assert.True(state.SlotFreed);      // 槽位释放先于发射
         Assert.True(state.Destroyed);      // IsDestroyed 置位先于发射
-        Assert.True(state.PositionCleared); // Position 置空先于发射
+        Assert.True(state.LineCleared); // Position 置空先于发射
     }
 
     [Fact]
@@ -142,7 +142,7 @@ public class CommandUpdateTests
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         using var recorder = new UpdateRecorder(match.Engine);
 
-        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine[3].Ref);
+        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps()[3].Ref);
 
         // 移动纯净性：unit.position.changed ＋ 收尾扣行动费的 point.changed（E1-25 后续）；不发 card.died / card.played / turn 类。
         Assert.Equal(CommandResultStatus.Success, result.Status);

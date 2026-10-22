@@ -61,9 +61,9 @@ public static class CovertRules
                      environment.Battlefield.PlayerBSupportLine,
                  })
         {
-            foreach (var slot in line)
+            foreach (var slot in line.Members)
             {
-                if (slot.Occupant is UnitCard unit && IsCovert(unit))
+                if (slot is UnitCard unit && IsCovert(unit))
                 {
                     result.Add(unit);
                 }
@@ -97,7 +97,7 @@ public static class CovertRules
         if (!IsCovert(unit)
             || !unit.TryGetData<UnitStateData>(out var state)
             || state.IsDestroyed
-            || state.Position is null)
+            || state.Line is null)
         {
             return RevealOutcome.NoOp;
         }

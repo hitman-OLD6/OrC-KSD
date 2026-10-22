@@ -10,6 +10,15 @@ public sealed record SandboxScaffoldResult(
     bool CreatedManifest,
     bool CreatedPlaceholder);
 
+/// <summary>沙盒包元数据同步结果（补齐 sidecar 与 lock 的结果）。</summary>
+/// <param name="Wrote">是否实际写入了文件（全 Skip ＝ false）。</param>
+/// <param name="WrittenFiles">已写入的相对/绝对路径（诊断用）。</param>
+/// <param name="Obstacles">无法生成元数据的条目与原因（不阻断，仅报告）。</param>
+public sealed record SandboxMetadataResult(
+    bool Wrote,
+    IReadOnlyList<string> WrittenFiles,
+    IReadOnlyList<string> Obstacles);
+
 /// <summary>
 /// 沙盒环境：**唯一可写根**的结构、脚手架与读面。
 /// <para>
@@ -110,6 +119,63 @@ public sealed class SandboxEnvironment
 
         return new SandboxScaffoldResult(
             PackRoot, CardsDirectory, EffectsDirectory, ManifestFile, PlaceholderCardFile, createdManifest, createdPlaceholder);
+    }
+
+    /// <summary>
+    /// 为沙盒卡包补齐元数据（每源文件一份 sidecar ＋ 两域 lock），使其可用于正式装配链。
+    /// <para>
+    /// **为什么必须做**：装配链由 lock 驱动（<c>MatchCardAssembly.Register</c> 读 <c>lock.formal.json</c>），
+    /// 而脚手架只产出 manifest ＋ 占位卡；不补这一步，沙盒包会被判「无 lock」而整体非法，
+    /// 进而被开局装配的降级路径剔除——表现为「调试面造出的卡进不了对局」。
+    /// </para>
+    /// <para>
+    /// 幂等：既有 sidecar 一律 Skip（<c>force:false</c>），只补新增源文件与 lock；源文件不可解析时
+    /// 记 <see cref="SandboxMetadataResult.Obstacles"/> 并跳过该文件，**不写坏**既有 sidecar，也不抛。
+    /// </para>
+    /// </summary>
+    public SandboxMetadataResult EnsurePackageMetadata()
+    {
+        if (!Directory.Exists(PackRoot))
+        {
+            return new SandboxMetadataResult(false, Array.Empty<string>(), Array.Empty<string>());
+        }
+
+        Orc.Packages.MigrationPlan plan;
+        try
+        {
+            plan = Orc.Packages.AssetMigrationTool.Plan(PackRoot, force: false);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or FormatException
+            or InvalidOperationException or ArgumentException or DirectoryNotFoundException)
+        {
+            return new SandboxMetadataResult(
+                false,
+                Array.Empty<string>(),
+                new[] { $"元数据规划失败：{ex.GetType().Name}: {ex.Message}" });
+        }
+
+        var obstacles = plan.Obstacles
+            .Select(obstacle => $"{obstacle.File}: {obstacle.Reason}")
+            .ToArray();
+
+        if (!plan.HasPendingWrites)
+        {
+            return new SandboxMetadataResult(false, Array.Empty<string>(), obstacles);
+        }
+
+        try
+        {
+            var applied = Orc.Packages.AssetMigrationTool.Apply(plan);
+            return new SandboxMetadataResult(true, applied.WrittenFiles, obstacles);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException
+            or FormatException or InvalidOperationException)
+        {
+            return new SandboxMetadataResult(
+                false,
+                Array.Empty<string>(),
+                obstacles.Append($"元数据写入失败：{ex.GetType().Name}: {ex.Message}").ToArray());
+        }
     }
 
     /// <summary>列出沙盒卡包内的卡数据体文件（绝对路径；按文件名排序＝确定性）。</summary>

@@ -9,16 +9,18 @@ using Orc.Game.Actions;
 namespace Orc.Foundation.Actions;
 
 /// <summary>
-/// 加入战场动作实体（S9）：**两个触发端**（部署／加入）＋恰一个**共享处理端**。
+/// 加入战场动作实体（S9；有序列表模型）：**三个触发端**（部署／加入前线／加入支援阵线）＋恰一个**共享处理端**。
 /// <para>
 /// 部署触发端：<see cref="ActionTriggerBands.Initiate"/> 代价校验 → <see cref="ActionTriggerBands.Announce"/>
 /// 发 <c>card.played</c> → <see cref="ActionTriggerBands.Commit"/> 先跑部署词条（priority 50）→ 默认转发（priority 100）。
 /// </para>
 /// <para>
-/// 加入触发端：<see cref="ActionTriggerBands.Initiate"/> 前置 → <see cref="ActionTriggerBands.Commit"/> 直接转发。
+/// 加入触发端（前线／支援阵线）：<see cref="ActionTriggerBands.Initiate"/> 前置 → <see cref="ActionTriggerBands.Commit"/> 直接转发。
+/// 落位规则＝显式序号 &gt; 守护（HQ 右侧，仅支援线）&gt; 默认最左；前线被敌方存活单位占据＝**报错**（Error 留痕＋失败）；
+/// 目标线已满＝**静默失败**（Warning 留痕＋失败）；两者均不抛异常。
 /// </para>
 /// <para>
-/// 处理端：单位化 + 落位 + <c>card.placed</c>（唯一落地口，零入口类型分支）。入口收尾（<c>unit.deployed</c>／
+/// 处理端：单位化 + 插入阵线 + <c>card.placed</c>（唯一落地口，零入口类型分支）。入口收尾（<c>unit.deployed</c>／
 /// <c>unit.joined</c>、扣费、离手、<c>OnDeployChainFinalized</c>）留在入口，不进处理端。
 /// </para>
 /// </summary>
@@ -29,10 +31,13 @@ public sealed class JoinBattlefieldAction : IJoinBattlefieldAction
 
     private const int DefaultPriority = 100;
 
+    private const string FrontLineZone = "frontline";
+    private const string SupportLineZone = "support";
+
     private readonly LogicEngine _engine;
     private readonly IJoinActionServices _services;
 
-    /// <summary>创建加入战场动作（两端默认链与处理端默认落地在本类内注册）。</summary>
+    /// <summary>创建加入战场动作（三端默认链与处理端默认落地在本类内注册）。</summary>
     /// <param name="engine">对局引擎（执行流挂载点／信号发射）。</param>
     /// <param name="services">动作服务面（唯一落地口；实现由宿主提供）。</param>
     /// <exception cref="ArgumentNullException">engine / services 为 null。</exception>
@@ -45,8 +50,10 @@ public sealed class JoinBattlefieldAction : IJoinBattlefieldAction
 
         Deploy = new Trigger<JoinBattlefieldTriggerView>(
             "加入战场·部署触发器", bandType: typeof(ActionTriggerBands));
-        Join = new Trigger<JoinBattlefieldTriggerView>(
-            "加入战场·加入触发器", bandType: typeof(ActionTriggerBands));
+        JoinFrontline = new Trigger<JoinBattlefieldTriggerView>(
+            "加入战场·加入前线触发器", bandType: typeof(ActionTriggerBands));
+        JoinSupportLine = new Trigger<JoinBattlefieldTriggerView>(
+            "加入战场·加入支援阵线触发器", bandType: typeof(ActionTriggerBands));
         Handle = new Trigger<JoinBattlefieldHandleView>(
             "加入战场处理触发器", bandType: typeof(ActionHandleBands));
 
@@ -56,65 +63,142 @@ public sealed class JoinBattlefieldAction : IJoinBattlefieldAction
         Deploy.Register("部署词条", HandleDeployKeywordsAsync, ActionTriggerBands.Commit, DeployKeywordPriority);
         Deploy.Register("转发到处理端", ForwardAsync, ActionTriggerBands.Commit, DefaultPriority);
 
-        // 加入触发端：前置校验（无宣告段）→ 直接转发。
-        Join.Register("加入前置", ValidateJoinAsync, ActionTriggerBands.Initiate, DefaultPriority);
-        Join.Register("转发到处理端", ForwardAsync, ActionTriggerBands.Commit, DefaultPriority);
+        // 加入前线触发端：敌对占线门禁（发起前）→ 直接转发。
+        JoinFrontline.Register("前线敌对门禁", ValidateFrontlineAsync, ActionTriggerBands.Initiate, DefaultPriority);
+        JoinFrontline.Register("加入前置", ValidateJoinAsync, ActionTriggerBands.Initiate, DefaultPriority);
+        JoinFrontline.Register("转发到处理端", ForwardAsync, ActionTriggerBands.Commit, DefaultPriority);
 
-        // 共享处理端：单位化 + 落位 + card.placed。
+        // 加入支援阵线触发端：无宣称段 → 结构前置 → 直接转发。
+        JoinSupportLine.Register("加入前置", ValidateJoinAsync, ActionTriggerBands.Initiate, DefaultPriority);
+        JoinSupportLine.Register("转发到处理端", ForwardAsync, ActionTriggerBands.Commit, DefaultPriority);
+
+        // 共享处理端：单位化 + 插入阵线 + card.placed。
         Handle.Register("单位化与落位", HandleApplyAsync, ActionHandleBands.Apply, DefaultPriority);
-
     }
 
     /// <summary>部署**触发端**。</summary>
     public Trigger<JoinBattlefieldTriggerView> Deploy { get; }
 
-    /// <summary>加入**触发端**。</summary>
-    public Trigger<JoinBattlefieldTriggerView> Join { get; }
+    /// <summary>加入前线**触发端**。</summary>
+    public Trigger<JoinBattlefieldTriggerView> JoinFrontline { get; }
 
-    /// <summary>共享**处理端**（单位化 + 落位 + <c>card.placed</c>）。</summary>
+    /// <summary>加入支援阵线**触发端**。</summary>
+    public Trigger<JoinBattlefieldTriggerView> JoinSupportLine { get; }
+
+    /// <summary>共享**处理端**（单位化 + 插入阵线 + <c>card.placed</c>）。</summary>
     public Trigger<JoinBattlefieldHandleView> Handle { get; }
 
     /// <inheritdoc />
     public async Task<ActionResult> DeployAsync(
-        UnitCard card, Slot slot, Player player, Card? triggerCard = null, CancellationToken ct = default)
+        UnitCard card, FormationGap gap, Player player, Card? triggerCard = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(card);
-        ArgumentNullException.ThrowIfNull(slot);
+        ArgumentNullException.ThrowIfNull(gap);
         ArgumentNullException.ThrowIfNull(player);
 
         var result = new ActionTargetResult(card.Ref, card, 1);
-        if (!CheckStructure(card, slot, result))
+        if (!CheckStructure(card, gap, result))
         {
             return new ActionResult(ActionId.JoinBattlefield, result);
         }
 
-        await Deploy.InvokeAsync(_engine, BuildData(card, slot, player, triggerCard, result), ct)
+        await Deploy.InvokeAsync(_engine, BuildData(card, gap, player, triggerCard, result), ct)
             .ConfigureAwait(false);
         return new ActionResult(ActionId.JoinBattlefield, result);
     }
 
     /// <inheritdoc />
-    public async Task<ActionResult> JoinAsync(
-        UnitCard card, Slot slot, Card? triggerCard = null, CancellationToken ct = default)
+    public Task<ActionResult> JoinFrontlineAsync(
+        UnitCard card, int? index = null, Card? triggerCard = null, CancellationToken ct = default)
+        => JoinZoneAsync(card, FrontLineZone, index, triggerCard, ct);
+
+    /// <inheritdoc />
+    public Task<ActionResult> JoinSupportLineAsync(
+        UnitCard card, int? index = null, Card? triggerCard = null, CancellationToken ct = default)
+        => JoinZoneAsync(card, SupportLineZone, index, triggerCard, ct);
+
+    /// <inheritdoc />
+    public async Task<ActionResult> JoinAtAsync(
+        UnitCard card, FormationGap gap, Card? triggerCard = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(card);
-        ArgumentNullException.ThrowIfNull(slot);
+        ArgumentNullException.ThrowIfNull(gap);
 
         var result = new ActionTargetResult(card.Ref, card, 1);
-        if (!CheckStructure(card, slot, result))
+        if (!CheckStructure(card, gap, result))
         {
             return new ActionResult(ActionId.JoinBattlefield, result);
         }
 
-        await Join.InvokeAsync(_engine, BuildData(card, slot, player: null, triggerCard, result), ct)
+        var trigger = ReferenceEquals(gap.Line, SupportLineOf(card)) ? JoinSupportLine : JoinFrontline;
+        await trigger.InvokeAsync(_engine, BuildData(card, gap, player: null, triggerCard, result), ct)
             .ConfigureAwait(false);
         return new ActionResult(ActionId.JoinBattlefield, result);
     }
 
-    /// <summary>结构性前置（两条路径共用；不满足＝<c>TargetInvalid</c>、零状态变更）。</summary>
-    private static bool CheckStructure(UnitCard card, Slot slot, ActionTargetResult result)
+    /// <summary>按区域加入（落位解析 → 触发端）。</summary>
+    private async Task<ActionResult> JoinZoneAsync(
+        UnitCard card, string zone, int? index, Card? triggerCard, CancellationToken ct)
     {
-        if (!slot.IsEmpty || card.TryGetData<UnitStateData>(out _))
+        ArgumentNullException.ThrowIfNull(card);
+
+        var result = new ActionTargetResult(card.Ref, card, 1);
+        var gap = _services.ResolveJoinGap(card, zone, index, out var failure);
+        if (gap is null)
+        {
+            ReportPlacementFailure(card, zone, failure);
+            if (failure == JoinPlacementFailure.EnemyHoldsFrontline)
+            {
+                result.MarkTargetInvalid();
+            }
+            else
+            {
+                result.MarkSkipped(ActionFailureKind.Precondition);
+            }
+
+            return new ActionResult(ActionId.JoinBattlefield, result);
+        }
+
+        if (!CheckStructure(card, gap, result))
+        {
+            return new ActionResult(ActionId.JoinBattlefield, result);
+        }
+
+        var trigger = zone == FrontLineZone ? JoinFrontline : JoinSupportLine;
+        await trigger.InvokeAsync(_engine, BuildData(card, gap, player: null, triggerCard, result), ct)
+            .ConfigureAwait(false);
+        return new ActionResult(ActionId.JoinBattlefield, result);
+    }
+
+    /// <summary>落位失败留痕（敌方占线＝Error〔"报错"〕；其余＝Warning〔静默失败〕；均不抛）。</summary>
+    private void ReportPlacementFailure(UnitCard card, string zone, JoinPlacementFailure failure)
+    {
+        var level = failure == JoinPlacementFailure.EnemyHoldsFrontline ? LogLevel.Error : LogLevel.Warning;
+        var message = failure switch
+        {
+            JoinPlacementFailure.EnemyHoldsFrontline =>
+                $"单位 '{card.Name}' 加入前线被拒绝：前线存在存活敌方单位（效果须自行先判定前线归属）。",
+            JoinPlacementFailure.LineFull =>
+                $"单位 '{card.Name}' 加入{(zone == FrontLineZone ? "前线" : "支援阵线")}被拒绝：目标阵线已满（容量上限）。",
+            JoinPlacementFailure.IndexOutOfRange =>
+                $"单位 '{card.Name}' 加入被拒绝：目标序号越界。",
+            JoinPlacementFailure.AlreadyOnBoard =>
+                $"单位 '{card.Name}' 加入被拒绝：该单位已在场。",
+            _ => $"单位 '{card.Name}' 加入被拒绝（{failure}）。",
+        };
+
+        _engine.RootStream.WriteLog(
+            "加入战场",
+            message,
+            level,
+            new[] { $"reason:{failure}" },
+            new Dictionary<string, object?> { ["card"] = card.Name, ["zone"] = zone });
+    }
+
+    /// <summary>结构性前置（两条路径共用；不满足＝<c>TargetInvalid</c>、零状态变更）。</summary>
+    private static bool CheckStructure(UnitCard card, FormationGap gap, ActionTargetResult result)
+    {
+        if (!gap.IsCurrent || card.TryGetData<UnitStateData>(out _))
         {
             result.MarkTargetInvalid();
             return false;
@@ -124,12 +208,12 @@ public sealed class JoinBattlefieldAction : IJoinBattlefieldAction
     }
 
     private static Dictionary<string, object?> BuildData(
-        UnitCard card, Slot slot, Player? player, Card? triggerCard, ActionTargetResult result)
+        UnitCard card, FormationGap gap, Player? player, Card? triggerCard, ActionTargetResult result)
     {
         var data = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             [nameof(JoinBattlefieldTriggerView.Card)] = card,
-            [nameof(JoinBattlefieldTriggerView.Slot)] = slot,
+            [nameof(JoinBattlefieldTriggerView.Gap)] = gap,
             [nameof(JoinBattlefieldTriggerView.Result)] = result,
         };
 
@@ -165,8 +249,21 @@ public sealed class JoinBattlefieldAction : IJoinBattlefieldAction
     /// <summary>加入前置（发起前）：结构性错误＝拒绝。</summary>
     private static Task ValidateJoinAsync(JoinBattlefieldTriggerView view, Context ctx, CancellationToken ct)
     {
-        if (!view.Slot.IsEmpty || view.Card.TryGetData<UnitStateData>(out _))
+        if (!view.Gap.IsCurrent || view.Card.TryGetData<UnitStateData>(out _))
         {
+            view.Result?.MarkTargetInvalid();
+            ctx.Stop();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>加入前线门禁（发起前）：前线存在存活敌方单位＝报错拒绝（效果须自行先判定）。</summary>
+    private Task ValidateFrontlineAsync(JoinBattlefieldTriggerView view, Context ctx, CancellationToken ct)
+    {
+        if (_services.EnemyHoldsFrontline(view.Card.Owner))
+        {
+            ReportPlacementFailure(view.Card, FrontLineZone, JoinPlacementFailure.EnemyHoldsFrontline);
             view.Result?.MarkTargetInvalid();
             ctx.Stop();
         }
@@ -181,15 +278,15 @@ public sealed class JoinBattlefieldAction : IJoinBattlefieldAction
 
     /// <summary>部署词条（<c>Commit</c> 段前部；零信号；未进入处理端）。</summary>
     private Task HandleDeployKeywordsAsync(JoinBattlefieldTriggerView view, Context ctx, CancellationToken ct)
-        => _services.InvokeDeployKeywordAsync(view.Card, view.Player, view.Slot, ct);
+        => _services.InvokeDeployKeywordAsync(view.Card, view.Player, view.Gap, ct);
 
-    /// <summary>默认转发到处理端（两个触发端共用；处理端不知道入口类型）。</summary>
+    /// <summary>默认转发到处理端（三个触发端共用；处理端不知道入口类型）。</summary>
     private Task ForwardAsync(JoinBattlefieldTriggerView view, Context ctx, CancellationToken ct)
     {
         var data = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             [nameof(JoinBattlefieldHandleView.Card)] = view.Card,
-            [nameof(JoinBattlefieldHandleView.Slot)] = view.Slot,
+            [nameof(JoinBattlefieldHandleView.Gap)] = view.Gap,
             [nameof(JoinBattlefieldHandleView.Result)] = view.Result,
         };
 
@@ -206,10 +303,10 @@ public sealed class JoinBattlefieldAction : IJoinBattlefieldAction
         return Handle.InvokeAsync(_engine, data, ct);
     }
 
-    /// <summary>处理端默认落地（唯一调用动作服务面处）：单位化 + 落位 + <c>card.placed</c>。</summary>
+    /// <summary>处理端默认落地（唯一调用动作服务面处）：单位化 + 插入阵线 + <c>card.placed</c>。</summary>
     private async Task HandleApplyAsync(JoinBattlefieldHandleView view, Context ctx, CancellationToken ct)
     {
-        var applied = await _services.UnitizeOnJoinAsync(view.Card, view.Slot, view.TriggerCard, ct)
+        var applied = await _services.UnitizeOnJoinAsync(view.Card, view.Gap, view.TriggerCard, ct)
             .ConfigureAwait(false);
         if (!applied)
         {
@@ -220,4 +317,9 @@ public sealed class JoinBattlefieldAction : IJoinBattlefieldAction
 
         view.Result?.MarkApplied(1);
     }
+
+    private static BattleLine? SupportLineOf(UnitCard card)
+        => GameEnvironment.ResolveFor(card)?.Battlefield is { } battlefield && card.Owner is { } owner
+            ? battlefield.GetSupportLine(owner)
+            : null;
 }

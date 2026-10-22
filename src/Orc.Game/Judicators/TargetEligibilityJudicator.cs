@@ -67,9 +67,9 @@ internal static class TargetCandidateResolver
         var candidates = new List<Ref<Entity>>();
         foreach (var line in lines)
         {
-            foreach (var slot in line)
+            foreach (var member in line.Members)
             {
-                if (slot.Occupant is Hq hq && selector.Zone == "hq"
+                if (member is Hq hq && selector.Zone == "hq"
                     && (selector.Side is null or "both" or "any"
                         || viewerOwner is null
                         || (selector.Side == "friendly" && hq.Owner.Index == viewerOwner.Index)
@@ -81,7 +81,7 @@ internal static class TargetCandidateResolver
                     continue;
                 }
 
-                if (selector.Zone == "hq" || slot.Occupant is not UnitCard unit
+                if (selector.Zone == "hq" || member is not UnitCard unit
                     || !MatchesSide(unit, selector.Side, viewerOwner)
                     || !MatchesUnitType(unit, selector.UnitType)
                     || !MatchesKeyword(unit, selector.Keyword)

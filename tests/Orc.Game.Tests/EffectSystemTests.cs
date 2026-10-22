@@ -1,4 +1,4 @@
-﻿using Orc.Cards;
+using Orc.Cards;
 using Orc.Core;
 using Orc.Game;
 using Orc.Game.Cards;
@@ -170,7 +170,7 @@ public class EffectSystemTests
         var demo = (UnitCard)match.CardLibrary.Instantiate(DemoId);
         await demo.LoadAsync(playerB);
         var effect = (LifecycleProbeEffect)Assert.Single(demo.Effects);
-        var joinResult = await match.PlayManager.JoinUnitAsync(demo, match.Battlefield.FrontLine[0]);
+        var joinResult = await match.PlayManager.JoinUnitAsync(demo, match.Battlefield.FrontLine.GetInsertionGaps()[0]);
         Assert.Equal(PlayResultStatus.Success, joinResult.Status);
 
         var mega = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.MegaId, 1); // 攻 30
@@ -458,7 +458,7 @@ public class EffectSystemTests
 
         // 上场（加入路径）→ 效果施加修饰器（+2 攻击；来源＝本效果）→ 走管线：有效值变化＋集中触发
         using var recorder = new UpdateRecorder(match.Engine);
-        var joinResult = await match.PlayManager.JoinUnitAsync(demo, match.Battlefield.FrontLine[0]);
+        var joinResult = await match.PlayManager.JoinUnitAsync(demo, match.Battlefield.FrontLine.GetInsertionGaps()[0]);
         Assert.Equal(PlayResultStatus.Success, joinResult.Status);
 
         Assert.Equal(1, effect.AppliedCount);

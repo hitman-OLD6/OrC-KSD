@@ -16,7 +16,7 @@ namespace Orc.Game.Actions;
 /// 覆盖动作：伤害结算（P1）、卡牌移动／抽牌／加入手牌／死亡（P2）。方法名按动作归属唯一（S4 第 3 条）。
 /// </para>
 /// </summary>
-internal sealed class MatchActionServices :
+internal sealed partial class MatchActionServices :
     IDamageActionServices,
     IMoveActionServices,
     IDrawActionServices,
@@ -110,36 +110,6 @@ internal sealed class MatchActionServices :
 
     // ---------- 卡牌移动（S6） ----------
 
-    /// <inheritdoc />
-    public async Task<bool> LandMoveAsync(UnitCard unit, Slot destination, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(unit);
-        ArgumentNullException.ThrowIfNull(destination);
-
-        if (!unit.TryGetData<UnitStateData>(out var state) || state.IsDestroyed)
-        {
-            return false;
-        }
-
-        if (state.Position is not { } oldSlot)
-        {
-            return false;
-        }
-
-        if (ReferenceEquals(oldSlot, destination) || !destination.IsEmpty)
-        {
-            return false;
-        }
-
-        // 旧槽释放 → 目标槽放入 → 位置字段改写 → 发射更新（恰一次）。
-        // 「槽位变更」是动作状态的唯一写点：指挥入口与效果入口都只经这里落地。
-        oldSlot.Clear();
-        destination.Place(unit);
-        state.Position = destination;
-        await GameUpdates.EmitUnitPositionChanged(_engine, unit, oldSlot, destination, ct).ConfigureAwait(false);
-        return true;
-    }
-
     // ---------- 抽牌（S7） ----------
 
     /// <inheritdoc />
@@ -186,41 +156,6 @@ internal sealed class MatchActionServices :
 
     // ---------- 加入战场（S9） ----------
 
-    /// <inheritdoc />
-    public async Task<bool> UnitizeOnJoinAsync(
-        UnitCard card, Slot slot, Card? triggerCard, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(card);
-        ArgumentNullException.ThrowIfNull(slot);
-
-        // 结构不变量（矛盾中间态防护）：仅空槽、未单位化的卡可单位化——违反＝false、零落地。
-        if (!slot.IsEmpty || card.TryGetData<UnitStateData>(out _))
-        {
-            return false;
-        }
-
-        // 单位化的**唯一执行面**（卡侧单源入口）：加单位组件＋指挥组件＋实际占用空槽＋跑链一次。
-        // 调用者只有本方法（加入战场动作处理端），注入「单位化触发器」的效果照常参与。
-        await card.InvokeUnitizeAsync(slot, ct).ConfigureAwait(false);
-        if (!card.TryGetData<UnitStateData>(out _))
-        {
-            return false; // 单位化未完成（结构性拒绝）：不发射 card.placed
-        }
-
-        // 放置驱动装载信号：单位化（组件挂载＋槽位占用）成功之后、完成信号（入口发）之前。
-        await GameUpdates.EmitCardPlaced(_engine, card, ct, triggerCard ?? card).ConfigureAwait(false);
-        return true;
-    }
-
-    /// <inheritdoc />
-    public Task InvokeDeployKeywordAsync(
-        UnitCard card, Player? player, Slot slot, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(card);
-        ArgumentNullException.ThrowIfNull(slot);
-        return card.InvokeDeployKeywordAsync(player, slot, ct);
-    }
-
     // ---------- 死亡（S8） ----------
 
     /// <inheritdoc />
@@ -235,7 +170,7 @@ internal sealed class MatchActionServices :
         }
 
         // ① 槽位释放（变空槽）→ ② IsDestroyed 置位。
-        state.Position?.Clear();
+        state.Line?.TryRemove(unit);
         state.IsDestroyed = true;
 
         // 宿主侧死亡效果必须在登记仍存在时结算；完成态的观察仍留在清理之后的 card.died。
@@ -270,7 +205,7 @@ internal sealed class MatchActionServices :
         }
 
         // ⑧ 位置字段置空（实例保留可查询）。
-        state.Position = null;
+        state.Line = null;
 
         // ⑨ card.died（恰一次；击杀者为改写后的归属）。
         await GameUpdates.EmitCardDied(_engine, unit, killer, ct, source: killer).ConfigureAwait(false);

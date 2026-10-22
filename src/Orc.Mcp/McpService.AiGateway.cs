@@ -50,13 +50,13 @@ public sealed partial class McpService : IAiMatchGateway
     async Task<AiActionOutcome> IAiMatchGateway.SubmitAsync(
         string sessionId, IReadOnlyList<int> picks, bool cancel, CancellationToken ct, string claimant)
     {
-        // S6：归属座位校验——本网关只服务 **AI 驱动的座位**；待决请求若属于 agent 座位（AgentSeat），
+        // 归属座位校验：本网关只服务 **AI 驱动的座位**；待决请求若属于 agent 座位，
         // 必须由该座位的 agent 应答，AI 不得代答。
-        // 判据方向必须是「等于 AgentSeat 才拒绝」：AI 自己发起的选靶 Seat＝AI 座位，
-        // 反向判定（不等于 AgentSeat 就拒绝）会把 AI 自己的请求一并拒掉 → 对局死锁在 AI 回合（本局实测）。
+        // 判据方向必须是「属于非 AI 座位才拒绝」：AI 自己发起的选靶 Seat＝AI 座位，
+        // 反向判定（不属于非 AI 座位就拒绝）会把 AI 自己的请求一并拒掉 → 对局死锁在 AI 回合（实测过）。
         if (Bridge.CurrentPending is { Seat: { } ownerSeat }
-            && Options.AgentSeat is { } agentSeat
-            && ownerSeat == agentSeat)
+            && Options.AiSeats.Count > 0
+            && !Options.AiSeats.Contains(ownerSeat))
         {
             return AiActionOutcome.Fail($"该选靶属于 agent 座位 {ownerSeat}，AI 控制器不应答。");
         }

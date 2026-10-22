@@ -219,7 +219,7 @@ public class CardToolchainEndToEndTests
                 match, match.Players[0], CycleDeployCardId, toHand: true);
 
             // ⑤ 打出（真实部署链驱动）→ 行为断言（unit.deployed 时置位——覆盖部署初值 false/false）。
-            var result = await match.PlayManager.PlayUnitAsync(unit, match.Battlefield.PlayerASupportLine[1]);
+            var result = await match.PlayManager.PlayUnitAsync(unit, match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);
             Assert.Equal(PlayResultStatus.Success, result.Status);
 
             var command = unit.GetData<CommandData>();

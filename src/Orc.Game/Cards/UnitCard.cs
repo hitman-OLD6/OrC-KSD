@@ -1,4 +1,4 @@
-﻿using Orc.Cards;
+using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Actions;
 using Orc.Game.Board;
@@ -169,9 +169,9 @@ public class UnitCard : CardBase
     /// <summary>
     /// 触发部署词条效果（S6 单源入口）：部署链与「部署重放」共用；载荷＝{ Card, Player?, Position }。
     /// </summary>
-    internal async Task<EventStream> InvokeDeployKeywordAsync(Player? player, Slot slot, CancellationToken ct)
+    internal async Task<EventStream> InvokeDeployKeywordAsync(Player? player, FormationGap? gap, CancellationToken ct)
     {
-        var result=await DeployKeywordTrigger.InvokeAsync(_chainEngine, BuildUnitData(this, player, slot), ct);
+        var result=await DeployKeywordTrigger.InvokeAsync(_chainEngine, BuildUnitData(this, player, gap), ct);
         if(result.Outcome==ExecutionOutcome.Normal)await KeywordProgramRuntime.ReplayDeployment(this,ct);
         return result;
     }
@@ -197,17 +197,12 @@ public class UnitCard : CardBase
             return;
         }
 
-        // A.20：阵型空隙（FormationGap）＝部署主入口的落点；提交的是"空隙身份"而非物理空槽。
-        var slot = view.Position;
-        if (view.FormationGap is { } gap)
-        {
-            if (!gap.Line.TryOpenGap(gap, out slot)) { ctx.Interrupt(); return; }
-        }
-
-        if (slot is null) { ctx.Interrupt(); return; }
+        // A.20：阵型空隙（FormationGap）＝部署主入口的落点；提交的是"空隙身份"而非物理位置。
+        var gap = view.Position;
+        if (gap is null) { ctx.Interrupt(); return; }
 
         // 内层部署链（部署词条 → 单位化 → card.placed）——S9：执行全部下沉到「加入战场」动作的部署触发端。
-        await unit.DeployTrigger.InvokeAsync(_chainEngine, BuildUnitData(unit, player, slot), ct);
+        await unit.DeployTrigger.InvokeAsync(_chainEngine, BuildUnitData(unit, player, gap), ct);
         if (ctx.Interrupted)
         {
             return; // 部署链未完成（代价不足/结构拒绝）：不进入收尾（不扣费、不离手、不发 unit.deployed）
@@ -215,7 +210,8 @@ public class UnitCard : CardBase
 
         // 部署完成：unit.deployed（单位化之后——组件挂载＋槽位占用已成立；R9：Source＝本卡）→
         // 扣费（仅部署扣费——恰一次；读有效部署费——与校验/复验同口径）→ 离手 → 词条落点（钳击＝同伴选择）。
-        await GameUpdates.EmitUnitDeployed(_chainEngine, unit, slot, ct, view.TriggerCard ?? unit);
+        await GameUpdates.EmitUnitDeployed(
+            _chainEngine, unit, new BoardPosition(gap.Line, gap.Ordinal), ct, view.TriggerCard ?? unit);
 
         var deployCost = unit.Modifiers.GetEffectiveValue(CardStatFields.DeployCost);
         if (ResourceManager.ResolveFor(unit) is { } manager)
@@ -237,7 +233,7 @@ public class UnitCard : CardBase
     /// </summary>
     private async Task HandleDeployChainAsync(CardTriggerView view, Context ctx, CancellationToken ct)
     {
-        if (view.Card is not UnitCard unit || view.Position is not { } slot || view.Player is not Player player)
+        if (view.Card is not UnitCard unit || view.Position is not { } gap || view.Player is not Player player)
         {
             ctx.Interrupt();
             return;
@@ -255,7 +251,7 @@ public class UnitCard : CardBase
         }
 
         await using var scope = _chainEngine.BeginAction();
-        var result = await action.DeployAsync(unit, slot, player, view.TriggerCard, ct)
+        var result = await action.DeployAsync(unit, gap, player, view.TriggerCard, ct)
             .ConfigureAwait(false);
         if (result.Targets[0].Outcome != ActionOutcomeKind.Applied)
         {
@@ -266,7 +262,7 @@ public class UnitCard : CardBase
     /// <summary>加入链（S9）：转发到加入战场动作的加入触发端 → 共享处理端；完成后发 <c>unit.joined</c>。</summary>
     private async Task HandleJoinChainAsync(CardTriggerView view, Context ctx, CancellationToken ct)
     {
-        if (view.Card is not UnitCard unit || view.Position is not { } slot)
+        if (view.Card is not UnitCard unit || view.Position is not { } gap)
         {
             ctx.Interrupt();
             return;
@@ -283,14 +279,15 @@ public class UnitCard : CardBase
         }
 
         await using var scope = _chainEngine.BeginAction();
-        var result = await action.JoinAsync(unit, slot, view.TriggerCard, ct).ConfigureAwait(false);
+        var result = await action.JoinAtAsync(unit, gap, view.TriggerCard, ct).ConfigureAwait(false);
         if (result.Targets[0].Outcome != ActionOutcomeKind.Applied)
         {
             ctx.Interrupt(); // 处理端未落地：不发射 card.placed／unit.joined
             return;
         }
 
-        await GameUpdates.EmitUnitJoined(_chainEngine, unit, slot, ct, view.TriggerCard ?? unit);
+        await GameUpdates.EmitUnitJoined(
+            _chainEngine, unit, new BoardPosition(gap.Line, gap.Ordinal), ct, view.TriggerCard ?? unit);
     }
 
     /// <summary>
@@ -301,20 +298,25 @@ public class UnitCard : CardBase
     /// </summary>
     private async Task HandleUnitizeAsync(CardTriggerView view, Context ctx, CancellationToken ct)
     {
-        if (view.Card is not UnitCard unit || view.Position is not { } slot
-            || !slot.IsEmpty || unit.TryGetData<UnitStateData>(out _))
+        if (view.Card is not UnitCard unit || view.Position is not { } gap
+            || !gap.IsCurrent || unit.TryGetData<UnitStateData>(out _))
         {
-            ctx.Interrupt(); // 载荷缺失 / 槽位非空 / 二次单位化：链中止（留痕由 Interrupt 写入）
+            ctx.Interrupt(); // 载荷缺失 / 空隙失效 / 二次单位化：链中止（留痕由 Interrupt 写入）
+            return;
+        }
+
+        if (!gap.Line.TryInsert(gap, unit))
+        {
+            ctx.Interrupt(); // 插入失败（快照失效/已满）：零中间态
             return;
         }
 
         var state = UnitStateData.CreateInitial(unit.GetData<BattleStatsData>());
         state.FillInitialTypes(unit.Definition.UnitTypes); // 单位类型清单从定义填充（部署/加入两路径一致）
-        state.Position = slot;
+        state.Line = gap.Line;
         unit.AddData(state);
         unit.AddData(new CommandData());
         unit.AddData(new ActionRecordData());
-        slot.Place(unit);
 
         // W2b G3 接线：装配完成点请求跑链一次（首轮——以基准状态建立比较基线；本时点无修饰/无损伤＝零变化、零发射）。
         await unit.Modifiers.RequestRerunAsync(ct);
@@ -324,13 +326,13 @@ public class UnitCard : CardBase
     /// 单位化的**卡侧单源入口**（S9；唯一调用者＝加入战场动作服务面）：触发「单位化触发器」
     /// （载荷＝{ Card, Position }），由默认链执行单位化；注入该触发器的效果照常参与。
     /// </summary>
-    internal Task InvokeUnitizeAsync(Slot slot, CancellationToken ct = default)
+    internal Task InvokeUnitizeAsync(FormationGap gap, CancellationToken ct = default)
         => UnitizeTrigger.InvokeAsync(
             _chainEngine,
             new Dictionary<string, object?>
             {
                 [GameUpdates.PayloadCard] = this,
-                [GameUpdates.PayloadPosition] = slot,
+                [GameUpdates.PayloadPosition] = gap!,
             },
             ct);
 
@@ -449,7 +451,7 @@ public class UnitCard : CardBase
         // ---------- 预检（全部前置条件先于任何副作用；可预检失败＝拒绝、零副作用） ----------
 
         // ① 在场且存活（未单位化未入场/已死亡已毁/已离场＝拒绝——「在场且存活」谓词不满足即拒绝）。
-        if (!TryGetData<UnitStateData>(out var state) || state.IsDestroyed || state.Position is null)
+        if (!TryGetData<UnitStateData>(out var state) || state.IsDestroyed || state.Line is null)
         {
             return VeteranPromotionResult.Rejected(VeteranPromotionRejectionReason.NotOnField);
         }
@@ -828,12 +830,12 @@ public class UnitCard : CardBase
             : throw new InvalidOperationException(
                 $"单位 '{Name}' 尚未单位化（缺单位数据组件），不能执行数值变更操作（装配性错误）。");
 
-    /// <summary>单位链触发数据（Card / Player / Position；Player 可缺省/可空——加入路径不要求归属）。</summary>
-    private static Dictionary<string, object?> BuildUnitData(UnitCard unit, Player? player, Slot slot)
+    /// <summary>单位链触发数据（Card / Player / Position〔插入空隙〕；Player 可缺省/可空——加入路径不要求归属）。</summary>
+    private static Dictionary<string, object?> BuildUnitData(UnitCard unit, Player? player, FormationGap? gap)
         => new()
         {
             [GameUpdates.PayloadCard] = unit,
             [GameUpdates.PayloadPlayer] = player,
-            [GameUpdates.PayloadPosition] = slot,
+            [GameUpdates.PayloadPosition] = gap!,
         };
 }

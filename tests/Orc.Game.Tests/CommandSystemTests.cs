@@ -1,5 +1,6 @@
 using Orc.Core;
 using Orc.Game;
+using Orc.Game.Board;
 using Orc.Game.Cards;
 using Orc.Game.Commanding;
 using Orc.Game.Players;
@@ -29,13 +30,13 @@ public class CommandSystemTests
         var support = match.Battlefield.PlayerASupportLine;
         var front = match.Battlefield.FrontLine;
 
-        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, front[0].Ref);
+        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, front.GetInsertionGaps()[0].Ref);
 
         // 成功：旧槽移除 → 放入目标空槽（原槽变为空槽）；扣 1 点行动费；两 bool 外层更新（步兵：二选一全清）。
         Assert.Equal(CommandResultStatus.Success, result.Status);
-        Assert.True(support[1].IsEmpty);
-        Assert.Same(unit, front[0].Occupant);
-        Assert.Same(front[0], unit.GetData<UnitStateData>().Position);
+        Assert.Equal(1, support.Size);
+        Assert.Same(unit, front[0]);
+        Assert.Same(front[0], unit.GetData<UnitStateData>().Line);
         Assert.Equal(0, player.Points);
         Assert.False(unit.GetData<CommandData>().CanMove);
         Assert.False(unit.GetData<CommandData>().CanAttack);
@@ -52,8 +53,8 @@ public class CommandSystemTests
         CommandTestKit.Activate(unit);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         using var recorder = new UpdateRecorder(match.Engine);
-        var oldSlot = match.Battlefield.PlayerASupportLine[1];
-        var newSlot = match.Battlefield.FrontLine[2];
+        var oldSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1];
+        var newSlot = match.Battlefield.FrontLine.GetInsertionGaps()[2];
 
         var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, newSlot.Ref);
 
@@ -65,8 +66,8 @@ public class CommandSystemTests
             recorder.Types);
         var payload = recorder.Updates[0].Payload!;
         Assert.Same(unit, payload[GameUpdates.PayloadUnit]);
-        Assert.Same(oldSlot, payload[GameUpdates.PayloadOldPosition]);
-        Assert.Same(newSlot, payload[GameUpdates.PayloadNewPosition]);
+        Assert.Same(oldSlot.Line, ((BoardPosition)payload[GameUpdates.PayloadOldPosition]!).Line);
+        Assert.Same(newSlot.Line, ((BoardPosition)payload[GameUpdates.PayloadNewPosition]!).Line);
     }
 
     [Fact]
@@ -93,7 +94,7 @@ public class CommandSystemTests
             return Task.CompletedTask;
         });
 
-        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine[0].Ref);
+        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps()[0].Ref);
 
         Assert.Equal(CommandResultStatus.Success, result.Status);
         var state = Assert.Single(probes);
@@ -116,7 +117,7 @@ public class CommandSystemTests
         CommandTestKit.Activate(unit);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
-        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine[0].Ref);
+        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps()[0].Ref);
 
         // 坦克双动：移动仅清 CanMove；CanAttack 保留（两动作独立清位）。
         Assert.Equal(CommandResultStatus.Success, result.Status);
@@ -142,7 +143,7 @@ public class CommandSystemTests
         // 取消（拖回）＝零副作用：不发更新、不扣费、不清位、槽位不变。
         Assert.Equal(CommandResultStatus.Cancelled, result.Status);
         Assert.Null(result.FailureReason);
-        Assert.Same(unit, support[1].Occupant);
+        Assert.Same(unit, support[1]);
         Assert.Equal(1, player.Points);
         Assert.True(unit.GetData<CommandData>().CanMove);
         Assert.True(unit.GetData<CommandData>().CanAttack);
@@ -234,7 +235,7 @@ public class CommandSystemTests
         await match.Initialize();
         // 加入路径不要求归属：构造无主已单位化单位（Owner＝null）。
         var unit = (UnitCard)match.CardLibrary.Instantiate(CommandTestKit.InfantryId);
-        var joinResult = await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.PlayerASupportLine[3]); // 槽 3（避开 HQ 占位槽）
+        var joinResult = await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.PlayerASupportLine.GetInsertionGaps()[3]); // 槽 3（避开 HQ 占位槽）
         Assert.Equal(PlayResultStatus.Success, joinResult.Status);
         CommandTestKit.Activate(unit);
 
@@ -323,8 +324,8 @@ public class CommandSystemTests
         var unit = await CommandTestKit.PrepareOnSupportAsync(match, player, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(unit);
         using var recorder = new UpdateRecorder(match.Engine);
-        var oldSlot = match.Battlefield.PlayerASupportLine[1];
-        var newSlot = match.Battlefield.FrontLine[0];
+        var oldSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1];
+        var newSlot = match.Battlefield.FrontLine.GetInsertionGaps()[0];
 
         // 直接驱动内层移动触发器（越层）：执行段＝槽位变更＋发射更新；「两 bool 不写、费用不扣」——只在外层更新。
         var stream = await match.CommandManager.UnitMoveTrigger.InvokeAsync(
@@ -337,7 +338,7 @@ public class CommandSystemTests
             });
 
         Assert.Equal(ExecutionOutcome.Normal, stream.Outcome);
-        Assert.Same(unit, newSlot.Occupant);
+        Assert.Same(unit, newSlot);
         Assert.True(unit.GetData<CommandData>().CanMove);  // 内层不写
         Assert.True(unit.GetData<CommandData>().CanAttack); // 内层不写
         Assert.Equal(1, player.Points);                     // 内层不扣费
@@ -411,7 +412,7 @@ public class CommandSystemTests
         Assert.Equal(expected, description.AllowedTargets);
         Assert.DoesNotContain(enemyOnSupport.Ref, description.AllowedTargets);
         Assert.DoesNotContain(playerB.Hq.Ref, description.AllowedTargets); // W3-3：HQ 目标＝实体引用（步兵不可达）
-        Assert.DoesNotContain(front[0].Ref, description.AllowedTargets); // 移动剔除（前线空槽不作为移动候选）
+        Assert.DoesNotContain(front.GetInsertionGaps()[0].Ref, description.AllowedTargets); // 移动剔除（前线空槽不作为移动候选）
 
         // 无效目标点击＝选择器终局 Failed → targeter 内部重入（同一选择器）。
         var rejected = responder.Complete(

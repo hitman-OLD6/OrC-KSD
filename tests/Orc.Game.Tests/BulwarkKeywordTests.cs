@@ -87,7 +87,7 @@ public sealed class BulwarkKeywordTests : IDisposable
         var (match, bridge) = CreateMatch("test.mobility", Mobility);
         await match.Initialize();
         var unit = await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[0], "test.mobility", match.Battlefield.FrontLine[0]);
+            match, match.Players[0], "test.mobility", match.Battlefield.FrontLine.GetInsertionGaps()[0]);
         CommandTestKit.Activate(unit);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
@@ -105,7 +105,7 @@ public sealed class BulwarkKeywordTests : IDisposable
         var (match, bridge) = CreateMatch("test.mobility.fury", Mobility, KeywordIds.Fury);
         await match.Initialize();
         var unit = await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[0], "test.mobility.fury", match.Battlefield.FrontLine[0]);
+            match, match.Players[0], "test.mobility.fury", match.Battlefield.FrontLine.GetInsertionGaps()[0]);
         CommandTestKit.Activate(unit);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
@@ -126,12 +126,12 @@ public sealed class BulwarkKeywordTests : IDisposable
         var (match, _) = CreateMatch("test.entrench", Entrench);
         await match.Initialize();
         var unit = await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[0], "test.entrench", match.Battlefield.FrontLine[0]);
+            match, match.Players[0], "test.entrench", match.Battlefield.FrontLine.GetInsertionGaps()[0]);
         CommandTestKit.Activate(unit);
 
         Assert.False(match.CommandManager.GetCommandAvailability(unit).Move.CanUse, "固守：不能指挥移动");
 
-        var support = match.Battlefield.PlayerASupportLine.First(s => s.IsEmpty);
+        var support = match.Battlefield.PlayerASupportLine.GetInsertionGaps()[0];
         Assert.True(await match.CommandManager.MoveUnitAsync(unit, support)); // 效果位移允许
 
         Assert.NotNull(match.Engine.Judicators);
@@ -160,13 +160,13 @@ public sealed class BulwarkKeywordTests : IDisposable
         var (match, bridge) = CreateMatch("test.repair.move", Repair);
         await match.Initialize();
         var unit = await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[0], "test.repair.move", match.Battlefield.PlayerASupportLine[1]);
+            match, match.Players[0], "test.repair.move", match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);
         CommandTestKit.Activate(unit);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
-        var front = match.Battlefield.FrontLine.First(s => s.IsEmpty);
+        var front = match.Battlefield.FrontLine.GetInsertionGaps()[0];
         Assert.True((await CommandTestKit.RunCommandAsync(match, bridge, unit, front.Ref)).IsSuccess);
-        Assert.Same(front, unit.GetData<UnitStateData>().Position);
+        Assert.Same(front, unit.GetData<UnitStateData>().Line);
         Assert.False(unit.Keywords.Has(Repair), "抢修：位于前线即失去");
     }
 
@@ -176,7 +176,7 @@ public sealed class BulwarkKeywordTests : IDisposable
         var (match, _) = CreateMatch("test.repair", Repair);
         await match.Initialize();
         var unit = await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[0], "test.repair", match.Battlefield.PlayerASupportLine[1]);
+            match, match.Players[0], "test.repair", match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);
 
         await unit.ApplyDefenseDamageAsync(2, CancellationToken.None);
         Assert.True(unit.GetData<UnitStateData>().DefenseLoss > 0);

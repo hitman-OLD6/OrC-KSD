@@ -30,17 +30,17 @@ public class PlayChainUpdateTests
             if (type == GameUpdates.UnitDeployed)
             {
                 var deployedUnit = (UnitCard)payload![GameUpdates.PayloadUnit]!;
-                var position = (Slot)payload[GameUpdates.PayloadPosition]!;
+                var position = (BoardPosition)payload[GameUpdates.PayloadPosition]!;
                 deployedProbe.Add((
                     deployedUnit.TryGetData<UnitStateData>(out _),
-                    ReferenceEquals(position.Occupant, deployedUnit)));
+                    ReferenceEquals(position, deployedUnit)));
             }
 
             return Task.CompletedTask;
         });
         using var recorder = new UpdateRecorder(match.Engine);
 
-        var result = await match.PlayManager.PlayUnitAsync(unit, line[1]);
+        var result = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps()[1]);
 
         Assert.Equal(PlayResultStatus.Success, result.Status);
         // 组合与互斥：played ×1 ＋ card.placed ×1（W3-A3 加线）＋ deployed ×1 ＋ 末条 point.changed（收尾扣部署费；E1-25 后续）；
@@ -58,7 +58,7 @@ public class PlayChainUpdateTests
         // 载荷 {Unit, Position}
         var deployedPayload = recorder.Updates[2].Payload!;
         Assert.Same(unit, deployedPayload[GameUpdates.PayloadUnit]);
-        Assert.Same(line[1], deployedPayload[GameUpdates.PayloadPosition]);
+        Assert.Same(line.GetInsertionGaps()[1], deployedPayload[GameUpdates.PayloadPosition]);
         // 时点：位于单位化完成（组件挂载＋槽位占用）之后
         var state = Assert.Single(deployedProbe);
         Assert.True(state.HasComponents);
@@ -71,7 +71,7 @@ public class PlayChainUpdateTests
         var match = PlayChainTestKit.CreatePlayMatch();
         await match.Initialize();
         var unit = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId);
-        var front = match.Battlefield.FrontLine[0];
+        var front = match.Battlefield.FrontLine.GetInsertionGaps()[0];
         using var recorder = new UpdateRecorder(match.Engine);
 
         var result = await match.PlayManager.JoinUnitAsync(unit, front);

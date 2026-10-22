@@ -31,7 +31,6 @@ public class ClientRobustnessTests
             PackDirectories = [],
             SandboxRoot = temp.Path,
             Port = 0,
-            EnforceDeckRules = false,
         });
 
         await using var client = await OrcClient.ConnectAsync(new ClientOptions
@@ -46,7 +45,7 @@ public class ClientRobustnessTests
         var frame = JsonNode.Parse("""{"params":{"arguments":{}}}""")!;
         var parented = (JsonObject)frame["params"]!["arguments"]!;
 
-        var result = await client.CallAsync("service.info", parented);
+        var result = await client.CallAsync("room.info", parented);
 
         Assert.True(result.Ok, result.Message);
     }
@@ -61,7 +60,6 @@ public class ClientRobustnessTests
             PackDirectories = [TestSupport.SamplePackDirectory()],
             SandboxRoot = temp.Path,
             Port = 0,
-            EnforceDeckRules = false,
         });
 
         await using var client = await OrcClient.ConnectAsync(new ClientOptions
@@ -70,12 +68,21 @@ public class ClientRobustnessTests
             Port = host.Port,
         });
 
+        await client.InitializeAsync(new InitializeParams { ClientName = "handler-throws" });
+
         var received = 0;
         client.NotificationReceived += _ => throw new InvalidOperationException("订阅者故障（测试注入）");
         client.NotificationReceived += _ => Interlocked.Increment(ref received);
 
-        // 任何房间变更都会广播 notify/room（先触发的订阅者会抛）。
-        Assert.True((await client.CallAsync("room.claim", TestSupport.Claim(0))).Ok);
+        // 座位申请会触发 notify/room.seats（先触发的订阅者会抛）。
+        var attached = await client.AttachAsync(new SessionAttachParams
+        {
+            Roles = [SessionRoles.Controller],
+            Seat = 0,
+            Deck = TestSupport.DeckList(),
+            Packages = [TestSupport.SamplePackage()],
+        });
+        Assert.Equal(ResultCodes.Ok, attached.Code);
 
         await TestSupport.WaitUntilAsync(
             () => Task.FromResult(Volatile.Read(ref received)),

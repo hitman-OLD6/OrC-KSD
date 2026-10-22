@@ -68,7 +68,7 @@ public class DeathrattleAndRetriggerTests
         public bool ModifierEffective { get; init; }     // 修饰仍生效（实时数值含修饰）
         public bool ContentEffectMounted { get; init; }  // 内容效果仍装载（效果列表）
         public bool StrayEffectMounted { get; init; }    // 并存效果仍装载
-        public bool PositionReadable { get; init; }      // 位置字段可读（＝死亡前槽位引用）
+        public bool LineReadable { get; init; }      // 位置字段可读（＝死亡前槽位引用）
         public bool SlotFreed { get; init; }             // 槽位已释放（死亡即离场）
         public bool Destroyed { get; init; }             // IsDestroyed 已置位
         public bool EngineSame { get; init; }            // 统一上下文：引擎引用
@@ -86,7 +86,7 @@ public class DeathrattleAndRetriggerTests
         var playerB = match.Players[1];
 
         var victim = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.WeakId, 1); // 攻 1 / 防 2
-        var victimSlot = match.Battlefield.GetSupportLine(playerB)[1];
+        var victimSlot = match.Battlefield.GetSupportLine(playerB).GetInsertionGaps()[1];
 
         // 前置：同卡其它词条（行为态可查证据）＋一项修饰（修饰仍生效证据）＋一项并存效果（效果仍装载证据）。
         Assert.True(await victim.Keywords.GrantAsync(KeywordIds.Forecast));
@@ -108,8 +108,8 @@ public class DeathrattleAndRetriggerTests
                 ModifierEffective = unit.Modifiers.GetEffectiveValue(CardStatFields.Attack) == 5, // 1 基准 + 4 修饰
                 ContentEffectMounted = unit.Effects.Contains(probe!) && probe!.IsMounted,
                 StrayEffectMounted = unit.Effects.Contains(stray) && stray.IsMounted,
-                PositionReadable = ReferenceEquals(state.Position, victimSlot),
-                SlotFreed = victimSlot.IsEmpty,
+                LineReadable = ReferenceEquals(state.Line, victimSlot),
+                SlotFreed = victimSlot.IsEmpty(),
                 Destroyed = state.IsDestroyed,
                 EngineSame = ReferenceEquals(context.Engine, match.Engine),
             });
@@ -139,7 +139,7 @@ public class DeathrattleAndRetriggerTests
         Assert.True(observation.ModifierEffective);    // ② 修饰仍生效
         Assert.True(observation.ContentEffectMounted); // ③ 内容效果仍装载
         Assert.True(observation.StrayEffectMounted);   // ③+ 并存效果仍装载
-        Assert.True(observation.PositionReadable);     // ④ 位置字段可读（＝死亡前槽位引用）
+        Assert.True(observation.LineReadable);     // ④ 位置字段可读（＝死亡前槽位引用）
         Assert.True(observation.SlotFreed);            // ④+ 槽位已释放（死亡即离场——不保留占用）
         Assert.True(observation.Destroyed);            // ⑤ IsDestroyed 已置位（结算可观察）
         Assert.True(observation.EngineSame);           // 统一上下文（宿主卡＋引擎引用）
@@ -150,7 +150,7 @@ public class DeathrattleAndRetriggerTests
         Assert.True(victim.Keywords.Has(KeywordIds.Deathrattle)); // 登记保留
         Assert.Empty(victim.Keywords.Components);                 // 行为态清空（注销完成）
         Assert.Empty(victim.Effects);                             // 效果卸载完成
-        Assert.Null(victim.GetData<UnitStateData>().Position);    // 位置字段置空（终态）
+        Assert.Null(victim.GetData<UnitStateData>().Line);    // 位置字段置空（终态）
     }
 
     // ---------- ① 亡计：必须用例（反例/重入/隔离/空内容/非战斗来源） ----------
@@ -223,7 +223,7 @@ public class DeathrattleAndRetriggerTests
 
         // 隔离记录并继续后续清理：死亡必须完成（清理落定、信号发射、无半死状态）。
         Assert.True(victim.GetData<UnitStateData>().IsDestroyed);
-        Assert.Null(victim.GetData<UnitStateData>().Position);
+        Assert.Null(victim.GetData<UnitStateData>().Line);
         Assert.Empty(victim.Effects);
         Assert.Empty(victim.Keywords.Components);
         Assert.True(victim.Keywords.Has(KeywordIds.Deathrattle)); // 登记保留
@@ -291,7 +291,7 @@ public class DeathrattleAndRetriggerTests
         unit.AddEffect(new DeployLogicProbeEffect(unit, "A", view => { order.Add("A"); views.Add(view); return Task.CompletedTask; }));
         unit.AddEffect(new DeployLogicProbeEffect(unit, "B", view => { order.Add("B"); views.Add(view); return Task.CompletedTask; }));
 
-        var slot = match.Battlefield.GetSupportLine(player)[1];
+        var slot = match.Battlefield.GetSupportLine(player).GetInsertionGaps()[1];
         var joined = await match.PlayManager.JoinUnitAsync(unit, slot);
         Assert.Equal(PlayResultStatus.Success, joined.Status);
         order.Clear();
@@ -334,7 +334,7 @@ public class DeathrattleAndRetriggerTests
         unit.AddEffect(new DeployLogicProbeEffect(unit, "A", _ => { order.Add("A"); return Task.CompletedTask; }));
         unit.AddEffect(new DeployLogicProbeEffect(unit, "B", _ => throw new InvalidOperationException("重放爆炸（测试）")));
         unit.AddEffect(new DeployLogicProbeEffect(unit, "C", _ => { order.Add("C"); return Task.CompletedTask; }));
-        await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.GetSupportLine(player)[1]);
+        await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.GetSupportLine(player).GetInsertionGaps()[1]);
 
         // 逐条异常隔离（记录并继续）——单个效果异常不阻断后续效果。
         var accepted = await RetriggerRules.RequestDeployAsync(unit);
@@ -359,7 +359,7 @@ public class DeathrattleAndRetriggerTests
         played.AddEffect(new DeployLogicProbeEffect(played, "乙", _ => { order.Add("乙"); return Task.CompletedTask; }));
 
         // 打出（部署链①段）。
-        var playResult = await match.PlayManager.PlayUnitAsync(played, match.Battlefield.GetSupportLine(playerA)[1]);
+        var playResult = await match.PlayManager.PlayUnitAsync(played, match.Battlefield.GetSupportLine(playerA).GetInsertionGaps()[1]);
         Assert.Equal(PlayResultStatus.Success, playResult.Status);
         Assert.Equal(new[] { "甲", "乙" }, order);
 

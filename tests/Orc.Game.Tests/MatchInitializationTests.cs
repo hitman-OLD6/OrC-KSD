@@ -36,23 +36,23 @@ public class MatchInitializationTests
         Assert.Equal(0, match.Players[0].Index);
         Assert.Equal(1, match.Players[1].Index);
 
-        // 战场三线就绪（2A 槽位化受控变更：支援线各含 HQ 占位〔居中槽 Battlefield.HqSlotIndex〕＋其余为空；前线全空）
+        // 战场三线就绪（2A 槽位化受控变更：支援线各含 HQ 占位〔居中槽 0〕＋其余为空；前线全空）
         var lineA = match.Battlefield.PlayerASupportLine;
         var frontLine = match.Battlefield.FrontLine;
         var lineB = match.Battlefield.PlayerBSupportLine;
-        Assert.Same(match.Players[0].Hq, lineA[Battlefield.HqSlotIndex].Occupant); // HQ 占位＝总部实体（W3-3：Player 不再作为占位者）
-        Assert.Same(match.Players[1].Hq, lineB[Battlefield.HqSlotIndex].Occupant);
-        for (var i = 0; i < lineA.Count; i++)
+        Assert.Same(match.Players[0].Hq, lineA[0]); // HQ 占位＝总部实体（W3-3：Player 不再作为占位者）
+        Assert.Same(match.Players[1].Hq, lineB[0]);
+        for (var i = 0; i < lineA.Size; i++)
         {
-            if (i != Battlefield.HqSlotIndex) Assert.True(lineA[i].IsEmpty); // 支援线除 HQ 占位槽外初始为空
+            if (i != 0) Assert.True(lineA[i].IsEmpty()); // 支援线除 HQ 占位槽外初始为空
         }
 
-        for (var i = 0; i < lineB.Count; i++)
+        for (var i = 0; i < lineB.Size; i++)
         {
-            if (i != Battlefield.HqSlotIndex) Assert.True(lineB[i].IsEmpty);
+            if (i != 0) Assert.True(lineB[i].IsEmpty());
         }
 
-        Assert.All(frontLine, slot => Assert.True(slot.IsEmpty)); // 前线 0 占位
+        Assert.Equal(0, frontLine.Size); // 前线 0 占位
         // 容量 5/5/5 可读
         Assert.Equal(5, match.Battlefield.PlayerASupportLineCapacity);
         Assert.Equal(5, match.Battlefield.FrontLineCapacity);

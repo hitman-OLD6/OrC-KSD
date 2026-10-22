@@ -1,56 +1,77 @@
-using System.Text.Json.Nodes;
 using Orc.Mcp.Contracts;
 using Orc.Mcp.Room;
+using Orc.Protocol;
 
 namespace Orc.Server.Rooms;
 
 /// <summary>
-/// 房间状态机（多人支持 S3）：维护座位与控制器的唯一真相，不持有任何引擎对象。
+/// 房间状态机（R4/R5/R12）：**seat 属于房间**，房间是 seat 的容器；seat 数恒为 2（引擎 1v1）。
 /// <para>
-/// 状态：<see cref="RoomState.Lobby"/> →（全部座位就绪 + <c>room.start</c>）→ InMatch → Ended；
-/// 对局态不可回到房间态。所有操作用实例锁串行（房间操作是轻量短临界区，
-/// 与引擎无关；引擎侧的串行化由 `SerialWorkQueue` 负责）。
+/// 一场对局对应一个房间；终局后房间保持 <see cref="RoomState.Ended"/> 不可回退，服务器经**房间轮换**
+/// 产出下一个 lobby。跨房间不共享 seat（下一局必须重新入座、重新提供卡组）。
+/// </para>
+/// <para>
+/// 房间**不持有任何引擎活对象**（<c>Match</c>/<c>Player</c>/<c>Card</c>）：它只有座位、声明与令牌。
+/// 对局设施的归属走 <see cref="SeatBinding"/>（纪元 ＋ playerIndex）。
 /// </para>
 /// </summary>
 public sealed class Room
 {
     private readonly object _sync = new();
     private readonly SeatSlot?[] _seats;
-    private readonly IDeckValidator? _deckValidator;
-    private readonly IMatchLauncher? _launcher;
     private readonly Func<IReadOnlyList<RoomListenAddress>> _addresses;
 
     private RoomState _state = RoomState.Lobby;
 
     public Room(
         string roomId,
-        int seatCount = 2,
-        IDeckValidator? deckValidator = null,
-        IMatchLauncher? launcher = null,
-        Func<IReadOnlyList<RoomListenAddress>>? addresses = null,
-        string packPolicy = "loaded",
-        string? packFingerprint = null)
+        IReadOnlyList<SeatConfig> seatConfigs,
+        Func<IReadOnlyList<RoomListenAddress>>? addresses = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(roomId);
-        if (seatCount <= 0)
+        ArgumentNullException.ThrowIfNull(seatConfigs);
+        if (seatConfigs.Count != 2)
         {
-            throw new ArgumentOutOfRangeException(nameof(seatCount), seatCount, "座位数必须为正。");
+            throw new ArgumentException($"seat 数恒为 2（引擎 1v1）；收到 {seatConfigs.Count}。", nameof(seatConfigs));
         }
 
         RoomId = roomId;
-        _seats = new SeatSlot?[seatCount];
-        _deckValidator = deckValidator;
-        _launcher = launcher;
+        _seats = new SeatSlot?[seatConfigs.Count];
         _addresses = addresses ?? (() => Array.Empty<RoomListenAddress>());
-        PackPolicy = packPolicy;
-        PackFingerprint = packFingerprint;
+
+        // AI 座位：**配置即视为已批准**（不需要连接、不需要管理员再批一次）。
+        for (var seat = 0; seat < seatConfigs.Count; seat++)
+        {
+            var config = seatConfigs[seat];
+            if (config.Kind != SeatKind.Ai)
+            {
+                continue;
+            }
+
+            _seats[seat] = new SeatSlot
+            {
+                Seat = seat,
+                Kind = ControllerKinds.Ai,
+                State = SeatState.Admitted,
+                DisplayName = string.IsNullOrWhiteSpace(config.DisplayName) ? "AI" : config.DisplayName,
+                Deck = config.Deck ?? Array.Empty<string>(),
+                DeckConfig = config.DeckConfig is { } deckConfig
+                    ? new RoomDeckConfig(deckConfig.MainFaction, deckConfig.AllyFaction)
+                    : null,
+                Packages = config.Packages ?? Array.Empty<PackageRef>(),
+                SeatToken = NewToken(),
+                SessionId = null,
+            };
+        }
     }
 
     public string RoomId { get; }
 
-    public string PackPolicy { get; }
+    /// <summary>座位数（恒 2）。</summary>
+    public int SeatCount => _seats.Length;
 
-    public string? PackFingerprint { get; }
+    /// <summary>座位状态迁移通知（宿主据此推 <c>notify/room.seats</c>；载荷不含卡组/卡包）。</summary>
+    public event Action? SeatsChanged;
 
     /// <summary>当前状态（诊断用；协议面请取 <see cref="Snapshot"/>）。</summary>
     public RoomState State
@@ -64,9 +85,38 @@ public sealed class Room
         }
     }
 
-    /// <summary>房间快照（纯 DTO）。**锁内只拷座位数组**，网卡枚举一律放到锁外（不持锁做 IO）。</summary>
-    public RoomSnapshot Snapshot()
+    /// <summary>是否全部座位已批准（开局前置之一）。</summary>
+    public bool AllAdmitted
     {
+        get
+        {
+            lock (_sync)
+            {
+                return Array.TrueForAll(_seats, slot => slot is { State: SeatState.Admitted or SeatState.Disconnected });
+            }
+        }
+    }
+
+    /// <summary>是否仍有空座（开局拒绝原因之一）。</summary>
+    public bool HasEmptySeat
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return Array.Exists(_seats, slot => slot is null || slot.State != SeatState.Admitted);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 房间快照（**按调用者角色构造**，R12）：自己的卡组/卡包只回给自己的座位；
+    /// 调试面可见全量；对手的永远不可见（全知 viewer 亦不可）。
+    /// </summary>
+    public RoomSnapshot Snapshot(RoomViewRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
         RoomSeatSnapshot[] seats;
         string state;
 
@@ -76,438 +126,260 @@ public sealed class Room
             for (var i = 0; i < _seats.Length; i++)
             {
                 var slot = _seats[i];
-                seats[i] = slot is null
-                    ? new RoomSeatSnapshot(i, string.Empty, null, false)
-                    : new RoomSeatSnapshot(i, slot.Kind, slot.DisplayName, slot.Connected);
-            }
-
-            state = StateName(_state);
-        }
-
-        return new RoomSnapshot(
-            RoomId,
-            state,
-            seats,
-            PackPolicy,
-            PackFingerprint,
-            _addresses());
-    }
-
-    /// <summary>声明座位（填充控制器）。</summary>
-    public McpToolResult Claim(RoomSeatClaim claim)
-    {
-        ArgumentNullException.ThrowIfNull(claim);
-
-        lock (_sync)
-        {
-            if (_state != RoomState.Lobby)
-            {
-                return Fail(McpCodes.RoomStarted, "房间已开局，不能再声明座位。");
-            }
-
-            if (!InRange(claim.Seat))
-            {
-                return Fail(McpCodes.InvalidArguments, $"座位号 {claim.Seat} 越界（0..{_seats.Length - 1}）。");
-            }
-
-            var existing = _seats[claim.Seat];
-            if (existing is not null)
-            {
-                // 同令牌＝重连，幂等成功；否则视为占用冲突。
-                if (claim.SeatToken == existing.SeatToken)
+                if (slot is null)
                 {
-                    existing.Connected = true;
-                    return Success("已重新绑定座位。", SeatJson(claim.Seat, existing));
+                    seats[i] = new RoomSeatSnapshot(i, false, SeatStates.Idle, null);
+                    continue;
                 }
 
-                return Fail(McpCodes.SeatTaken, $"座位 {claim.Seat} 已被占用。");
-            }
-
-            if (claim.Deck.Count == 0)
-            {
-                return Fail(McpCodes.DeckInvalid, "卡组为空（卡组必须显式提供）。");
-            }
-
-            if (_deckValidator?.Validate(claim.Deck, claim.DeckConfig) is { } invalid)
-            {
-                return invalid;
-            }
-
-            var slot = new SeatSlot
-            {
-                Seat = claim.Seat,
-                Kind = NormalizeKind(claim.ControllerKind),
-                DisplayName = string.IsNullOrWhiteSpace(claim.DisplayName) ? $"座位{claim.Seat}" : claim.DisplayName,
-                Deck = claim.Deck,
-                DeckConfig = claim.DeckConfig,
-                SeatToken = Guid.NewGuid().ToString("N"),
-                Connected = true,
-            };
-
-            _seats[claim.Seat] = slot;
-            return Success("座位已声明。", SeatJson(claim.Seat, slot));
-        }
-    }
-
-    /// <summary>释放座位（房主或该座位持有者）。</summary>
-    public McpToolResult Release(RoomSeatRelease release)
-    {
-        ArgumentNullException.ThrowIfNull(release);
-
-        lock (_sync)
-        {
-            if (_state != RoomState.Lobby)
-            {
-                return Fail(McpCodes.RoomStarted, "房间已开局，不能释放座位。");
-            }
-
-            if (!InRange(release.Seat) || _seats[release.Seat] is not { } slot)
-            {
-                return Fail(McpCodes.InvalidArguments, $"座位 {release.Seat} 当前为空。");
-            }
-
-            // 无房主＝无人有权处置座位（否则"两个远程座位"的房间可被任意持令牌者清空）。
-            if (HostSlot() is not { } host)
-            {
-                return Fail(McpCodes.Unauthorized, "房间没有房主，无法释放座位。");
-            }
-
-            if (!CanControl(host, slot, release.SeatToken))
-            {
-                return Fail(McpCodes.Unauthorized, "令牌无效（既不是房主，也不是该座位持有者）。");
-            }
-
-            _seats[release.Seat] = null;
-            return Success("座位已释放。", new JsonObject { ["seat"] = release.Seat });
-        }
-    }
-
-    /// <summary>生成 AI 控制器（缺省卡组由开局装配生成）。</summary>
-    public McpToolResult AddAi(RoomAiSeat ai)
-    {
-        ArgumentNullException.ThrowIfNull(ai);
-
-        lock (_sync)
-        {
-            if (_state != RoomState.Lobby)
-            {
-                return Fail(McpCodes.RoomStarted, "房间已开局，不能再生成 AI。");
-            }
-
-            if (!InRange(ai.Seat))
-            {
-                return Fail(McpCodes.InvalidArguments, $"座位号 {ai.Seat} 越界（0..{_seats.Length - 1}）。");
-            }
-
-            if (_seats[ai.Seat] is not null)
-            {
-                return Fail(McpCodes.SeatTaken, $"座位 {ai.Seat} 已被占用。");
-            }
-
-            if (ai.Deck is { Count: > 0 } && _deckValidator?.Validate(ai.Deck, ai.DeckConfig) is { } invalid)
-            {
-                return invalid;
-            }
-
-            var slot = new SeatSlot
-            {
-                Seat = ai.Seat,
-                Kind = ControllerKinds.Ai,
-                DisplayName = string.IsNullOrWhiteSpace(ai.DisplayName) ? "AI" : ai.DisplayName,
-                Deck = ai.Deck ?? Array.Empty<string>(),
-                DeckConfig = ai.DeckConfig,
-                SeatToken = Guid.NewGuid().ToString("N"),
-                Connected = true,
-            };
-
-            _seats[ai.Seat] = slot;
-            return Success("AI 控制器已生成。", SeatJson(ai.Seat, slot));
-        }
-    }
-
-    /// <summary>开局（房主令牌；无房主座位时拒绝——不允许免令牌开局）。</summary>
-    public async Task<McpToolResult> StartAsync(string? seatToken, CancellationToken ct = default)
-    {
-        RoomStartRequest request;
-        lock (_sync)
-        {
-            if (_state != RoomState.Lobby)
-            {
-                return Fail(McpCodes.RoomStarted, "房间已开局。");
-            }
-
-            if (Array.Exists(_seats, slot => slot is null))
-            {
-                return Fail(McpCodes.RoomNotReady, "仍有空座，无法开局。");
-            }
-
-            // 无房主＝无人有权开局（不能因为"没有房主座位"就免令牌）。
-            if (HostSlot() is not { } host)
-            {
-                return Fail(McpCodes.Unauthorized, "房间没有房主，无法开局。");
-            }
-
-            if (host.SeatToken != seatToken)
-            {
-                return Fail(McpCodes.Unauthorized, "开局须由房主发起。");
-            }
-
-            if (_launcher is null)
-            {
-                return Fail(McpCodes.NotSupported, "宿主未提供对局装配面（无法开局）。");
-            }
-
-            _state = RoomState.Starting;
-            request = new RoomStartRequest(
-                RoomId,
-                _seats.Select(slot => new RoomSeatStart(
-                    slot!.Seat,
+                var own = request.SeeAllDeclarations || request.Seat == i;
+                seats[i] = new RoomSeatSnapshot(
+                    i,
+                    true,
+                    StateName(slot.State),
                     slot.DisplayName,
-                    slot.Deck,
-                    slot.DeckConfig,
-                    slot.Kind)).ToArray(),
-                PackFingerprint);
-        }
-
-        try
-        {
-            var result = await _launcher.StartAsync(request, ct).ConfigureAwait(false);
-
-            lock (_sync)
-            {
-                _state = result.Ok ? RoomState.InMatch : RoomState.Lobby;
+                    slot.Kind,
+                    own ? slot.Deck : null,
+                    own ? ToPackageSnapshots(slot.Packages) : null);
             }
 
-            return result;
+            state = RoomStateName(_state);
         }
-        catch (Exception ex)
-        {
-            lock (_sync)
-            {
-                _state = RoomState.Lobby;
-            }
 
-            return Fail(McpCodes.Internal, $"开局失败：{ex.GetType().Name}: {ex.Message}");
-        }
+        return new RoomSnapshot(RoomId, state, _seats.Length, seats, _addresses());
     }
 
-    /// <summary>
-    /// 以**系统身份**开局（无头编排专用旁路）：复用 <see cref="StartAsync"/> 的房间态与"座位已满"检查，
-    /// **跳过**房主席位与座位令牌两道校验。
-    /// <para>
-    /// 系统身份只存在于调用栈上——不进入房间状态、不是座席、不改变 <see cref="Snapshot"/> 的形状，
-    /// 外部连接因此仍然无法开局/处置座位（协议面零变更）。
-    /// </para>
-    /// </summary>
-    /// <param name="ct">取消令牌。</param>
-    public async Task<McpToolResult> StartBySystemAsync(CancellationToken ct = default)
+    /// <summary>申请座位（空闲 → 待许可）。**同步拒绝**已被占用的座位（不进 <c>Pending</c>）。</summary>
+    public SeatApplyOutcome Apply(int seat, SeatApplication application)
     {
-        RoomStartRequest request;
-        lock (_sync)
-        {
-            if (_state != RoomState.Lobby)
-            {
-                return Fail(McpCodes.RoomStarted, "房间已开局。");
-            }
+        ArgumentNullException.ThrowIfNull(application);
 
-            if (Array.Exists(_seats, slot => slot is null))
-            {
-                return Fail(McpCodes.RoomNotReady, "仍有空座，无法开局。");
-            }
-
-            if (_launcher is null)
-            {
-                return Fail(McpCodes.NotSupported, "宿主未提供对局装配面（无法开局）。");
-            }
-
-            _state = RoomState.Starting;
-            request = new RoomStartRequest(
-                RoomId,
-                _seats.Select(slot => new RoomSeatStart(
-                    slot!.Seat,
-                    slot.DisplayName,
-                    slot.Deck,
-                    slot.DeckConfig,
-                    slot.Kind)).ToArray(),
-                PackFingerprint);
-        }
-
-        try
-        {
-            var result = await _launcher.StartAsync(request, ct).ConfigureAwait(false);
-
-            lock (_sync)
-            {
-                _state = result.Ok ? RoomState.InMatch : RoomState.Lobby;
-            }
-
-            return result;
-        }
-        catch (Exception ex)
-        {
-            lock (_sync)
-            {
-                _state = RoomState.Lobby;
-            }
-
-            return Fail(McpCodes.Internal, $"开局失败：{ex.GetType().Name}: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// 预置座位（无头编排专用）：**不经过 <see cref="Claim"/>**，只做"空座 + 房间态"检查后直接落座，
-    /// 并返回强类型令牌（服务端据此写 <c>agent.token</c>）。
-    /// <para>
-    /// <c>Claim</c>/<c>AddAi</c>/<c>Resume</c> 的既有行为一律不动（非无头路径零变更）。
-    /// 令牌生成与 <see cref="Claim"/> 同源（只在进程内存在，随进程退出失效）。
-    /// </para>
-    /// </summary>
-    /// <param name="seat">座位号。</param>
-    /// <param name="controllerKind">控制器类型（<c>ai</c>/<c>remote</c>）。</param>
-    /// <param name="displayName">展示名。</param>
-    /// <param name="deck">卡组（由服务端预先生成，不再校验）。</param>
-    /// <param name="deckConfig">构筑配置（可空）。</param>
-    /// <param name="connected">是否标记为已连接（AI＝true；等待外部连接的 agent 座位＝false）。</param>
-    public PresetSeatOutcome PresetSeat(
-        int seat,
-        string controllerKind,
-        string displayName,
-        IReadOnlyList<string> deck,
-        RoomDeckConfig? deckConfig = null,
-        bool connected = false)
-    {
-        ArgumentNullException.ThrowIfNull(deck);
+        bool changed;
+        SeatApplyOutcome outcome;
 
         lock (_sync)
         {
+            changed = false;
             if (_state != RoomState.Lobby)
             {
-                return new PresetSeatOutcome(false, null, "房间已开局，不能预置座位。");
+                return SeatApplyOutcome.Reject(McpCodes.RoomStarted, "房间已开局，不能再申请座位。");
             }
 
             if (!InRange(seat))
             {
-                return new PresetSeatOutcome(false, null, $"座位号 {seat} 越界（0..{_seats.Length - 1}）。");
+                return SeatApplyOutcome.Reject(McpCodes.InvalidArguments, $"座位号 {seat} 越界（0..{_seats.Length - 1}）。");
             }
 
-            if (_seats[seat] is not null)
+            if (_seats[seat] is { } existing)
             {
-                return new PresetSeatOutcome(false, null, $"座位 {seat} 已被占用。");
+                // 同一连接重复申请＝幂等（把声明更新为最新一份）；其它连接＝占用冲突。
+                if (!string.Equals(existing.SessionId, application.SessionId, StringComparison.Ordinal))
+                {
+                    return SeatApplyOutcome.Reject(McpCodes.SeatTaken, $"座位 {seat} 已被占用。");
+                }
+
+                existing.Deck = application.Deck;
+                existing.DeckConfig = ToDeckConfig(application.DeckConfig);
+                existing.Packages = application.Packages;
+                existing.DisplayName = DisplayName(application.DisplayName, seat);
+                outcome = SeatApplyOutcome.Accepted;
+            }
+            else
+            {
+                _seats[seat] = new SeatSlot
+                {
+                    Seat = seat,
+                    Kind = ControllerKinds.Remote,
+                    State = SeatState.Pending,
+                    DisplayName = DisplayName(application.DisplayName, seat),
+                    Deck = application.Deck,
+                    DeckConfig = ToDeckConfig(application.DeckConfig),
+                    Packages = application.Packages,
+                    SeatToken = NewToken(),
+                    SessionId = application.SessionId,
+                };
+                outcome = SeatApplyOutcome.Accepted;
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            RaiseSeatsChanged();
+        }
+
+        return outcome;
+    }
+
+    /// <summary>批准某个待许可座位（pending → admitted）；返回该座位的令牌（**批准那一刻签发**）。</summary>
+    public string? Admit(int seat, string sessionId)
+    {
+        string? token = null;
+        var changed = false;
+
+        lock (_sync)
+        {
+            if (!InRange(seat) || _seats[seat] is not { } slot)
+            {
+                return null;
             }
 
-            var slot = new SeatSlot
+            if (slot.State == SeatState.Admitted
+                || slot.State == SeatState.Disconnected)
             {
-                Seat = seat,
-                Kind = NormalizeKind(controllerKind),
-                DisplayName = string.IsNullOrWhiteSpace(displayName) ? $"座位{seat}" : displayName,
-                Deck = deck,
-                DeckConfig = deckConfig,
-                SeatToken = Guid.NewGuid().ToString("N"),
-                Connected = connected,
-            };
+                // 幂等：已批准时同连接再次批准返回同一令牌（令牌不因重复批准而变）。
+                return string.Equals(slot.SessionId, sessionId, StringComparison.Ordinal) ? slot.SeatToken : null;
+            }
 
-            _seats[seat] = slot;
-            return new PresetSeatOutcome(true, slot.SeatToken, null);
+            if (slot.SessionId is { } owner && !string.Equals(owner, sessionId, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            slot.SessionId = sessionId;
+            slot.State = SeatState.Admitted;
+            slot.SeatToken = NewToken();
+            token = slot.SeatToken;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            RaiseSeatsChanged();
+        }
+
+        return token;
+    }
+
+    /// <summary>拒绝申请（回到空闲；申请被拒后连接退回 <c>Connected</c> 改声明重申请）。</summary>
+    public bool Release(int seat)
+    {
+        var changed = false;
+
+        lock (_sync)
+        {
+            if (!InRange(seat) || _seats[seat] is not { } slot)
+            {
+                return false;
+            }
+
+            if (_state != RoomState.Lobby)
+            {
+                return false; // 对局态不允许释放座位（R11：局中不释放绑定）
+            }
+
+            slot.State = SeatState.Idle;
+            _seats[seat] = null;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            RaiseSeatsChanged();
+        }
+
+        return true;
+    }
+
+    /// <summary>撤销某座位的批准（→ revoked；对局态也允许，用于"管理员收回"）。</summary>
+    public bool Revoke(int seat)
+    {
+        var changed = false;
+
+        lock (_sync)
+        {
+            if (!InRange(seat) || _seats[seat] is not { } slot)
+            {
+                return false;
+            }
+
+            slot.State = SeatState.Revoked;
+            slot.SessionId = null;
+            slot.SeatToken = NewToken(); // 旧令牌立即失效
+            changed = true;
+        }
+
+        if (changed)
+        {
+            RaiseSeatsChanged();
+        }
+
+        return true;
+    }
+
+    /// <summary>标记座位断线（**保留绑定**＝对局态宽限的来源）。</summary>
+    public void MarkDisconnected(int seat)
+    {
+        var changed = false;
+
+        lock (_sync)
+        {
+            if (InRange(seat) && _seats[seat] is { State: SeatState.Admitted } slot)
+            {
+                slot.State = SeatState.Disconnected;
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            RaiseSeatsChanged();
         }
     }
 
-    /// <summary>强制释放座位（房主）。</summary>
-    public McpToolResult Kick(int seat, string? seatToken)
+    /// <summary>标记座位恢复（重连成功）。</summary>
+    public void MarkConnected(int seat)
+    {
+        var changed = false;
+
+        lock (_sync)
+        {
+            if (InRange(seat) && _seats[seat] is { State: SeatState.Disconnected } slot)
+            {
+                slot.State = SeatState.Admitted;
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            RaiseSeatsChanged();
+        }
+    }
+
+    /// <summary>房间进入对局态（开局成功）。</summary>
+    public void MarkInMatch()
+    {
+        lock (_sync)
+        {
+            _state = RoomState.InMatch;
+        }
+    }
+
+    /// <summary>开局失败：回到 lobby（进程存活、不留半装载态）。</summary>
+    public void MarkLobby()
+    {
+        lock (_sync)
+        {
+            if (_state == RoomState.Starting)
+            {
+                _state = RoomState.Lobby;
+            }
+        }
+    }
+
+    /// <summary>标记房间进入开局中（防并发开局）。</summary>
+    public bool TryBeginStart()
     {
         lock (_sync)
         {
             if (_state != RoomState.Lobby)
             {
-                return Fail(McpCodes.RoomStarted, "房间已开局，不能踢出座位。");
+                return false;
             }
 
-            if (!InRange(seat) || _seats[seat] is null)
-            {
-                return Fail(McpCodes.InvalidArguments, $"座位 {seat} 当前为空。");
-            }
-
-            if (HostSlot() is not { } host)
-            {
-                return Fail(McpCodes.Unauthorized, "房间没有房主，无法踢出座位。");
-            }
-
-            if (host.SeatToken != seatToken)
-            {
-                return Fail(McpCodes.Unauthorized, "只有房主可以踢出座位。");
-            }
-
-            _seats[seat] = null;
-            return Success("座位已释放。", new JsonObject { ["seat"] = seat });
-        }
-    }
-
-    /// <summary>凭座位令牌重连（房间态与对局态均可）。</summary>
-    public McpToolResult Resume(string seatToken)
-    {
-        lock (_sync)
-        {
-            for (var i = 0; i < _seats.Length; i++)
-            {
-                if (_seats[i] is { } slot && slot.SeatToken == seatToken)
-                {
-                    slot.Connected = true;
-                    return Success("已重新绑定。", SeatJson(i, slot));
-                }
-            }
-
-            return Fail(McpCodes.Unauthorized, "座位令牌无效。");
-        }
-    }
-
-    /// <summary>标记座位断线（对局态保留座位；房间态由调用方决定是否释放）。</summary>
-    public void MarkDisconnected(string seatToken)
-    {
-        lock (_sync)
-        {
-            for (var i = 0; i < _seats.Length; i++)
-            {
-                if (_seats[i] is { } slot && slot.SeatToken == seatToken)
-                {
-                    slot.Connected = false;
-                    return;
-                }
-            }
-        }
-    }
-
-    /// <summary>按座位标记断线（会话断开/心跳超时；不释放座位）。</summary>
-    public void MarkDisconnected(int seat)
-    {
-        lock (_sync)
-        {
-            if (InRange(seat) && _seats[seat] is { } slot)
-            {
-                slot.Connected = false;
-            }
-        }
-    }
-
-    /// <summary>按座位标记恢复（重连成功）。</summary>
-    public void MarkConnected(int seat)
-    {
-        lock (_sync)
-        {
-            if (InRange(seat) && _seats[seat] is { } slot)
-            {
-                slot.Connected = true;
-            }
-        }
-    }
-
-    /// <summary>直接清空座位（服务端内部用：房间态断线立即释放，无权限校验）。</summary>
-    public void DropSeat(int seat)
-    {
-        lock (_sync)
-        {
-            if (InRange(seat) && _state == RoomState.Lobby)
-            {
-                _seats[seat] = null;
-            }
+            _state = RoomState.Starting;
+            return true;
         }
     }
 
@@ -520,72 +392,139 @@ public sealed class Room
         }
     }
 
-    /// <summary>取得某座位的控制器输入（开局装配用；不含令牌）。</summary>
+    /// <summary>取得某座位的开局输入（不含令牌）。</summary>
     public RoomSeatStart? SeatAt(int seat)
     {
         lock (_sync)
         {
             return InRange(seat) && _seats[seat] is { } slot
-                ? new RoomSeatStart(slot.Seat, slot.DisplayName, slot.Deck, slot.DeckConfig, slot.Kind)
+                ? new RoomSeatStart(
+                    slot.Seat,
+                    slot.DisplayName,
+                    slot.Deck,
+                    slot.DeckConfig,
+                    slot.Kind,
+                    slot.Packages)
                 : null;
         }
     }
 
-    private SeatSlot? HostSlot()
+    /// <summary>按令牌定位座位（重连用）；不存在＝false。</summary>
+    public bool TryResolveToken(string token, out int seat)
     {
-        for (var i = 0; i < _seats.Length; i++)
+        seat = -1;
+        if (string.IsNullOrWhiteSpace(token))
         {
-            if (_seats[i] is { Kind: ControllerKinds.Local } slot)
+            return false;
+        }
+
+        lock (_sync)
+        {
+            for (var i = 0; i < _seats.Length; i++)
             {
-                return slot;
+                if (_seats[i] is { } slot
+                    && string.Equals(slot.SeatToken, token, StringComparison.Ordinal)
+                    && slot.State is SeatState.Admitted or SeatState.Disconnected)
+                {
+                    seat = i;
+                    return true;
+                }
             }
         }
 
-        return null;
+        return false;
     }
 
-    private static bool CanControl(SeatSlot host, SeatSlot slot, string? token)
-        => token is not null && (token == slot.SeatToken || host.SeatToken == token);
+    /// <summary>座位是否被占用（诊断/守卫测试）。</summary>
+    public bool IsOccupied(int seat)
+    {
+        lock (_sync)
+        {
+            return InRange(seat) && _seats[seat] is not null;
+        }
+    }
+
+    /// <summary>该座位是否 AI（轮换重建与 AI 驱动判据）。</summary>
+    public bool IsAiSeat(int seat)
+    {
+        lock (_sync)
+        {
+            return InRange(seat) && _seats[seat] is { Kind: ControllerKinds.Ai };
+        }
+    }
+
+    /// <summary>座位的卡包声明（AI 卡组的并集单位元）。</summary>
+    public IReadOnlyList<PackageRef> PackagesOf(int seat)
+    {
+        lock (_sync)
+        {
+            return InRange(seat) && _seats[seat] is { } slot ? slot.Packages : Array.Empty<PackageRef>();
+        }
+    }
+
+    /// <summary>更新某座位的卡组（AI 开局生成后回写，供快照与日志）。</summary>
+    public void SetDeck(int seat, IReadOnlyList<string> deck)
+    {
+        lock (_sync)
+        {
+            if (InRange(seat) && _seats[seat] is { } slot)
+            {
+                slot.Deck = deck;
+            }
+        }
+    }
+
+    private void RaiseSeatsChanged()
+    {
+        try
+        {
+            SeatsChanged?.Invoke();
+        }
+        catch (Exception)
+        {
+            // 订阅者故障不得影响房间状态机。
+        }
+    }
 
     private bool InRange(int seat) => seat >= 0 && seat < _seats.Length;
 
-    private static string NormalizeKind(string? kind)
-        => kind switch
-        {
-            ControllerKinds.Local => ControllerKinds.Local,
-            ControllerKinds.Ai => ControllerKinds.Ai,
-            _ => ControllerKinds.Remote,
-        };
+    private static string NewToken() => Guid.NewGuid().ToString("N");
 
-    private static string StateName(RoomState state) => state switch
+    private static string DisplayName(string? name, int seat)
+        => string.IsNullOrWhiteSpace(name) ? $"座位{seat}" : name;
+
+    private static RoomDeckConfig? ToDeckConfig(DeckConfigPayload? config)
+        => config is null ? null : new RoomDeckConfig(config.MainFaction, config.AllyFaction);
+
+    private static IReadOnlyList<RoomPackageSnapshot> ToPackageSnapshots(IReadOnlyList<PackageRef> packages)
+        => packages.Select(p => new RoomPackageSnapshot(p.PackageId, p.Version, p.Guid)).ToArray();
+
+    private static string StateName(SeatState state) => state switch
+    {
+        SeatState.Pending => SeatStates.Pending,
+        SeatState.Admitted => SeatStates.Admitted,
+        SeatState.Disconnected => SeatStates.Disconnected,
+        SeatState.Revoked => SeatStates.Revoked,
+        _ => SeatStates.Idle,
+    };
+
+    private static string RoomStateName(RoomState state) => state switch
     {
         RoomState.Lobby => RoomStates.Lobby,
         RoomState.InMatch or RoomState.Starting => RoomStates.InMatch,
         _ => RoomStates.Ended,
     };
 
-    private static JsonObject SeatJson(int seat, SeatSlot slot) => new()
-    {
-        ["seat"] = seat,
-        ["controllerKind"] = slot.Kind,
-        ["displayName"] = slot.DisplayName,
-        ["seatToken"] = slot.SeatToken,
-    };
-
-    private static McpToolResult Success(string message, JsonNode? details)
-        => McpToolResult.Success(message, details: details);
-
-    private static McpToolResult Fail(string code, string message)
-        => McpToolResult.Failure(code, message);
-
     private sealed class SeatSlot
     {
         public required int Seat { get; init; }
         public required string Kind { get; init; }
-        public required string DisplayName { get; init; }
-        public required IReadOnlyList<string> Deck { get; init; }
-        public RoomDeckConfig? DeckConfig { get; init; }
-        public required string SeatToken { get; init; }
-        public bool Connected { get; set; }
+        public required string DisplayName { get; set; }
+        public required IReadOnlyList<string> Deck { get; set; }
+        public RoomDeckConfig? DeckConfig { get; set; }
+        public required IReadOnlyList<PackageRef> Packages { get; set; }
+        public required string SeatToken { get; set; }
+        public string? SessionId { get; set; }
+        public SeatState State { get; set; }
     }
 }

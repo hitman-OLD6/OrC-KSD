@@ -134,14 +134,14 @@ public class MatchHistoryReadTests
 
         // ② S9 转换组合形态：旧实例离场/销毁 → 按定义 Create → 放置到转换目标位置
         // （离场已由死亡链完成〔Position 置空、槽位释放〕；销毁经引擎销毁面补全——转换组合的「销毁」步）
-        Assert.Null(diedCard.GetData<UnitStateData>().Position);
+        Assert.Null(diedCard.GetData<UnitStateData>().Line);
         await match.Engine.DestroyCard(diedCard);
         Assert.False(diedCard.Life.IsAlive);
 
         var service = match.CardService;
         Assert.True(service.TryResolveDefinitionId(diedCard, out var definitionId));
 
-        var target = match.Battlefield.GetSupportLine(playerA)[1]; // 转换目标位置（原位置——已被死亡链释放为空槽）
+        var target = match.Battlefield.GetSupportLine(playerA).GetInsertionGaps()[1]; // 转换目标位置（原位置——已被死亡链释放为空槽）
         var result = await service.CreateAndPlaceToSupportLineAsync(definitionId!, playerA, target);
 
         // 组合断言：新实例按定义就位、位置正确
@@ -149,8 +149,8 @@ public class MatchHistoryReadTests
         var rebuilt = result.Card!;
         Assert.Same(diedCard.Definition, rebuilt.Definition); // 按定义重建
         Assert.True(rebuilt.TryGetData<UnitStateData>(out var rebuiltState));
-        Assert.Same(target, rebuiltState.Position);
-        Assert.Same(rebuilt, target.Occupant);
+        Assert.Same(target, rebuiltState.Line);
+        Assert.Same(rebuilt, target);
     }
 
     // ---------- ③4 边界核验（信号契约 18 条不变；读取来源＝事件流） ----------

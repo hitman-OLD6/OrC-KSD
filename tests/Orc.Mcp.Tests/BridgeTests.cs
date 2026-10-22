@@ -142,7 +142,7 @@ public class BridgeTests
 
         Assert.Equal(2, server.ExitCode);
         var envelope = JsonNode.Parse(ParseLines(output)[0]["result"]!["content"]![0]!["text"]!.GetValue<string>())!;
-        Assert.Equal("unauthorized", envelope["result"]!["code"]!.GetValue<string>());
+        Assert.Equal("invalid-token", envelope["result"]!["code"]!.GetValue<string>());
     }
 
     /// <summary>服务端工具结果附带精简 state（不是"仅变化时附"）。</summary>
@@ -154,7 +154,11 @@ public class BridgeTests
         transport.Push(new RpcNotification
         {
             Method = ProtocolMethods.NotifyView,
-            Params = new JsonObject { ["turn"] = 2, ["phase"] = "mulligan", ["activePlayerSide"] = "opponent" },
+            Params = new JsonObject
+            {
+                ["perspective"] = new JsonObject { ["mode"] = "seat", ["seat"] = 0 },
+                ["view"] = new JsonObject { ["turn"] = 2, ["phase"] = "mulligan", ["activePlayerSide"] = "opponent" },
+            },
         });
 
         var (_, output) = await RunAsync(server,

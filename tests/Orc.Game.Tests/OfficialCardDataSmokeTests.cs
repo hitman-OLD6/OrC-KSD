@@ -88,10 +88,10 @@ public class OfficialCardDataSmokeTests
 
         var supportLine = match.Battlefield.PlayerASupportLine;
         var pointsBefore = player.Points;
-        var playResult = await match.PlayManager.PlayUnitAsync(unit, supportLine[1]);
+        var playResult = await match.PlayManager.PlayUnitAsync(unit, supportLine.GetInsertionGaps()[1]);
 
         Assert.Equal(PlayResultStatus.Success, playResult.Status);
-        Assert.Same(unit, supportLine[1].Occupant);
+        Assert.Same(unit, supportLine.GetInsertionGaps()[1]);
 
         // 数值经加载链就绪（组件 loader 驱动：battleStats）。
         var stats = unit.GetData<BattleStatsData>();

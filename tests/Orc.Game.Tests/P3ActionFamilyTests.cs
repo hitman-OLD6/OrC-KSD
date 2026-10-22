@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using Orc.Cards;
 using Orc.Core;
 using Orc.Game;
@@ -25,7 +25,7 @@ public class P3ActionFamilyTests
         await match.Initialize();
         var player = match.Players[0];
         var unit = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(match, player);
-        var slot = match.Battlefield.PlayerASupportLine[1];
+        var slot = match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1];
         using var recorder = new UpdateRecorder(match.Engine);
 
         var result = await match.PlayManager.PlayUnitAsync(unit, slot);
@@ -41,8 +41,8 @@ public class P3ActionFamilyTests
                 GameUpdates.PointChanged,
             },
             recorder.Types);
-        Assert.Same(unit, slot.Occupant);
-        Assert.Same(slot, unit.GetData<UnitStateData>().Position);
+        Assert.Same(unit, slot);
+        Assert.Same(slot, unit.GetData<UnitStateData>().Line);
         Assert.DoesNotContain(unit, player.Hand);
         Assert.Equal(0, player.Points);
     }
@@ -54,7 +54,7 @@ public class P3ActionFamilyTests
         await match.Initialize();
         var player = match.Players[0];
         var unit = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId);
-        var slot = match.Battlefield.FrontLine[0];
+        var slot = match.Battlefield.FrontLine.GetInsertionGaps()[0];
         var points = player.Points;
         using var recorder = new UpdateRecorder(match.Engine);
 
@@ -63,7 +63,7 @@ public class P3ActionFamilyTests
         // 不允许的行为变更（S9）：card.placed → unit.joined；无宣告、无扣费。
         Assert.Equal(PlayResultStatus.Success, result.Status);
         Assert.Equal(new[] { Updates.CardPlaced, GameUpdates.UnitJoined }, recorder.Types);
-        Assert.Same(unit, slot.Occupant);
+        Assert.Same(unit, slot);
         Assert.Equal(points, player.Points);
     }
 
@@ -74,7 +74,7 @@ public class P3ActionFamilyTests
         await match.Initialize();
         var player = match.Players[0]; // 回合 1：点数 1
         var unit = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(match, player, PlayChainTestKit.UnitCostlyId); // 部署费 5
-        var slot = match.Battlefield.PlayerASupportLine[1];
+        var slot = match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1];
         using var recorder = new UpdateRecorder(match.Engine);
 
         // 直接驱动动作的部署触发端（绕过 PlayTrigger 验证）：代价校验必须在发起前拒绝。
@@ -83,7 +83,7 @@ public class P3ActionFamilyTests
         Assert.NotEqual(ActionOutcomeKind.Applied, result.Targets[0].Outcome);
         Assert.Equal(ActionFailureKind.Precondition, result.Targets[0].Reason);
         Assert.Empty(recorder.Updates); // 零宣告、零放置、零扣费
-        Assert.True(slot.IsEmpty);
+        Assert.False(slot.IsEmpty());
         Assert.False(unit.TryGetData<UnitStateData>(out _));
         Assert.Contains(unit, player.Hand);
     }
@@ -98,7 +98,7 @@ public class P3ActionFamilyTests
 
         // 两触发端 + 一共享处理端；处理端无 Mode/入口类型标志（视图属性即证据）。
         Assert.Equal(typeof(ActionTriggerBands), action.Deploy.BandType);
-        Assert.Equal(typeof(ActionTriggerBands), action.Join.BandType);
+        Assert.Equal(typeof(ActionTriggerBands), action.JoinSupportLine.BandType);
         Assert.Equal(typeof(ActionHandleBands), action.Handle.BandType);
         Assert.Single(action.Handle.Events, e => e.BandValue == (int)ActionHandleBands.Apply);
         Assert.DoesNotContain(
@@ -107,13 +107,13 @@ public class P3ActionFamilyTests
 
         // 部署与加入各经同一处理端落地：card.placed 恰一次、状态一致。
         var deployed = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(match, player);
-        var joinSlot = match.Battlefield.PlayerASupportLine[0];
+        var joinSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps()[0];
         var joinUnit = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId);
 
         Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.PlayUnitAsync(deployed, joinSlot)).Status);
-        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(joinUnit, match.Battlefield.FrontLine[0])).Status);
-        Assert.Same(joinSlot, deployed.GetData<UnitStateData>().Position);
-        Assert.NotNull(joinUnit.GetData<UnitStateData>().Position);
+        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(joinUnit, match.Battlefield.FrontLine.GetInsertionGaps()[0])).Status);
+        Assert.Same(joinSlot, deployed.GetData<UnitStateData>().Line);
+        Assert.NotNull(joinUnit.GetData<UnitStateData>().Line);
     }
 
     [Fact]
@@ -123,7 +123,7 @@ public class P3ActionFamilyTests
         await match.Initialize();
         var player = match.Players[0];
         var unit = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(match, player);
-        var slot = match.Battlefield.PlayerASupportLine[1];
+        var slot = match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1];
 
         // 部署词条位于部署触发端 Commit 段前部（priority 50 < 默认转发 100）。
         var commit = match.CommandManager.JoinBattlefieldAction.Deploy.Events
@@ -150,11 +150,10 @@ public class P3ActionFamilyTests
         var match = PlayChainTestKit.CreatePlayMatch();
         await match.Initialize();
         var unit = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId);
-        var occupied = match.Battlefield.FrontLine[1];
-        occupied.Place(new object());
+        var occupied = match.Battlefield.FrontLine.GetInsertionGaps()[1];
         using var recorder = new UpdateRecorder(match.Engine);
 
-        var result = await match.CommandManager.JoinBattlefieldAction.JoinAsync(unit, occupied);
+        var result = await match.CommandManager.JoinBattlefieldAction.JoinAtAsync(unit, occupied);
 
         Assert.Equal(ActionOutcomeKind.TargetInvalid, result.Targets[0].Outcome);
         Assert.Empty(recorder.Updates);

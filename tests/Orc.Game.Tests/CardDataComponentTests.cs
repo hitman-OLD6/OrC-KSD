@@ -57,7 +57,7 @@ public class CardDataComponentTests
 
         // 初始值：位置 null／已毁 false／类型列表空（0 个合法）／实时值 0／损伤量 0／在场回合数 0
         // （手构空组件默认 0——入场经 CreateInitial 置 1，见下用例；G14补 S10 随注）
-        Assert.Null(state.Position);
+        Assert.Null(state.Line);
         Assert.False(state.IsDestroyed);
         Assert.Empty(state.UnitTypes);
         Assert.Equal(0, state.OperateCost);
@@ -72,14 +72,14 @@ public class CardDataComponentTests
         // （受控入口＝唯一合规增补路径）；「多个合法＋登记序」的验证经受控入口完成——信号副作用不涉本断言
         // （独立引擎无订阅者；受控入口完整行为——去重/信号/实例级——见 CardServiceTests 专项）。
         var line = new BattleLine(4);
-        state.Position = line[1];
+        state.Line = line;
         state.IsDestroyed = true;
         var host = CreateUnitCard();
         host.AddData(state);
         await host.AddUnitTypeAsync(UnitType.Infantry);
         await host.AddUnitTypeAsync(UnitType.Tank);
 
-        Assert.Same(line[1], state.Position);
+        Assert.Same(line.GetInsertionGaps()[1], state.Line);
         Assert.True(state.IsDestroyed);
         Assert.Equal(new[] { UnitType.Infantry, UnitType.Tank }, state.UnitTypes);
     }

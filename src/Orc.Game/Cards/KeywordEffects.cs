@@ -1,4 +1,4 @@
-﻿using Orc.Cards;
+using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Actions;
 using Orc.Game.Commanding;
@@ -140,7 +140,7 @@ public sealed class MobilizeAccrualEffect
         if (view.Host is not UnitCard unit
             || !unit.TryGetData<UnitStateData>(out var state)
             || state.IsDestroyed
-            || state.Position is null)
+            || state.Line is null)
         {
             return; // 未在场（未单位化/已死亡/无位置）：不获得（「单位在其回合开始时获得」）
         }

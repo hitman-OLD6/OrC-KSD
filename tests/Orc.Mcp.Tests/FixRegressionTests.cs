@@ -39,7 +39,7 @@ public class FixRegressionTests
     [Fact]
     public async Task AttackPreviews_MatchEngineCandidates()
     {
-        using var fixture = new SandboxFixture(McpServiceMode.Player, room: null, agentSeat: 0);
+        using var fixture = new SandboxFixture(McpServiceMode.Player, room: null, aiSeats: [0]);
         await CreateMatchAsync(fixture, seatACard: "ai.sample.artillery", seatBCard: "ai.sample.infantry");
 
         // 回合 1（座位 0、1 点，不够火炮 2 费）→ 直接过。
@@ -60,6 +60,7 @@ public class FixRegressionTests
         // 预览（观察面）——投影只在消费者上下文内可用。
         JsonArray previews;
         using (ConsumerContext.Enter())
+        using (fixture.AsSeat(0))
         {
             var view = await fixture.InvokeAsync("observe.view");
             Assert.True(view.Ok, view.Message);
@@ -95,39 +96,6 @@ public class FixRegressionTests
     // ---------------------------------------------------------------- R8 / R2
 
     /// <summary>
-    /// R2 附带修复：待决期间 <c>room.resume</c> 必须放行。
-    /// 端到端实测的死锁：桥在待决期间断开后重连，<c>room.resume</c> 被「挂起期门禁」拒成
-    /// <c>pending-targeting</c>；而应答待决又必须先绑定座位 ⇒ 谁也进不来。
-    /// 放行是安全的：绑定座位不改对局状态，绑定后会把该座位的待决请求重推一次。
-    /// </summary>
-    [Fact]
-    public async Task RoomResume_Is_Not_Blocked_While_Targeting()
-    {
-        using var fixture = new SandboxFixture(
-            McpServiceMode.Player, room: new FakeRoomControl(), agentSeat: 0);
-        await CreateMatchAsync(fixture, seatACard: "ai.sample.artillery", seatBCard: "ai.sample.infantry");
-
-        // 走到「座位 0 可攻击座位 1 单位」的局面（步骤与 R3 用例同源）。
-        Assert.True((await fixture.InvokeAsync("match.end_turn")).Ok);
-        await DeployFirstAsync(fixture, seat: 1, cardId: "ai.sample.infantry");
-        Assert.True((await fixture.InvokeAsync("match.end_turn")).Ok);
-        var attacker = await DeployFirstAsync(fixture, seat: 0, cardId: "ai.sample.artillery");
-        Assert.True((await fixture.InvokeAsync("match.end_turn")).Ok);
-        Assert.True((await fixture.InvokeAsync("match.end_turn")).Ok);
-
-        var attack = await fixture.InvokeAsync("command.attack", $"{{\"ref\":\"{attacker}\"}}");
-        Assert.Equal(McpCodes.Targeting, attack.Code);
-        Assert.True(fixture.Service.Executor.IsBusy); // 确实处于挂起期
-
-        var resume = await fixture.InvokeAsync("room.resume", "{\"seatToken\":\"dummy\"}");
-        Assert.True(resume.Ok, $"待决期间 room.resume 被拒：{resume.Code} / {resume.Message}");
-        Assert.Equal("resume", resume.Details!["kind"]!.GetValue<string>());
-
-        await fixture.InvokeAsync(
-            "target.cancel", $"{{\"sessionId\":\"{attack.Details!["pending"]!["sessionId"]!.GetValue<string>()}\"}}");
-    }
-
-    /// <summary>
     /// R2 附带修复：AI 网关的归属校验方向。
     /// <c>AgentSeat</c> 是 **agent 占用的座位**，AI 驱动其余座位；判据必须是「待决属于 AgentSeat 才拒绝」。
     /// 反向判定（不属于 AgentSeat 就拒绝）会把 AI 自己发起的选靶一并拒掉 → 对局死锁在 AI 回合（端到端实测）。
@@ -136,7 +104,7 @@ public class FixRegressionTests
     public async Task AiGateway_AnswersRequestsOwnedByAiSeat()
     {
         using var fixture = new SandboxFixture(
-            McpServiceMode.Player, room: null, agentSeat: 1); // agent 占 1 → AI 驱动 0
+            McpServiceMode.Player, room: null, aiSeats: [0]); // agent 占 1 → AI 驱动 0
 
         await CreateMatchAsync(fixture, seatACard: "ai.sample.artillery", seatBCard: "ai.sample.infantry");
         Assert.True((await fixture.InvokeAsync("match.end_turn")).Ok);
@@ -164,7 +132,7 @@ public class FixRegressionTests
     public async Task DeployTargeting_ReportsActionAndSeat()
     {
         using var fixture = new SandboxFixture(McpServiceMode.Authoring);
-        Assert.True((await fixture.InvokeAsync("sandbox.create")).Ok);
+        Assert.True((await fixture.CreateSandboxMatchAsync()).Ok);
 
         var received = new List<PendingSelection>();
         using var subscription = fixture.Service.SubscribeTargetingRequests(received.Add);
@@ -345,8 +313,9 @@ public class FixRegressionTests
     {
         JsonObject entry;
         using (ConsumerContext.Enter())
+        using (fixture.AsSeat(seat))
         {
-            var view = await fixture.InvokeAsync("observe.view", $"{{\"seat\":{seat}}}");
+            var view = await fixture.InvokeAsync("observe.view");
             Assert.True(view.Ok, view.Message);
             var hand = view.Details!["view"]!["selfHand"]!.AsArray();
             // 卡定义 id 是带命名空间的（pack/<pack>/<id>）——按后缀匹配，避免测试绑定包名。

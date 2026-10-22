@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Orc.Manager</AssemblyName>
+    <RootNamespace>Orc.Manager</RootNamespace>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <!--
+    服务器管理器（R1/R2）：**常驻**，并行托管多个服务器实例（一实例＝一子进程），
+    持有唯一权威的资产库（注册/依赖分析/同步分析）。
+    入口分层：进程内 API 是真身，CLI 是同一真身的一次调用（逐字等价）。
+    依赖方向：Orc.Manager → { Orc.Protocol, Orc.Packages }。
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Orc.Protocol\Orc.Protocol.csproj" />
+    <ProjectReference Include="..\Orc.Packages\Orc.Packages.csproj" />
+    <!-- 管理器要能**代持**玩家/调试面连接（manager.connect / manager.action），因此需要客户端。 -->
+    <ProjectReference Include="..\Orc.Client\Orc.Client.csproj" />
+    <!-- 引用服务器工程只为把 Orc.Server.dll 及其依赖复制到本工程输出目录：
+         管理器以「同目录下的 Orc.Server.dll」为默认子进程程序集（见 ServerManager 构造）。
+         不引用它 ⇒ bin 里没有服务器 dll ⇒ 每次 spawn 都是 instance-boot-failed。 -->
+    <ProjectReference Include="..\Orc.Server\Orc.Server.csproj" />
+  </ItemGroup>
+
+  <!-- 传输层（ManagerServer / ManagerClient / ManagerMcpFront）不对外暴露类型，
+       但需要被测试工程直接驱动（否则只能起真进程做端到端，慢且脆）。 -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Orc.Manager.Tests" />
+  </ItemGroup>
+
+</Project>

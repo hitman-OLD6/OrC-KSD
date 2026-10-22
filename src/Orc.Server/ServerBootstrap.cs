@@ -1,45 +1,92 @@
-using System.Security.Cryptography;
-using System.Text;
-using Orc.Game.Cards;
-using Orc.Game.Decks;
+using Orc.Foundation.Actions;
 using Orc.Mcp;
-using Orc.Packages.Loading;
-using Orc.Server.Headless;
-using Orc.Server.Rooms;
+using Orc.Mcp.Sandbox;
+using Orc.Packages;
+using Orc.Plugins.BuiltIn;
 using Orc.Server.Transport;
 
 namespace Orc.Server;
 
 /// <summary>
-/// 服务端启动链路（多人支持 S8b）：装载卡池 → 组装房间/校验/装配器 → 创建服务层 → 启动监听。
+/// 服务端启动链路（S5）：**boot 段不装任何卡池**，只做四步固定动作。
+/// <list type="number">
+///   <item><c>Sandbox.EnsureScaffold()</c>（幂等；manifest 自检失败**不阻断 boot**，由开局剔除降级兜住）；</item>
+///   <item><c>BuiltInPlugin.RegisterProcessDefaults()</c> ＋ <c>FoundationActions.Register()</c>（进程级注册前移）；</item>
+///   <item>建 lobby 房间 ＋ 2 个空 seat（AI seat 由 spawn 配置填充）；</item>
+///   <item>起监听并回报就绪行。</item>
+/// </list>
 /// <para>
-/// 顺序要点：房间需要 launcher，而 launcher 需要服务层，服务层又需要房间控制面——
-/// 用 lambda 延迟取服务实例打破这个构造环。
-/// </para>
-/// <para>
-/// 无头沙盒（S1/S2）：<see cref="ServerOptions.Headless"/> 为真时，在任何外部连接之前预置两座位并落盘令牌；
-/// 就绪回调之后才开始自动开局判定（<c>ai+ai</c> 立即开局，否则等待 agent 绑定）。
+/// 判定分两个时点：**进程启动**只校验"卡包可索引"（不预装卡池）；**房间开局**才按并集装配本局卡池。
+/// 因此不存在"启动装错、后续无法卸载"的路径。
 /// </para>
 /// </summary>
 public static class ServerBootstrap
 {
     /// <summary>启动服务端并返回宿主（调用方负责 Dispose）。</summary>
     /// <param name="options">启动选项。</param>
-    /// <param name="onReady">监听就绪回调（参数＝实际端口；用于写 stdout 就绪行）。</param>
     /// <param name="ct">取消令牌。</param>
-    public static async Task<ServerHost> StartAsync(
-        ServerOptions options,
-        Action<int>? onReady = null,
-        CancellationToken ct = default)
+    public static async Task<ServerHost> StartAsync(ServerOptions options, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(options);
+        Validate(options);
 
-        // 两个开关语义不混：既有关闭开关（EnforceDeckRules=false）映射到 none，不得与三档同时给出。
-        if (!options.EnforceDeckRules && options.DeckRules != DeckRuleTier.Strict)
+        // ① 沙盒脚手架（幂等）：沙盒包必须在本局装配前存在，不能等"第一次写卡"才惰性创建。
+        EnsureScaffold(options);
+
+        // ② 进程级注册前移（刻意变化第 10 条）：从每局的 CreateMatchAsync 迁到 boot 段，避免双真源。
+        BuiltInPlugin.RegisterProcessDefaults();
+        FoundationActions.Register();
+
+        // ③＋④ 建 lobby 房间并起监听。
+        var host = new ServerHost(options);
+        await host.StartAsync(ct).ConfigureAwait(false);
+
+        // 父进程兜底：管理器崩溃（无 FIN、无正常退出）时本进程随之退出。
+        _ = ParentWatchdog.Start(options.ParentProcessId, ct: ct);
+
+        host.NoteBootReady();
+        return host;
+    }
+
+    /// <summary>
+    /// 生成沙盒包脚手架**并补齐其元数据**（sidecar ＋ lock）；失败只记日志、不阻断 boot——
+    /// 由开局"剔除沙盒包重试一次"的降级兜住。
+    /// <para>
+    /// 补元数据是必需的：装配链由 lock 驱动，只生成 manifest ＋ 占位卡会让沙盒包被判非法，
+    /// 从而被降级剔除——那会静默地让"调试面造出的卡"永远进不了对局。
+    /// </para>
+    /// </summary>
+    private static void EnsureScaffold(ServerOptions options)
+    {
+        try
         {
-            throw new ArgumentException(
-                "EnforceDeckRules=false 与 DeckRules 三档不能同时给出（前者映射到 none）。",
-                nameof(options));
+            var environment = new SandboxEnvironment(new McpServiceOptions
+            {
+                Mode = options.Mode == ServerMode.Sandbox ? McpServiceMode.Authoring : McpServiceMode.Player,
+                SandboxRoot = options.SandboxRoot,
+                AllowDebugWrites = options.Mode == ServerMode.Sandbox && options.AllowDebugWrites,
+            });
+
+            environment.EnsureScaffold();
+            var metadata = environment.EnsurePackageMetadata();
+            if (metadata.Obstacles.Count > 0)
+            {
+                Console.Error.WriteLine($"[boot] 沙盒包元数据存在障碍（不阻断启动）：{string.Join("；", metadata.Obstacles)}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[boot] 沙盒脚手架生成失败（不阻断启动）：{ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static void Validate(ServerOptions options)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(options.SandboxRoot);
+
+        if (options.Seats.Count != 2)
+        {
+            throw new ArgumentException($"seat 数恒为 2（引擎 1v1）；收到 {options.Seats.Count}。", nameof(options));
         }
 
         if (options.AllowDebugWrites && options.Mode != ServerMode.Sandbox)
@@ -47,111 +94,23 @@ public static class ServerBootstrap
             throw new ArgumentException("AllowDebugWrites 只在 ServerMode.Sandbox 下有效。", nameof(options));
         }
 
-        var tier = options.EnforceDeckRules ? options.DeckRules : DeckRuleTier.None;
-        // lenient 放宽张数＝RequiredDeckSize 0（分项放宽的"张数"这一项）；strict 保持生产口径。
-        var requiredDeckSize = tier == DeckRuleTier.Lenient ? 0 : options.RequiredDeckSize;
-
-        IReadOnlyDictionary<string, CardDefinition> pool =
-            new Dictionary<string, CardDefinition>(StringComparer.Ordinal);
-
-        if (options.PackDirectories.Count > 0)
+        // 进程启动只校验"卡包可索引"：目录存在 ＋ manifest 可解析。**不装卡池**。
+        foreach (var directory in options.PackDirectories)
         {
-            var assembly = MatchCardAssembly.Register(options.PackDirectories);
-            pool = assembly.Definitions.ToDictionary(
-                entry => entry.Id,
-                entry => entry.Definition,
-                StringComparer.Ordinal);
-        }
+            ArgumentException.ThrowIfNullOrWhiteSpace(directory);
 
-        var listenerPort = 0;
-        McpService? service = null;
-
-        // S2b：同一种子驱动卡组生成与建局，保证"同卡包 ＋ 同种子 ＋ 同参数"可复现。
-        var generator = new AiDeckGenerator(pool, options.Seed is { } seed ? new Random(seed) : null);
-        var launcher = new McpMatchLauncher(
-            () => service ?? throw new InvalidOperationException("服务层尚未就绪。"),
-            options.PackDirectories,
-            () => generator.Generate(requiredDeckSize, bestEffort: tier == DeckRuleTier.Lenient),
-            options.EnforceDeckRules,
-            tier,
-            requiredDeckSize,
-            options.Seed);
-
-        var room = new Room(
-            Guid.NewGuid().ToString("N")[..8],
-            options.SeatCount,
-            deckValidator: new DeckRulesValidator(() => pool, options.EnforceDeckRules, requiredDeckSize, tier),
-            launcher: launcher,
-            addresses: () => LocalAddresses.Collect(listenerPort),
-            packFingerprint: options.PackFingerprint ?? ComputePackFingerprint(options.PackDirectories));
-
-        // S2：预置座位与令牌必须在任何外部连接之前完成（否则首个 resume 可能找不到 token）。
-        var headless = options.Headless ? new HeadlessContext(options) : null;
-        headless?.Prepare(generator, room);
-
-        service = new McpService(
-            new McpServiceOptions
-            {
-                Mode = options.Mode == ServerMode.Sandbox ? McpServiceMode.Authoring : McpServiceMode.Player,
-                SandboxRoot = options.SandboxRoot,
-                MatchId = room.RoomId,
-                TargetSelectionTimeout = options.TargetSelectionTimeout,
-                Seed = options.Seed,
-                AgentSeat = headless?.AgentSeat,
-                // S3：服务端 sandbox 默认零写面；显式 --allow-debug-writes 才注册写类。
-                AllowDebugWrites = options.Mode == ServerMode.Sandbox && options.AllowDebugWrites,
-            },
-            new RoomControl(room));
-
-        var host = await new ServerHost(service, options, queue: null, room: room, headless: headless)
-            .StartAsync(ct)
-            .ConfigureAwait(false);
-        listenerPort = host.Port;
-        headless?.Attach(host);
-
-        // 父进程兜底：客户端崩溃（无 FIN、无正常退出）时本进程随之退出。
-        _ = ParentWatchdog.Start(options.ParentProcessId, ct: ct);
-
-        onReady?.Invoke(host.Port);
-
-        // 监听就绪后启动编排：ai+ai 立即开局；有 agent 座位则开始等待计时。
-        headless?.Arm();
-        return host;
-    }
-
-    /// <summary>
-    /// 卡包内容指纹（两端对账用）：对卡包目录下全部文件按路径排序后做 SHA-256，取前 16 位。
-    /// <para>只用于"双方是否同一份卡包"的对账，不构成安全边界（R12：不承诺防作弊）。</para>
-    /// </summary>
-    public static string? ComputePackFingerprint(IReadOnlyList<string> packDirectories)
-    {
-        if (packDirectories.Count == 0)
-        {
-            return null;
-        }
-
-        using var sha = SHA256.Create();
-
-        foreach (var directory in packDirectories.OrderBy(path => path, StringComparer.Ordinal))
-        {
             if (!Directory.Exists(directory))
             {
-                continue;
+                throw new DirectoryNotFoundException($"卡包目录不存在（资产库未注册）：{directory}");
             }
 
-            foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
-                         .OrderBy(path => path, StringComparer.Ordinal))
+            var manifestPath = Path.Combine(directory, "manifest.json");
+            if (!File.Exists(manifestPath))
             {
-                var relative = Path.GetRelativePath(directory, file).Replace('\\', '/');
-                var nameBytes = Encoding.UTF8.GetBytes(relative);
-                sha.TransformBlock(nameBytes, 0, nameBytes.Length, null, 0);
-
-                var content = File.ReadAllBytes(file);
-                sha.TransformBlock(content, 0, content.Length, null, 0);
+                throw new InvalidDataException($"目录 '{directory}' 不是卡包（缺 manifest.json）：资产库不可索引。");
             }
-        }
 
-        sha.TransformFinalBlock([], 0, 0);
-        return Convert.ToHexString(sha.Hash ?? []).ToLowerInvariant()[..16];
+            _ = PackageManifest.Parse(File.ReadAllText(manifestPath), out _);
+        }
     }
 }

@@ -72,9 +72,13 @@ public sealed class SeatStateTracker
             switch (notification.Method)
             {
                 case ProtocolMethods.NotifyView:
-                    if (notification.Params is JsonObject view)
+                    if (notification.Params is JsonObject frame)
                     {
+                        // 帧形状：{perspective, view} 或 {perspective, views[]}；只保留"这一座"的视图。
                         // 只保留最后一条 view：中间变化由 stateVersion 与 dropped 表达。
+                        var view = frame["view"] as JsonObject
+                            ?? (frame["views"] as JsonArray)?.FirstOrDefault()?["view"] as JsonObject
+                            ?? frame;
                         _lastView = (JsonObject)view.DeepClone();
                     }
 
@@ -122,9 +126,18 @@ public sealed class SeatStateTracker
                     break;
                 }
 
-                case ProtocolMethods.NotifyMatchStarted:
-                case ProtocolMethods.NotifyMatchEnded:
+                case ProtocolMethods.NotifyRoomRotated:
+                    // 轮换＝旧房间终结：待决请求已按 room-rotated 收束，视图须丢弃（新房间会重推）。
                     _pendingSessionId = null;
+                    _lastView = null;
+                    break;
+
+                case ProtocolMethods.NotifyAdmission:
+                    if (notification.Params?["decision"]?.GetValue<string>() == "revoked")
+                    {
+                        _pendingSessionId = null;
+                    }
+
                     break;
             }
         }
@@ -181,7 +194,9 @@ public sealed class SeatStateTracker
     {
         ArgumentNullException.ThrowIfNull(details);
 
-        if (details["view"] is not JsonObject view)
+        var view = details["view"] as JsonObject
+            ?? (details["views"] as JsonArray)?.FirstOrDefault()?["view"] as JsonObject;
+        if (view is null)
         {
             return;
         }

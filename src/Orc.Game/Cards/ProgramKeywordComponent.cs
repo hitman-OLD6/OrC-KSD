@@ -52,7 +52,7 @@ public sealed class ProgramKeywordComponent : KeywordComponent
         _ when expression.StartsWith("state.",StringComparison.Ordinal)=>_state[expression[6..]],_=>int.Parse(expression,System.Globalization.CultureInfo.InvariantCulture)};
     private bool Matches(KeywordCondition[] conditions,Card? actor=null,Card? target=null)=>conditions.All(c=>c.Op switch
     {"eq"=>NumberFor(c.Left,target??_host,actor)==NumberFor(c.Right,target??_host,actor),"ne"=>NumberFor(c.Left,target??_host,actor)!=NumberFor(c.Right,target??_host,actor),"gt"=>NumberFor(c.Left,target??_host,actor)>NumberFor(c.Right,target??_host,actor),"gte"=>NumberFor(c.Left,target??_host,actor)>=NumberFor(c.Right,target??_host,actor),"lt"=>NumberFor(c.Left,target??_host,actor)<NumberFor(c.Right,target??_host,actor),"lte"=>NumberFor(c.Left,target??_host,actor)<=NumberFor(c.Right,target??_host,actor),_=>false});
-    private bool LinkedAlive=>OnBoard&&_linked is not null&&_linked.TryGetData<UnitStateData>(out var state)&&!state.IsDestroyed&&state.Position is not null;
+    private bool LinkedAlive=>OnBoard&&_linked is not null&&_linked.TryGetData<UnitStateData>(out var state)&&!state.IsDestroyed&&state.Line is not null;
     internal IEnumerable<(KeywordRulePatch Rule,int Value)> Contributions(string rule,Card subject)=>_subscription is null?[]:_program.Rules.Where(r=>r.Rule==rule&&Matches(r.When,target:subject)&&Applies(r.Scope,subject)).Select(r=>(r,NumberFor(r.Value,subject)));
     private bool Applies(string scope,Card subject)=>scope switch
     {
@@ -169,7 +169,7 @@ public sealed class ProgramKeywordComponent : KeywordComponent
         finally{_selection.Value=previous;}
     }
     private Player? Owner=>(_host as CardBase)?.Owner;
-    private bool OnBoard=>_host.TryGetData<UnitStateData>(out var s)&&!s.IsDestroyed&&s.Position is not null;
+    private bool OnBoard=>_host.TryGetData<UnitStateData>(out var s)&&!s.IsDestroyed&&s.Line is not null;
     private EffectRuntime Runtime=>EffectRuntime.ResolveFor(_host)??throw new InvalidOperationException("词条缺少原生效果服务");
     private async Task<IReadOnlyList<Card>> Targets(string name,Card? actor,CancellationToken ct)
     {
@@ -223,18 +223,20 @@ public sealed class ProgramKeywordComponent : KeywordComponent
                         {
                             var retreatMatch=KeywordProgramRuntime.MatchFor(_host.Engine);
                             var support=retreatMatch.Battlefield.GetSupportLine(retreatOwner);
-                            var retreatPosition=retreat.GetData<UnitStateData>().Position;
-                            if(retreatPosition is not null&&!support.Contains(retreatPosition)&&support.FirstOrDefault(s=>s.IsEmpty) is { } destination)
+                            var retreatPosition=retreat.GetData<UnitStateData>().Line;
+                            if(retreatPosition is not null&&!ReferenceEquals(retreatPosition, support)&&support.GetInsertionGaps().FirstOrDefault() is { } destination)
                                 await retreatMatch.CommandManager.MoveUnitAsync(retreat,destination,ct);
                         }break;
                     case "replace":
-                        if(target is UnitCard original&&original.Owner is { } originalOwner&&original.GetData<UnitStateData>().Position is { } oldSlot)
+                        if(target is UnitCard original&&original.Owner is { } originalOwner&&original.GetData<UnitStateData>().Line is { } oldLine)
                         {
+                            var oldIndex=oldLine.IndexOf(original);
                             var replacementMatch=KeywordProgramRuntime.MatchFor(_host.Engine);
                             var replacement=await replacementMatch.CardService.CreateAsync(a.Key,originalOwner,ct);
                             if(replacement is not UnitCard replacementUnit)throw new InvalidOperationException("替换目标必须是单位定义");
                             if(!original.GetData<UnitStateData>().IsDestroyed)await replacementMatch.CommandManager.LeaveBattlefieldAsync(original,ct);
-                            var joined=await replacementMatch.PlayManager.JoinUnitAsync(replacementUnit,oldSlot,ct);
+                            var oldGap=oldLine.GetInsertionGaps().FirstOrDefault(g=>g.Ordinal==oldIndex)??throw new InvalidOperationException("替换入场失败：原位置不可用");
+                            var joined=await replacementMatch.PlayManager.JoinUnitAsync(replacementUnit,oldGap,ct);
                             if(joined.Status!=PlayResultStatus.Success)throw new InvalidOperationException("替换入场失败");
                             if(!original.GetData<UnitStateData>().IsDestroyed)await _host.Engine.DestroyCard(original);
                         }break;

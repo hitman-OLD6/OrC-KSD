@@ -376,7 +376,7 @@ public sealed class SandboxPrimitives
         var joined = await _match.PlayManager.JoinUnitAsync(unit, slot, ct).ConfigureAwait(false);
         if (joined.Status == PlayResultStatus.Success)
         {
-            Succeed(result, unit, request.Line, slot.Index);
+            Succeed(result, unit, request.Line, slot.Ordinal);
             return;
         }
 
@@ -407,7 +407,7 @@ public sealed class SandboxPrimitives
         var moved = await _match.CommandManager.ActionServices.LandMoveAsync(unit, slot, ct).ConfigureAwait(false);
         if (moved)
         {
-            Succeed(result, unit, request.Line, slot.Index);
+            Succeed(result, unit, request.Line, slot.Ordinal);
             return;
         }
 
@@ -618,7 +618,7 @@ public sealed class SandboxPrimitives
                         .PlaceToSupportLineAsync(unit, request.Owner, slot, ct).ConfigureAwait(false);
                     if (placed.Status == CardPlaceStatus.Placed)
                     {
-                        Succeed(result, unit, request.Zone, slot.Index);
+                        Succeed(result, unit, request.Zone, slot.Ordinal);
                         return;
                     }
 
@@ -631,7 +631,7 @@ public sealed class SandboxPrimitives
                 var joined = await _match.PlayManager.JoinUnitAsync(unit, slot, ct).ConfigureAwait(false);
                 if (joined.Status == PlayResultStatus.Success)
                 {
-                    Succeed(result, unit, request.Zone, slot.Index);
+                    Succeed(result, unit, request.Zone, slot.Ordinal);
                     return;
                 }
 
@@ -678,7 +678,7 @@ public sealed class SandboxPrimitives
             return false;
         }
 
-        Slot? resolved = null;
+        FormationGap? resolved = null;
         if (needsSlot && !TryResolveSlot(owner, zone!, index, out resolved, out reason))
         {
             return false;
@@ -693,7 +693,7 @@ public sealed class SandboxPrimitives
     private bool TryReadTarget(Card? card, string? line, int? slot, out TargetRequest request, out string reason)
     {
         request = default;
-        Slot? resolved = null;
+        FormationGap? resolved = null;
 
         if (card is null || line is not (LineSupport or LineFrontline) || slot is not { } index)
         {
@@ -715,7 +715,7 @@ public sealed class SandboxPrimitives
     /// 槽位解析（线名 ＋ 线内索引）：越界＝<c>slot-out-of-range</c>；解析结果不在该线内＝<c>slot-not-owned</c>。
     /// 风险 1 的应对＝在此承担线归属（引擎原子层不校验线归属）。
     /// </summary>
-    private bool TryResolveSlot(Player? player, string line, int index, out Slot? slot, out string reason)
+    private bool TryResolveSlot(Player? player, string line, int index, out FormationGap? slot, out string reason)
     {
         slot = null;
 
@@ -729,25 +729,16 @@ public sealed class SandboxPrimitives
             ? _match.Battlefield.GetSupportLine(player)
             : _match.Battlefield.FrontLine;
 
-        if (index < 0 || index >= battleLine.Count)
+        var gapList = battleLine.GetInsertionGaps();
+        if (index < 0 || index >= gapList.Count)
         {
             reason = SandboxFailure.SlotOutOfRange;
             return false;
         }
 
-        var candidate = battleLine[index];
-        for (var i = 0; i < battleLine.Count; i++)
-        {
-            if (ReferenceEquals(battleLine[i], candidate))
-            {
-                slot = candidate;
-                reason = string.Empty;
-                return true;
-            }
-        }
-
-        reason = SandboxFailure.SlotNotOwned;
-        return false;
+        slot = gapList[index];
+        reason = string.Empty;
+        return true;
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -762,7 +753,7 @@ public sealed class SandboxPrimitives
         }
 
         if (request.Zone is LineSupport or LineFrontline
-            && request.ResolvedSlot is { IsEmpty: false })
+            && request.ResolvedSlot is not null)
         {
             return SandboxFailure.TargetSlotOccupied;
         }
@@ -792,7 +783,7 @@ public sealed class SandboxPrimitives
             return SandboxFailure.UnitAlreadyUnitized;
         }
 
-        if (request.ResolvedSlot is { IsEmpty: false })
+        if (request.ResolvedSlot is not null)
         {
             return SandboxFailure.TargetSlotOccupied;
         }
@@ -814,20 +805,17 @@ public sealed class SandboxPrimitives
 
         if (request.Card is not UnitCard unit
             || !unit.TryGetData<UnitStateData>(out var state)
-            || state.Position is null
+            || state.Line is null
             || state.IsDestroyed)
         {
             return SandboxFailure.NotOnBattlefield;
         }
 
-        if (ReferenceEquals(state.Position, request.ResolvedSlot))
+        if (request.ResolvedSlot is { } gap
+            && ReferenceEquals(state.Line, gap.Line)
+            && state.Line.IndexOf(unit) == gap.Ordinal)
         {
             return SandboxFailure.SameSlot;
-        }
-
-        if (request.ResolvedSlot is { IsEmpty: false })
-        {
-            return SandboxFailure.TargetSlotOccupied;
         }
 
         return null;
@@ -880,24 +868,24 @@ public sealed class SandboxPrimitives
         _ => SandboxFailure.PlacementRejected,
     };
 
-    private static string MapMoveFailure(UnitCard unit, Slot destination)
+    private static string MapMoveFailure(UnitCard unit, FormationGap destination)
     {
         if (!unit.TryGetData<UnitStateData>(out var state) || state.IsDestroyed)
         {
             return SandboxFailure.EntityDestroyed;
         }
 
-        if (state.Position is not { } current)
+        if (state.Line is not { } current)
         {
             return SandboxFailure.NotOnBattlefield;
         }
 
-        if (ReferenceEquals(current, destination))
+        if (ReferenceEquals(current, destination.Line) && current.IndexOf(unit) == destination.Ordinal)
         {
             return SandboxFailure.SameSlot;
         }
 
-        return destination.IsEmpty ? SandboxFailure.PlacementRejected : SandboxFailure.TargetSlotOccupied;
+        return !destination.IsCurrent ? SandboxFailure.PlacementRejected : SandboxFailure.TargetSlotOccupied;
     }
 
     private static void Succeed(SandboxPrimitiveResult result, Card card, string? line, int? slotIndex)
@@ -1017,7 +1005,7 @@ public sealed class SandboxPrimitives
     // ---------- 请求载体 ----------
 
     private readonly record struct InstantiateRequest(
-        string DefinitionId, Player Owner, string Zone, int SlotIndex, Slot? ResolvedSlot);
+        string DefinitionId, Player Owner, string Zone, int SlotIndex, FormationGap? ResolvedSlot);
 
-    private readonly record struct TargetRequest(Card Card, string Line, int SlotIndex, Slot? ResolvedSlot);
+    private readonly record struct TargetRequest(Card Card, string Line, int SlotIndex, FormationGap? ResolvedSlot);
 }

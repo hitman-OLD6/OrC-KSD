@@ -25,9 +25,9 @@ public class DiyExample09_AdjacentCoverTests
         var playerA = match.Players[0];
         var line = match.Battlefield.GetSupportLine(playerA);
 
-        var host = await CommandTestKit.PrepareUnitAsync(match, playerA, CardId, line[0]);
-        var adjacent = await CommandTestKit.PrepareUnitAsync(match, playerA, CommandTestKit.InfantryId, line[1]);
-        var remote = await CommandTestKit.PrepareUnitAsync(match, playerA, CommandTestKit.InfantryId, line[3]);
+        var host = await CommandTestKit.PrepareUnitAsync(match, playerA, CardId, line.GetInsertionGaps()[0]);
+        var adjacent = await CommandTestKit.PrepareUnitAsync(match, playerA, CommandTestKit.InfantryId, line.GetInsertionGaps()[1]);
+        var remote = await CommandTestKit.PrepareUnitAsync(match, playerA, CommandTestKit.InfantryId, line.GetInsertionGaps()[3]);
 
         // ①光环：相邻步兵行动费 1 → 0；非相邻/自身不受益。
         Assert.Equal(0, OperateCostOf(adjacent));
@@ -54,8 +54,8 @@ public class DiyExample09_AdjacentCoverTests
         var playerA = match.Players[0];
         var line = match.Battlefield.GetSupportLine(playerA);
 
-        await CommandTestKit.PrepareUnitAsync(match, playerA, CardId, line[0]);
-        var tank = await CommandTestKit.PrepareUnitAsync(match, playerA, CommandTestKit.TankId, line[1]);
+        await CommandTestKit.PrepareUnitAsync(match, playerA, CardId, line.GetInsertionGaps()[0]);
+        var tank = await CommandTestKit.PrepareUnitAsync(match, playerA, CommandTestKit.TankId, line.GetInsertionGaps()[1]);
 
         Assert.Equal(1, OperateCostOf(tank)); // 坦克行动费不变
 

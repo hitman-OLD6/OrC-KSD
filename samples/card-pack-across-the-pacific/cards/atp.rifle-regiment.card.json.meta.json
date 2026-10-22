@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageId": "orc.across-the-pacific",
+  "source": "cards/atp.rifle-regiment.card.json",
+  "assets": [
+    {
+      "guid": "0b45d339-2209-135e-065a-2ae5b7c3f49d",
+      "kind": "card",
+      "id": "atp.rifle-regiment",
+      "version": "1.0.0",
+      "dependsOn": [],
+      "conflictsWith": []
+    }
+  ]
+}

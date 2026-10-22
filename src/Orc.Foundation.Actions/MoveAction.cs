@@ -21,9 +21,9 @@ public class MoveActionView
     [Read]
     public virtual UnitCard Unit { get; set; } = null!;
 
-    /// <summary>目标槽位（必填；须存在、为空、非原槽）。</summary>
+    /// <summary>目标插入空隙（必填；须为当前快照的有效空隙、且不是原位置）。</summary>
     [Read]
-    public virtual Slot Destination { get; set; } = null!;
+    public virtual FormationGap Destination { get; set; } = null!;
 
     /// <summary>触发者卡牌（效果发起时携带；玩家主动指挥＝空）。</summary>
     [Optional]
@@ -94,22 +94,23 @@ public sealed class MoveAction : IMoveAction
 
     /// <inheritdoc />
     public Task<ActionResult> CommandAsync(
-        UnitCard unit, Slot destination, Card? triggerCard = null, CancellationToken ct = default)
+        UnitCard unit, FormationGap destination, Card? triggerCard = null, CancellationToken ct = default)
         => RunAsync(unit, destination, triggerCard, ct);
 
     /// <inheritdoc />
     public Task<ActionResult> EffectAsync(
-        UnitCard unit, Slot destination, Card? triggerCard = null, CancellationToken ct = default)
+        UnitCard unit, FormationGap destination, Card? triggerCard = null, CancellationToken ct = default)
         => RunAsync(unit, destination, triggerCard, ct);
 
-    /// <summary>通用前置（触发端）：单位在场未毁／目标槽存在且为空／非原槽；不满足＝目标不合法、零落地。</summary>
+    /// <summary>通用前置（触发端）：单位在场未毁／目标空隙有效／非原位置；不满足＝目标不合法、零落地。</summary>
     private static Task ValidateAsync(MoveActionView view, Context ctx, CancellationToken ct)
     {
         if (!view.Unit.TryGetData<UnitStateData>(out var state)
             || state.IsDestroyed
-            || state.Position is not { } oldSlot
-            || ReferenceEquals(oldSlot, view.Destination)
-            || !view.Destination.IsEmpty)
+            || state.Line is not { } oldLine
+            || !view.Destination.IsCurrent
+            || (ReferenceEquals(view.Destination.Line, oldLine)
+                && view.Destination.Ordinal == oldLine.IndexOf(view.Unit)))
         {
             view.Result?.MarkTargetInvalid();
             ctx.Stop();
@@ -150,7 +151,7 @@ public sealed class MoveAction : IMoveAction
     }
 
     private async Task<ActionResult> RunAsync(
-        UnitCard unit, Slot destination, Card? triggerCard, CancellationToken ct)
+        UnitCard unit, FormationGap destination, Card? triggerCard, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(unit);
         ArgumentNullException.ThrowIfNull(destination);
