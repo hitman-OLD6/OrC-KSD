@@ -54,3 +54,10 @@ TestResults/
 
 # 第三方 agent 工具的工作区（会话记忆等），非本项目产出
 /.workbuddy/
+
+# 人类 CLI 客户端（tools/orc）：隔离 venv 与字节码不入库；源码、测试、启动脚本入库
+tools/orc/.venv/
+__pycache__/
+
+# 服务器管理器的运行时状态（实例目录／日志／CLI 会话），非源码，不入库
+/.orc-manager/

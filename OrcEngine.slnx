@@ -14,6 +14,7 @@
     <Project Path="src/Orc.Client/Orc.Client.csproj" />
     <Project Path="src/Orc.Server/Orc.Server.csproj" />
     <Project Path="src/Orc.Mcp.Bridge/Orc.Mcp.Bridge.csproj" />
+    <Project Path="src/Orc.Manager/Orc.Manager.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Orc.Tests/Orc.Tests.csproj" />
@@ -23,6 +24,7 @@
     <Project Path="tests/Orc.Mcp.Tests/Orc.Mcp.Tests.csproj" />
     <Project Path="tests/Orc.Ai.Tests/Orc.Ai.Tests.csproj" />
     <Project Path="tests/Orc.Server.Tests/Orc.Server.Tests.csproj" />
+    <Project Path="tests/Orc.Manager.Tests/Orc.Manager.Tests.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/Orc.Game.Sample/Orc.Game.Sample.csproj" />
