@@ -38,6 +38,15 @@ public static class AdminOps
     /// <summary>实例信息（纯读）。</summary>
     public const string InstanceInfo = "instance.info";
 
+    /// <summary>读取「已注册包集合」与试算结论（纯读；不入队、不写盘）。</summary>
+    public const string PoolList = "pool.list";
+
+    /// <summary>注册一个卡包目录（写；只影响下一局）。</summary>
+    public const string PoolRegister = "pool.register";
+
+    /// <summary>注销一个包（写；入参＝id ＋ version，与当前快照精确匹配）。</summary>
+    public const string PoolUnregister = "pool.unregister";
+
     /// <summary>全部管理 op 名（守卫测试：业务端口不得路由这些名字）。</summary>
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -51,6 +60,9 @@ public static class AdminOps
         RoomAbort,
         SandboxReset,
         InstanceInfo,
+        PoolList,
+        PoolRegister,
+        PoolUnregister,
     };
 }
 

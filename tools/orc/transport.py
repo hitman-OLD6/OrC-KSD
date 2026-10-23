@@ -363,7 +363,9 @@ class SocketDispatcher(IDispatcher):
             error = reply.get("error") or {}
             raise RpcError(str(error.get("code")), str(error.get("message")))
         result = reply.get("result")
-        return result if isinstance(result, dict) else {}
+        # 结果既可能是对象（initialize/session.attach/tools/call），也可能是数组（tools/list）——
+        # 早先只放行 dict，导致 tools/list 永远返回空表（客户端静默丢掉数组）。
+        return {} if result is None else result
 
     # -- 待决 --
     def peek_pending(self):

@@ -95,9 +95,20 @@ public static class ServerBootstrap
         }
 
         // 进程启动只校验"卡包可索引"：目录存在 ＋ manifest 可解析。**不装卡池**。
+        // 顺序固定（S1 裁决）：先过滤沙盒固定包路径（它不属于集合、每局强制加入），再对其余项做可索引校验。
+        var sandboxPack = Path.GetFullPath(Path.Combine(options.SandboxRoot, "pack"));
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
         foreach (var directory in options.PackDirectories)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+
+            if (string.Equals(Path.GetFullPath(directory), sandboxPack, comparison))
+            {
+                continue;
+            }
 
             if (!Directory.Exists(directory))
             {

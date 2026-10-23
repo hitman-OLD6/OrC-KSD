@@ -434,7 +434,10 @@ public static class AssetMigrationTool
         }
 
         var formal = BuildLockAction(root, packageId, declared, AssetDomain.Formal);
-        var test = BuildLockAction(root, packageId, declared, AssetDomain.Test);
+        // 测试域＝**编辑期临时段**（落盘位置是 <包>.tmp/lock.test.json），正式包不该有内容：
+        // 正式注册面只把资产登记进 formal 域，若正式包的 test lock 也列这些资产，加载时每条都会报
+        // DomainMismatch（"以 formal 域注册，与 lock 的 test 域不符"），把真实冲突淹掉。
+        var test = BuildLockAction(root, packageId, Array.Empty<MigrationAsset>(), AssetDomain.Test);
         return (formal, test);
     }
 

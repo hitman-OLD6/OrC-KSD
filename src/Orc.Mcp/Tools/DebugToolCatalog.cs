@@ -48,6 +48,10 @@ public static class DebugToolCatalog
         "editor.dep_set",
         "editor.promote",
         "editor.reload",
+
+        // 已注册包集合（S6：仅 sandbox ＋ debug 角色 ＋ 回环；改的是"下一局加载哪些包"）
+        "pool.register",
+        "pool.unregister",
     };
 
     /// <summary>读类调试工具（sandbox 下默认注册、所有连接可见，含已绑定座位的 agent）。</summary>

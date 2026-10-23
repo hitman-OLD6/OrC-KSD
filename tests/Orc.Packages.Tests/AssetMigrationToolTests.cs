@@ -86,7 +86,9 @@ public sealed class AssetMigrationToolTests : IDisposable
         Assert.Equal(AssetDomain.Formal, formal!.Domain);
         Assert.Equal(AssetDomain.Test, test!.Domain);
         Assert.Equal(2, formal.Assets.Count);
-        Assert.Equal(formal.Assets, test.Assets);
+        // 测试域＝编辑期临时段（<包>.tmp/lock.test.json）：正式包内必须为空，否则加载时每条资产都会
+        // 报 DomainMismatch（以 formal 注册、与 lock 的 test 域不符），把真实冲突淹掉。
+        Assert.Empty(test.Assets);
         Assert.Contains(formal.Assets, entry => entry.Kind == AssetKind.Card && entry.AppId == $"pack/{PackId}/rifle");
         Assert.Contains(formal.Assets, entry => entry.Kind == AssetKind.Effect && entry.AppId == $"pack/{PackId}/rally");
     }
@@ -338,7 +340,7 @@ public sealed class AssetMigrationToolTests : IDisposable
             Assert.Equal(
                 plan.Entries.SelectMany(entry => entry.Assets).Select(asset => asset.Guid).OrderBy(guid => guid),
                 formal!.Assets.Select(entry => entry.AssetGuid).OrderBy(guid => guid));
-            Assert.Equal(formal.Assets, test!.Assets);
+            Assert.Empty(test!.Assets); // 同上：正式包不承载测试段
         }
     }
 

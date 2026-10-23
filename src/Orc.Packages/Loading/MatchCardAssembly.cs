@@ -100,6 +100,7 @@ public sealed class MatchCardAssembly : IMatchCardLoader
 
     /// <summary>
     /// 准备期：**注册**卡包目录（只解析元数据并生成 DTO，不实例化、不进对局），并读入两域 lock。
+    /// <para>判定实现与 <see cref="Inspect"/> 同一份（<see cref="BuildOutcome"/>）；本方法只是把失败转成异常。</para>
     /// </summary>
     /// <param name="packDirectories">卡包目录（须含 <c>manifest.json</c>——加载严格按元数据）。</param>
     /// <exception cref="ArgumentException">目录列表为空或含空白项。</exception>
@@ -113,72 +114,221 @@ public sealed class MatchCardAssembly : IMatchCardLoader
             throw new ArgumentException("至少需要一个卡包目录。", nameof(packDirectories));
         }
 
+        return Build(packDirectories, strict: true).Assembly!;
+    }
+
+    /// <summary>
+    /// **判定旁路**（S3）：按同一套实现回答「用这份目录集合现在开局会怎样」——纯读、不 <c>Bind</c>、不落地、**不抛**。
+    /// <para>
+    /// 结构性非法（目录缺失／不是卡包／包级结构性非法／lock 冲突／环依赖／无卡可装／空输入）一律走结果模型，
+    /// 由调用方按受众投影；这样「试算」与「装配」不可能得出两套结论。
+    /// </para>
+    /// </summary>
+    /// <param name="packDirectories">卡包目录（空＝合法输入，产出 <see cref="AssetLoadIssueCode.EmptyPool"/>）。</param>
+    public static AssemblyInspection Inspect(IReadOnlyList<string> packDirectories)
+    {
+        ArgumentNullException.ThrowIfNull(packDirectories);
+        return Build(packDirectories, strict: false).Inspection;
+    }
+
+    /// <summary>构建结果（严格模式的产出／非严格模式的判定结论）。</summary>
+    private readonly record struct BuildOutcome(MatchCardAssembly? Assembly, AssemblyInspection Inspection);
+
+    /// <summary>
+    /// **唯一判定实现**：目录 → 注册面 → 合并 lock → 分层计划。
+    /// <para>
+    /// <paramref name="strict"/>＝<c>true</c> 时把失败转成与既有装配链完全等价的异常（<see cref="Register"/>）；
+    /// <c>false</c> 时把同一批失败写进 <see cref="AssemblyInspection"/>（<see cref="Inspect"/>）。
+    /// </para>
+    /// </summary>
+    private static BuildOutcome Build(IReadOnlyList<string> packDirectories, bool strict)
+    {
         var registry = new AssetRegistry();
         var bridge = new AssetIdBridge();
         var locks = new List<AssetLock>();
         var registrations = new List<PackageRegistrationResult>();
         var warnings = new List<string>();
+        var packages = new List<PackageInspection>(packDirectories.Count);
+
+        if (packDirectories.Count == 0)
+        {
+            // 空集合是**合法状态**（spawn 初值本就可能为空）：不抛，给 EmptyPool ＋ 全零摘要。
+            var empty = new AssetLoadIssue(
+                AssetLoadIssueCode.EmptyPool,
+                AssetDomain.Formal,
+                AppId: null,
+                "卡包集合为空：没有任何可装载的卡包目录（请先 pool.register）。",
+                []);
+            return new BuildOutcome(
+                null,
+                new AssemblyInspection(false, packages, [empty], warnings, AssemblyPlanSummary.Zero));
+        }
 
         foreach (var rawDirectory in packDirectories)
         {
-            ArgumentException.ThrowIfNullOrWhiteSpace(rawDirectory);
-            var directory = Path.GetFullPath(rawDirectory);
-            if (!Directory.Exists(directory))
+            if (strict)
             {
-                throw new DirectoryNotFoundException($"卡包目录不存在：{directory}");
+                ArgumentException.ThrowIfNullOrWhiteSpace(rawDirectory); // 既有入参校验（空白项＝调用方错误）
             }
 
-            var manifestPath = Path.Combine(directory, ManifestFileName);
-            if (!File.Exists(manifestPath))
+            var probe = PackageDirectoryProbe.Probe(rawDirectory);
+            if (probe.Manifest is not { } manifest)
             {
-                throw new InvalidDataException(
-                    $"目录 '{directory}' 不是卡包（缺 manifest.json）——加载严格按元数据（R3），目录链已退役。");
-            }
-
-            var manifest = PackageManifest.Parse(File.ReadAllText(manifestPath), out var manifestWarnings);
-            warnings.AddRange(manifestWarnings.Select(warning => $"{manifest.Id}：{warning}"));
-            registrations.Add(PackageRegistrar.Register(directory, manifest, registry));
-
-            foreach (var domain in new[] { AssetDomain.Formal, AssetDomain.Test })
-            {
-                if (AssetLockJson.ReadPackage(directory, domain) is { } @lock)
+                packages.Add(new PackageInspection(
+                    probe.Directory, probe.PackageId, probe.Version, probe.Guid, false, probe.ErrorCode, probe.Error,
+                    WillRemove: true));
+                if (strict)
                 {
-                    locks.Add(@lock);
+                    throw ProbeFailure(probe);
                 }
-                else if (domain == AssetDomain.Formal)
+
+                continue;
+            }
+
+            if (!probe.Ok)
+            {
+                // 有清单但目录仍不可用（kind 非 cardpack／id 漂移）：同样不入装配计算。
+                packages.Add(new PackageInspection(
+                    probe.Directory, probe.PackageId, probe.Version, probe.Guid, false, probe.ErrorCode, probe.Error,
+                    WillRemove: true));
+                if (strict)
                 {
-                    warnings.Add($"{manifest.Id}：缺少正式 lock（{Path.GetFileName(AssetLockJson.PathFor(directory, domain))}）——整包不参与加载");
+                    throw ProbeFailure(probe);
+                }
+
+                continue;
+            }
+
+            var directory = probe.Directory;
+            warnings.AddRange(probe.EffectiveWarnings.Select(warning => $"{manifest.Id}：{warning}"));
+
+            try
+            {
+                registrations.Add(PackageRegistrar.Register(directory, manifest, registry));
+
+                foreach (var domain in new[] { AssetDomain.Formal, AssetDomain.Test })
+                {
+                    if (AssetLockJson.ReadPackage(directory, domain) is { } @lock)
+                    {
+                        locks.Add(@lock);
+                    }
+                    else if (domain == AssetDomain.Formal)
+                    {
+                        warnings.Add($"{manifest.Id}：缺少正式 lock（{Path.GetFileName(AssetLockJson.PathFor(directory, domain))}）——整包不参与加载");
+                    }
                 }
             }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or FormatException
+                or InvalidOperationException or ArgumentException or DirectoryNotFoundException)
+            {
+                // 包级结构性非法（sidecar／GUID 重复／lock 不可解析…）⇒ 该包不可装载；
+                // 读面把它标成失效条目（错误码沿用 manifest-invalid，自由文本给原因）。
+                packages.Add(new PackageInspection(
+                    directory,
+                    manifest.Id,
+                    manifest.Version.ToString(),
+                    manifest.Guid.ToString("N"),
+                    false,
+                    PackageProbeCodes.ManifestInvalid,
+                    ex.Message,
+                    WillRemove: true));
+                if (strict)
+                {
+                    throw; // 既有异常类型与 message 原样保留
+                }
+
+                continue;
+            }
+
+            packages.Add(new PackageInspection(
+                directory, manifest.Id, manifest.Version.ToString(), manifest.Guid.ToString("N"), true));
         }
 
         var assembly = new MatchCardAssembly(registry, bridge, locks, registrations, warnings);
+        var issues = new List<AssetLoadIssue>();
+
         if (assembly.Definitions.Count == 0)
         {
-            throw new InvalidDataException(
-                "卡包目录未装载到任何卡定义（检查 lock 是否覆盖已注册资产）；诊断："
-                + string.Join("；", warnings.Take(6)));
+            var message = "卡包目录未装载到任何卡定义（检查 lock 是否覆盖已注册资产）；诊断："
+                + string.Join("；", warnings.Take(6));
+            if (strict)
+            {
+                throw new InvalidDataException(message);
+            }
+
+            issues.Add(new AssetLoadIssue(
+                AssetLoadIssueCode.DependencyMissing, AssetDomain.Formal, AppId: null, message, []));
+            return new BuildOutcome(
+                assembly,
+                new AssemblyInspection(
+                    false,
+                    packages,
+                    issues,
+                    warnings,
+                    new AssemblyPlanSummary(0, 0, 0, 0, 0)));
         }
 
         // 定版（lock 决议）在**注册期**一次算完并写入中间层：卡组解析（裸局部 ID → 应用层 ID）不依赖对局卡库，
         // 故宿主可在建局前解析卡位；装载期只按同一份计划落地（装载器再算一次是纯函数、结果必然一致）。
         var plan = LoadListPlanner.Plan(registry, locks);
+        issues.AddRange(plan.Issues);
+
         if (!plan.IsValid)
         {
-            throw new InvalidDataException(
-                "卡组装载计划结构性非法（lock 冲突／环依赖）："
-                + string.Join("；", plan.Issues.Where(issue => issue.IsFatal).Select(issue => issue.ToString())));
+            if (strict)
+            {
+                throw new InvalidDataException(
+                    "卡组装载计划结构性非法（lock 冲突／环依赖）："
+                    + string.Join("；", plan.Issues.Where(issue => issue.IsFatal).Select(issue => issue.ToString())));
+            }
         }
 
-        if (plan.Formal.Items.All(item => item.Kind != AssetKind.Card)
-            && plan.Test.Items.All(item => item.Kind != AssetKind.Card))
+        var cardCount = plan.Formal.Items.Count(item => item.Kind == AssetKind.Card)
+            + plan.Test.Items.Count(item => item.Kind == AssetKind.Card);
+        var hasCard = cardCount > 0;
+
+        if (!hasCard)
         {
-            throw new InvalidDataException(
-                "lock 未覆盖任何卡资产（正式／测试两域均无可装载卡）；诊断：" + string.Join("；", warnings.Take(6)));
+            var message = "lock 未覆盖任何卡资产（正式／测试两域均无可装载卡）；诊断："
+                + string.Join("；", warnings.Take(6));
+            if (strict)
+            {
+                throw new InvalidDataException(message);
+            }
         }
 
-        assembly.BindPlan(plan);
-        return assembly;
+        var summary = new AssemblyPlanSummary(
+            assembly.Definitions.Count,
+            plan.Formal.LayerCount,
+            plan.Test.LayerCount,
+            plan.Count,
+            cardCount);
+
+        if (strict)
+        {
+            assembly.BindPlan(plan);
+        }
+
+        var ok = packages.All(package => package.Ok) && plan.IsValid && hasCard;
+        return new BuildOutcome(assembly, new AssemblyInspection(ok, packages, issues, warnings, summary));
+    }
+
+    /// <summary>把探测失败还原成与既有装配链**等价**的异常（类型 ＋ message 一致）。</summary>
+    private static Exception ProbeFailure(PackageProbeResult probe)
+    {
+        if (probe.Cause is { } cause)
+        {
+            return cause;
+        }
+
+        return probe.ErrorCode switch
+        {
+            PackageProbeCodes.DirectoryMissing => new DirectoryNotFoundException(probe.Error),
+            PackageProbeCodes.KindNotCardpack => new InvalidOperationException(probe.Error),
+            PackageProbeCodes.ManifestMissing or PackageProbeCodes.ManifestInvalid or PackageProbeCodes.IdChanged
+                => new InvalidDataException(probe.Error),
+            _ => new IOException(probe.Error),
+        };
     }
 
     /// <summary>

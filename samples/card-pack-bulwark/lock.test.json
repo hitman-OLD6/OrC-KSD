@@ -2,42 +2,5 @@
   "schemaVersion": 1,
   "packageId": "orc.bulwark",
   "domain": "test",
-  "assets": [
-    {
-      "guid": "0e25acc9-46b2-c711-ef64-2bc2a8682c49",
-      "kind": "card",
-      "id": "pack/orc.bulwark/bulwark.entrench-infantry",
-      "version": "1.0.0"
-    },
-    {
-      "guid": "6af88a08-7708-3b9f-191b-0e3b0a76aaf4",
-      "kind": "card",
-      "id": "pack/orc.bulwark/bulwark.field-repair",
-      "version": "1.0.0"
-    },
-    {
-      "guid": "244f66b0-2af1-04ab-fd86-ca1add4420f9",
-      "kind": "card",
-      "id": "pack/orc.bulwark/bulwark.mobile-infantry",
-      "version": "1.0.0"
-    },
-    {
-      "guid": "e0b405fb-d320-def7-a9b0-06069a6cbabd",
-      "kind": "effect",
-      "id": "pack/orc.bulwark/keyword.entrench",
-      "version": "1.0.0"
-    },
-    {
-      "guid": "331eb0c0-c9e3-82d2-3f3f-ff17bfc07552",
-      "kind": "effect",
-      "id": "pack/orc.bulwark/keyword.mobility",
-      "version": "1.0.0"
-    },
-    {
-      "guid": "e1c5787b-5eb8-e708-448f-ea6a9f688188",
-      "kind": "effect",
-      "id": "pack/orc.bulwark/keyword.repair",
-      "version": "1.0.0"
-    }
-  ]
+  "assets": []
 }

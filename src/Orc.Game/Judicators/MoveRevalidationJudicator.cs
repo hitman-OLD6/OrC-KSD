@@ -9,10 +9,10 @@ namespace Orc.Game.Judicators;
 /// <summary>
 /// 移动复验判定器（J2；单位移动验证点专属——逐点专属判定器之一；K3 改造：leg 共享消重）：
 /// 执行前兜底复验的验证承载（原 <c>CommandManager.RevalidateMove</c> 逐字迁移）。
-/// 规则：终局后拒绝；操作角色引用（单位/原槽位/目标槽位）有效性与在场状态、leg 资格（K3：owner==current／
+/// 规则：终局后拒绝；操作角色引用（单位/原槽位/目标空隙）有效性与在场状态、leg 资格（K3：owner==current／
 /// !destroyed／CanMove／被压制／行动费／位置〔源∈支援线〕——经共享 leg 条目单源取用）、位置一致性（复验固有兜底）、
-/// 仅推进（目标须为前线空槽——调用点单源）、前线无存活敌方（K3：经 move.frontline-enemy 条目单源取用）。
-/// 输入：refs（触发数据第一层引用收集——本验证点：单位/原槽位/目标槽位位于前位；尾部可携带触发者卡引用、不参与复验）
+/// 仅推进（目标须为前线空隙——调用点单源）、前线无存活敌方（K3：经 move.frontline-enemy 条目单源取用）。
+/// 输入：refs（触发数据第一层引用收集——本验证点：单位/原槽位/目标空隙位于前位；尾部可携带触发者卡引用、不参与复验）
 /// ＋subject（被判定对象＝操作单位引用——显式、Ref 形态）。
 /// 装配期注入对局级只读设施（对局加载时加载、生命随对局、仅只读使用）：
 /// 生命周期（终局门禁）、leg 资格通道（K3 共享条目——每次调用经统一解析点）、战场（布局读取）、
@@ -69,13 +69,18 @@ internal sealed class MoveRevalidationJudicator : ValidationJudicator
             return ValidationVerdict.Invalid();
         }
 
-        if (!refs[2].IsAlive || refs[2].Value is not BoardPosition newPosition)
+        if (!refs[2].IsAlive || refs[2].Value is not FormationGap newSlot)
         {
             return ValidationVerdict.Invalid();
         }
 
-        // 新位置：目标线＋插入序号（快照语义）。
-        var newSlot = newPosition;
+        // 新位置＝**请求落位**（插入空隙，快照语义）：与候选面（GetCommandAvailability.Move.Candidates）、
+        // 执行段（IMoveAction.CommandAsync 的 FormationGap 形参）、载荷口径一致。
+        // 旧快照（占用变化后失效）＝拒绝：空隙的身份属于某一次线快照，不复用。
+        if (!newSlot.IsCurrent)
+        {
+            return ValidationVerdict.Invalid();
+        }
 
         // K3：leg 资格（共享条件源——原内联的 owner/destroyed/can/suppressed/cost/位置〔源∈支援线〕检查迁至
         // leg 条目；复验按 bool 语义消费：非 null＝Invalid；编排保持——leg 整体判定位于 refs/终局/subject 检查之后）。
@@ -97,7 +102,7 @@ internal sealed class MoveRevalidationJudicator : ValidationJudicator
             ? _battlefield.GetSupportLine(unit.Owner!)
             : _battlefield.FrontLine;
         if (!ReferenceEquals(newSlot.Line, destinationLine)
-            || newSlot.Index < 0 || newSlot.Index > destinationLine.Size)
+            || newSlot.Ordinal < 0 || newSlot.Ordinal > destinationLine.Size)
         {
             return ValidationVerdict.Invalid();
         }

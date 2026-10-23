@@ -13,6 +13,7 @@ using Orc.Mcp.Room;
 using Orc.Mcp.Tools;
 using Orc.Server.Admin;
 using Orc.Server.Execution;
+using Orc.Server.Pool;
 using Orc.Server.Rooms;
 
 namespace Orc.Server.Transport;
@@ -85,11 +86,19 @@ public sealed class ServerHost : IAsyncDisposable
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _queue = queue ?? new SerialWorkQueue();
         _ownsQueue = queue is null;
+
+        // 已注册包集合＝**进程级**（跨房间轮换存活；R1）。事件出口接本宿主的通道事件。
+        Packs = new PackPool(options, _queue, () => IsDraining, PublishEvent);
         Admin = new AdminApi(this);
     }
 
     /// <summary>管理面（**不进工具表**；进程内 API 与父子私有通道共用同一真身）。</summary>
     public AdminApi Admin { get; }
+
+    /// <summary>
+    /// 已注册包集合（进程级；R1）。管理面 op、工具面与开局装配链共用**同一个**实例。
+    /// </summary>
+    public PackPool Packs { get; }
 
     /// <summary>通道事件（轮换结果、对局终局、seat 绑定变化）——由父子私有通道转发给管理器。</summary>
     public event Action<JsonObject>? ChannelEvent;
@@ -200,7 +209,8 @@ public sealed class ServerHost : IAsyncDisposable
                 .ToArray(),
             AllowDebugWrites = _options.Mode == ServerMode.Sandbox && _options.AllowDebugWrites,
         },
-        new RoomControl(room));
+        new RoomControl(room),
+        Packs);
 
     private void AttachService(McpService service, Room room)
     {
@@ -913,9 +923,14 @@ public sealed class ServerHost : IAsyncDisposable
 
         var arguments = ToElement(request.Params?["arguments"]);
 
-        if (_draining)
+        // drain 白名单只有 pool.list 一项：它直取快照、不入队（写类 tool 仍整体拒绝）。
+        // 集合写工具在窗口内的说明与管理面 op **逐字一致**（S5/S6），其余工具维持原说明。
+        if (_draining && !string.Equals(name, "pool.list", StringComparison.Ordinal))
         {
-            return ToolFailure(request.Id, ResultCodes.RoomRotating, "房间正在轮换，请稍后重试。", new JsonObject { ["retryAfterMs"] = 200 });
+            var message = IsPoolWriteTool(name)
+                ? PackPool.DrainMessage
+                : "房间正在轮换，请稍后重试。";
+            return ToolFailure(request.Id, ResultCodes.RoomRotating, message, new JsonObject { ["retryAfterMs"] = 200 });
         }
 
         // 门禁顺序固定（不可调换）：角色态 → 工具要求 → 参数归属；被拒绝的请求**不入队、不碰引擎**。
@@ -997,7 +1012,11 @@ public sealed class ServerHost : IAsyncDisposable
     private static bool IsQueueFreeRead(string name)
         => name is "room.info" or "service.info" or "service.tools"
             or "card.list" or "pack.info" or "file.list" or "file.read"
-            or "docs.list" or "docs.read";
+            or "docs.list" or "docs.read" or "pool.list";
+
+    /// <summary>集合写工具（drain 窗口内的说明与管理面 op 逐字一致；不是白名单，仍被拒绝）。</summary>
+    private static bool IsPoolWriteTool(string name)
+        => name is AdminOps.PoolRegister or AdminOps.PoolUnregister;
 
     private RpcResponse ToolFailure(string? id, string code, string message, JsonNode? details = null)
         => RpcResponse.Success(id, Serialize(new ToolResultPayload { Ok = false, Code = code, Message = message, Details = details }));

@@ -174,15 +174,24 @@ internal sealed class HostFixture : IAsyncDisposable
         DeckRuleTier deckRules = DeckRuleTier.None,
         TimeSpan? disconnectGrace = null,
         IReadOnlyList<string>? packs = null,
-        TimeSpan? targetSelectionTimeout = null)
+        TimeSpan? targetSelectionTimeout = null,
+        bool includeSandboxPackInPacks = false)
     {
         var root = Path.Combine(Path.GetTempPath(), "orc-server-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
 
+        var sandboxRoot = Path.Combine(root, "sandbox");
+        var packDirectories = new List<string>(packs ?? [TestSupport.SamplePackDirectory()]);
+        if (includeSandboxPackInPacks)
+        {
+            // 模拟「管理员把 <sandboxRoot>/pack 也写进了 spawn 列表」：启动不该因此失败，且它不进集合初值。
+            packDirectories.Add(Path.Combine(sandboxRoot, "pack"));
+        }
+
         var options = new ServerOptions
         {
-            PackDirectories = packs ?? [TestSupport.SamplePackDirectory()],
-            SandboxRoot = Path.Combine(root, "sandbox"),
+            PackDirectories = packDirectories,
+            SandboxRoot = sandboxRoot,
             Port = 0,
             Seats = seats ?? [new SeatConfig(), new SeatConfig()],
             Mode = mode,

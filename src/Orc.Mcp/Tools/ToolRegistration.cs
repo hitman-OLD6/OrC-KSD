@@ -11,6 +11,7 @@ public static class ToolRegistration
 
         ServiceTools.Register(service);
         RoomTools.Register(service);
+        PoolTools.Register(service);
         SandboxTools.Register(service);
         CardTools.Register(service);
         AssetTools.Register(service);

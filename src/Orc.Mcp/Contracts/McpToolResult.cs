@@ -120,6 +120,9 @@ public static class McpCodes
     /// <summary>卡组不合法（张数/卡池/同名上限/配国）。</summary>
     public const string DeckInvalid = "deck-invalid";
 
+    /// <summary>协议或契约版本不匹配；卡包集合里也用于「注销时版本与当前快照不符」（与 Orc.Protocol.ResultCodes 同名同值）。</summary>
+    public const string VersionMismatch = "version-mismatch";
+
     // ---- 多人模型（管理面/房间轮换；与 Orc.Protocol.ResultCodes 同名同值） ----
 
     /// <summary><c>Pending</c> 连接调任何动作/调试/观察工具（不按工具区分）。</summary>

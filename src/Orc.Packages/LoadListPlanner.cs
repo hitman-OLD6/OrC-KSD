@@ -48,6 +48,12 @@ public enum AssetLoadIssueCode
     /// 保留 merge 稳定序的首条，其余每条各报一条。
     /// </summary>
     DuplicateLockEntry = 11,
+
+    /// <summary>
+    /// 空池：本次计算的输入为零个卡包目录（<b>非结构性失败</b>——空集合是合法状态，
+    /// 只是现在开局必然失败，由读面/开局报告特化说明）。
+    /// </summary>
+    EmptyPool = 12,
 }
 
 /// <summary>加载计算期的一条问题（结构化；<see cref="Path"/> 仅环依赖使用）。</summary>
@@ -56,12 +62,14 @@ public enum AssetLoadIssueCode
 /// <param name="AppId">相关资产的应用层 ID（无＝null）。</param>
 /// <param name="Message">人读说明（环依赖含完整环路径）。</param>
 /// <param name="Path">环路径（按依赖方向，首尾同一资产；非环＝空）。</param>
+/// <param name="Conflict">lock 冲突的结构化明细（仅 <see cref="AssetLoadIssueCode.LockConflict"/> 非空；其余＝null）。</param>
 public sealed record AssetLoadIssue(
     AssetLoadIssueCode Code,
     AssetDomain Domain,
     string? AppId,
     string Message,
-    IReadOnlyList<string> Path)
+    IReadOnlyList<string> Path,
+    LockConflict? Conflict = null)
 {
     /// <summary>是否为结构性失败（整次计算不产出可加载列表）。</summary>
     public bool IsFatal => Code is AssetLoadIssueCode.LockConflict
@@ -121,8 +129,9 @@ public static class LoadListPlanner
 
         foreach (var conflict in merge.Conflicts)
         {
+            // 原始冲突对象随问题一起上报（结构化明细的唯一来源；Server 层不得解析 message）。
             issues.Add(new AssetLoadIssue(
-                AssetLoadIssueCode.LockConflict, domain, conflict.AppId, conflict.ToString(), []));
+                AssetLoadIssueCode.LockConflict, domain, conflict.AppId, conflict.ToString(), [], conflict));
         }
 
         var (nodes, embedded, hostOfEmbedded) = Resolve(registry, merge, domain, issues);

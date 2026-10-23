@@ -66,7 +66,7 @@ public sealed partial class McpService
     private readonly List<string> _processStateNotes = new();
 
     public McpService(McpServiceOptions options)
-        : this(options, roomControl: null)
+        : this(options, roomControl: null, poolControl: null)
     {
     }
 
@@ -76,10 +76,25 @@ public sealed partial class McpService
     /// <param name="options">运行选项。</param>
     /// <param name="roomControl">房间控制面（宿主注入；<c>null</c>＝无房间能力，<c>room.*</c> 工具不登记）。</param>
     public McpService(McpServiceOptions options, Orc.Mcp.Room.IRoomControl? roomControl)
+        : this(options, roomControl, poolControl: null)
+    {
+    }
+
+    /// <summary>
+    /// 创建服务层（含卡包集合控制面）。
+    /// </summary>
+    /// <param name="options">运行选项。</param>
+    /// <param name="roomControl">房间控制面（宿主注入；<c>null</c>＝无房间能力，<c>room.*</c> 工具不登记）。</param>
+    /// <param name="poolControl">
+    /// 卡包集合控制面（宿主注入；与 <paramref name="roomControl"/> 同一条注入路径）。
+    /// <c>null</c>＝无集合能力，<c>pool.*</c> 工具不登记。
+    /// </param>
+    public McpService(McpServiceOptions options, Orc.Mcp.Room.IRoomControl? roomControl, Orc.Mcp.Pool.IPoolControl? poolControl)
     {
         ArgumentNullException.ThrowIfNull(options);
         Options = options;
         RoomControl = roomControl;
+        PoolControl = poolControl;
         Sandbox = new SandboxEnvironment(options);
         Bridge = new TargeterBridgeAdapter(options.TargetSelectionTimeout, KeyOf);
         Executor = new MatchExecutor(Bridge);
@@ -100,6 +115,12 @@ public sealed partial class McpService
 
     /// <summary>房间控制面（未注入＝<c>null</c>，房间工具不登记）。</summary>
     public Orc.Mcp.Room.IRoomControl? RoomControl { get; }
+
+    /// <summary>
+    /// 卡包集合控制面（未注入＝<c>null</c>，<c>pool.*</c> 工具不登记）。
+    /// **进程级对象**：宿主注入同一实例，房间轮换不重建（集合是实例状态，R1）。
+    /// </summary>
+    public Orc.Mcp.Pool.IPoolControl? PoolControl { get; }
 
     /// <summary>沙盒环境（目录/脚手架/路径守卫）。</summary>
     public SandboxEnvironment Sandbox { get; }

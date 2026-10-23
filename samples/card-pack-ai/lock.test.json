@@ -2,36 +2,5 @@
   "schemaVersion": 1,
   "packageId": "ai.sample",
   "domain": "test",
-  "assets": [
-    {
-      "guid": "ae4be6b1-bb19-5646-fa4e-dd2cc7d1d62b",
-      "kind": "card",
-      "id": "pack/ai.sample/ai.sample.armor",
-      "version": "1.0.0"
-    },
-    {
-      "guid": "f319350c-55f4-eb22-2dc3-2205ceff9b6c",
-      "kind": "card",
-      "id": "pack/ai.sample/ai.sample.artillery",
-      "version": "1.0.0"
-    },
-    {
-      "guid": "ed771fc3-cc07-740a-133b-af83f2b17b98",
-      "kind": "card",
-      "id": "pack/ai.sample/ai.sample.counter",
-      "version": "1.0.0"
-    },
-    {
-      "guid": "17910c6f-cca7-3d55-0761-7432bda97425",
-      "kind": "card",
-      "id": "pack/ai.sample/ai.sample.infantry",
-      "version": "1.0.0"
-    },
-    {
-      "guid": "13ee3334-4c2b-d767-9ff7-3896a44207d5",
-      "kind": "card",
-      "id": "pack/ai.sample/ai.sample.order",
-      "version": "1.0.0"
-    }
-  ]
+  "assets": []
 }

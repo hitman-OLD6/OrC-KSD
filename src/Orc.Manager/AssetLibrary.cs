@@ -46,7 +46,9 @@ public sealed record AssetRegistrationResult(
 public sealed record PackageDeclaration(string Side, IReadOnlyList<PackageRef> Packages);
 
 /// <summary>本局加载计划（管理器 → 服务器；服务器只执行，不做资产判定）。</summary>
-/// <param name="PackDirectories">解析后的包目录（含实例级沙盒包）。</param>
+/// <param name="PackDirectories">
+/// 解析后的包目录（**不含实例级沙盒包**——沙盒包由实例侧固定加入每局并集，见 R7/S11）。
+/// </param>
 /// <param name="Packages">并集后的包引用（回显）。</param>
 /// <param name="Assets">并集后的资产条数。</param>
 public sealed record MatchLoadPlan(
@@ -347,18 +349,19 @@ public sealed class AssetLibrary
             var locks = LocksOf(selected.Keys);
 
             // 沙盒包：**实例级固定包**，强制加入每局并集（不由玩家声明）。
+            // 它仍参与本层的 lock 判定（并集是否可装配），但**不进 packDirectories**：
+            // 服务端实例自己按 <sandboxRoot>/pack 固定加入，重复下发只会让两条路径各自漂移（S11）。
             var directories = new List<string>(DirectoriesOf(selected.Keys));
             if (sandboxPackDirectory is { Length: > 0 } sandbox && Directory.Exists(sandbox))
             {
                 try
                 {
-                    var manifest = PackageManifest.Parse(File.ReadAllText(Path.Combine(sandbox, "manifest.json")), out _);
+                    _ = PackageManifest.Parse(File.ReadAllText(Path.Combine(sandbox, "manifest.json")), out _);
                     foreach (var domain in new[] { AssetDomain.Formal, AssetDomain.Test })
                     {
                         if (AssetLockJson.ReadPackage(sandbox, domain) is { } @lock)
                         {
                             locks.Add(@lock);
-                            directories.Add(sandbox);
                             break;
                         }
                     }

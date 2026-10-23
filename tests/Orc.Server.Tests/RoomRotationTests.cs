@@ -261,10 +261,16 @@ public class RoomRotationTests
         var tools = await client.ListToolsAsync();
         var names = tools.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
 
-        foreach (var op in Orc.Server.Admin.AdminOps.All)
+        // 例外：`pool.list` 是**只读**面，按 R4 同时以 op 与 MCP 工具两种形态注册（无副作用、含 viewer 可用）；
+        // 写操作（pool.register/pool.unregister）仍不得出现在业务端口的工具表里。
+        foreach (var op in Orc.Server.Admin.AdminOps.All.Where(op => op != Orc.Server.Admin.AdminOps.PoolList))
         {
             Assert.DoesNotContain(op, names);
         }
+
+        Assert.Contains(AdminOps.PoolList, names);
+        Assert.DoesNotContain(AdminOps.PoolRegister, names);
+        Assert.DoesNotContain(AdminOps.PoolUnregister, names);
 
         // 业务端口上直接调用管理 op 名 ⇒ 未知方法（不路由到管理面）。
         var unknown = await client.CallAsync(Orc.Server.Admin.AdminOps.MatchStart);
