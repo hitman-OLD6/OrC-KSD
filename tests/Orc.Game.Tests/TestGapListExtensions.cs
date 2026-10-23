@@ -3,21 +3,26 @@ using Orc.Game.Board;
 namespace Orc.Game.Tests;
 
 /// <summary>
-/// 测试侧的空隙取位：越界时**钳制到最后一个可插入位置**。
-/// <para>旧槽位模型每条线恒有 5 个槽；有序列表模型的插入点数随占用变化（N 元素 ⇒ N+1 个），</para>
-/// <para>测试里"取第 3 个位置"在新模型下可能越界——钳制到末尾保持"尽量靠后"的意图。</para>
+/// 测试侧的空隙取位：按序号取当前快照中的插入点（0 起；N 个元素共 N+1 个）。
+/// <para>与 <see cref="BattleLine"/> 索引器同口径——越界＝明确错误、不静默（fail-fast），不做任何钳制。</para>
 /// </summary>
 internal static class TestGapListExtensions
 {
-    /// <summary>按序号取插入空隙（越界钳制到末尾；空线取唯一插入点）。</summary>
+    /// <summary>按序号取插入空隙（越界抛；线已满＝无插入点，同样抛）。</summary>
+    /// <exception cref="ArgumentOutOfRangeException">index 越界，或目标线已满（无插入点）。</exception>
     public static FormationGap At(this IReadOnlyList<FormationGap> gaps, int index)
     {
         ArgumentNullException.ThrowIfNull(gaps);
-        if (gaps.Count == 0)
+        if (index < 0 || index >= gaps.Count)
         {
-            throw new InvalidOperationException("目标线已满：没有可插入位置。");
+            throw new ArgumentOutOfRangeException(
+                nameof(index),
+                index,
+                gaps.Count == 0
+                    ? "目标线已满：没有可插入位置。"
+                    : $"插入点序号越界（合法范围：0..{gaps.Count - 1}）。");
         }
 
-        return gaps[Math.Min(Math.Max(index, 0), gaps.Count - 1)];
+        return gaps[index];
     }
 }

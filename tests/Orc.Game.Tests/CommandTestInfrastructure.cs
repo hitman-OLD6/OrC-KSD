@@ -160,22 +160,14 @@ internal static class CommandTestKit
     }
 
     /// <summary>
-    /// 准备单位到我方支援线的第 <paramref name="index"/> 个**可部署槽**（0 起、升序、自动跳过 HQ 占位槽）。
-    /// 不按"线路第几格"取位：HQ 的占位槽由棋盘决定（<see cref="0"/>，居中），
-    /// 按绝对下标取位会在 HQ 挪动后撞上占位槽（TargetSlotOccupied）；按可部署序取位则与 HQ 位置无关。
-    /// 注意 HQ 两侧都是邻位，因此 index 1 仍是紧邻 HQ 的那一格。
+    /// 准备单位到我方支援线的第 <paramref name="index"/> 个**插入点**（0 起；HQ 与单位同为元素，N 个元素共 N+1 个插入点）。
+    /// 元素顺序即位置：index 0＝HQ 之前，index 1＝紧随 HQ。
     /// </summary>
-    /// <exception cref="ArgumentOutOfRangeException">可部署槽不足 index＋1 个。</exception>
+    /// <exception cref="ArgumentOutOfRangeException">插入点不足 index＋1 个。</exception>
     public static Task<UnitCard> PrepareOnSupportAsync(Match match, Player player, string id, int index)
-    {
-        var line = match.Battlefield.GetSupportLine(player);
-        var deployable = Enumerable.Range(0, line.GetInsertionGaps().Count).ToArray();
-        if (index < 0){ index = 0; }
+        => PrepareUnitAsync(match, player, id, match.Battlefield.GetSupportLine(player).GetInsertionGaps().At(index));
 
-        return PrepareUnitAsync(match, player, id, line.GetInsertionGaps()[deployable[Math.Min(index, deployable.Length - 1)]]);
-    }
-
-    /// <summary>准备单位到前线指定槽（归属＝player——前线共享）。</summary>
+    /// <summary>准备单位到前线的第 <paramref name="index"/> 个插入点（0 起；前线共享、归属＝player）。</summary>
     public static Task<UnitCard> PrepareOnFrontAsync(Match match, Player player, string id, int index)
         => PrepareUnitAsync(match, player, id, match.Battlefield.FrontLine.GetInsertionGaps().At(index));
 

@@ -105,13 +105,13 @@ public class TurnPhaseEffectTests
         await match.EndTurn(); // → 回合 2（B）
         Assert.Equal(0, executions);
         Assert.Same(unit, displacedSlot);
-        Assert.True(originalSlot.IsEmpty());
+        Assert.NotEqual(originalSlot.Ordinal, originalSlot.Line!.IndexOf(unit));
 
         // 到点：己方回合开始 → 恢复执行一次（真实位置副作用）。
         await match.EndTurn(); // → 回合 3（A）
         Assert.Equal(1, executions);
         Assert.Same(unit, originalSlot);
-        Assert.True(displacedSlot.IsEmpty());
+        Assert.Equal(originalSlot.Ordinal, originalSlot.Line!.IndexOf(unit));
         Assert.Same(originalSlot, unit.GetData<UnitStateData>().Line);
 
         // 自清理：再移位后，后续己方回合不再触发（单位保持移位处——未被第二次恢复）。
@@ -122,7 +122,7 @@ public class TurnPhaseEffectTests
         await match.EndTurn(); // → 回合 5（A）
         Assert.Equal(1, executions);
         Assert.Same(unit, displacedSlot); // 未被恢复——handler 已自清理
-        Assert.True(originalSlot.IsEmpty());
+        Assert.NotEqual(originalSlot.Ordinal, originalSlot.Line!.IndexOf(unit));
     }
 
     // ---------- 场景③：结束响应——「回合结束时」到点执行「弃牌」（模拟消灭/弃牌类） ----------

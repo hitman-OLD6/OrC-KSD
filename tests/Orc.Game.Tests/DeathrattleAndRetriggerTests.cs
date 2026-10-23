@@ -109,7 +109,7 @@ public class DeathrattleAndRetriggerTests
                 ContentEffectMounted = unit.Effects.Contains(probe!) && probe!.IsMounted,
                 StrayEffectMounted = unit.Effects.Contains(stray) && stray.IsMounted,
                 LineReadable = ReferenceEquals(state.Line, victimSlot),
-                SlotFreed = victimSlot.IsEmpty(),
+                SlotFreed = !match.Battlefield.GetSupportLine(playerB).Contains(victim),
                 Destroyed = state.IsDestroyed,
                 EngineSame = ReferenceEquals(context.Engine, match.Engine),
             });

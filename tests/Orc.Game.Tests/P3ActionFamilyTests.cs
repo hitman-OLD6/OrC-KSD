@@ -83,7 +83,7 @@ public class P3ActionFamilyTests
         Assert.NotEqual(ActionOutcomeKind.Applied, result.Targets[0].Outcome);
         Assert.Equal(ActionFailureKind.Precondition, result.Targets[0].Reason);
         Assert.Empty(recorder.Updates); // 零宣告、零放置、零扣费
-        Assert.False(slot.IsEmpty());
+        Assert.DoesNotContain(unit, match.Battlefield.PlayerASupportLine.Members);
         Assert.False(unit.TryGetData<UnitStateData>(out _));
         Assert.Contains(unit, player.Hand);
     }

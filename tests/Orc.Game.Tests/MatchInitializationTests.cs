@@ -42,15 +42,8 @@ public class MatchInitializationTests
         var lineB = match.Battlefield.PlayerBSupportLine;
         Assert.Same(match.Players[0].Hq, lineA[0]); // HQ 占位＝总部实体（W3-3：Player 不再作为占位者）
         Assert.Same(match.Players[1].Hq, lineB[0]);
-        for (var i = 0; i < lineA.Size; i++)
-        {
-            if (i != 0) Assert.True(lineA[i].IsEmpty()); // 支援线除 HQ 占位槽外初始为空
-        }
-
-        for (var i = 0; i < lineB.Size; i++)
-        {
-            if (i != 0) Assert.True(lineB[i].IsEmpty());
-        }
+        Assert.Single(lineA.Members); // 支援线初始只有 HQ（有序列表：无"空格"，位置由元素序列表达）
+        Assert.Single(lineB.Members);
 
         Assert.Equal(0, frontLine.Size); // 前线 0 占位
         // 容量 5/5/5 可读

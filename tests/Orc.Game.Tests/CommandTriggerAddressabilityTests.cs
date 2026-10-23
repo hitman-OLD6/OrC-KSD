@@ -40,7 +40,7 @@ public class CommandTriggerAddressabilityTests
         Assert.Equal(new[] { "moding-防御归零" }, trace); // 替换生效
         var state = target.GetData<UnitStateData>();
         Assert.False(state.IsDestroyed);                        // 默认死亡衔接未执行（原逻辑被替换）
-        Assert.False(match.Battlefield.FrontLine.GetInsertionGaps().At(0).IsEmpty());   // 槽位未释放
+        Assert.Contains(target, match.Battlefield.FrontLine.Members);   // 位置未释放（单位仍在线上）
     }
 
     [Fact]

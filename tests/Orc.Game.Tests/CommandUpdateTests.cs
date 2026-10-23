@@ -67,7 +67,6 @@ public class CommandUpdateTests
         var target = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.WeakId, 0);
         CommandTestKit.Activate(attacker);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
-        var targetSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
 
         // 发射时点探针：card.died 到达时死亡状态已就绪（消费者查询不到半死状态）。
         var probes = new List<(bool SlotFreed, bool Destroyed, bool LineCleared)>();
@@ -77,7 +76,7 @@ public class CommandUpdateTests
             {
                 var card = (UnitCard)payload![GameUpdates.PayloadCard]!;
                 var state = card.GetData<UnitStateData>();
-                probes.Add((targetSlot.IsEmpty(), state.IsDestroyed, state.Line is null));
+                probes.Add((!match.Battlefield.FrontLine.Contains(card), state.IsDestroyed, state.Line is null));
             }
 
             return Task.CompletedTask;

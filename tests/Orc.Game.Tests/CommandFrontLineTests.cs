@@ -46,7 +46,7 @@ public class CommandFrontLineTests
         var kill = await CommandTestKit.RunCommandAsync(match, bridge, beast, blocker.Ref);
         Assert.Equal(CommandResultStatus.Success, kill.Status);
         Assert.True(blocker.GetData<UnitStateData>().IsDestroyed);
-        Assert.True(front[0].IsEmpty());
+        Assert.DoesNotContain(blocker, front.Members);
 
         var recovered = match.CommandManager.GetCommandAvailability(mover);
         Assert.True(recovered.Move.CanUse);
@@ -97,7 +97,7 @@ public class CommandFrontLineTests
 
         Assert.Equal(ExecutionOutcome.ValidationRejected, stream.Outcome);
         Assert.Same(mover, oldSlot);
-        Assert.True(targetSlot.IsEmpty());
+        Assert.Empty(match.Battlefield.FrontLine.Members); // 零副作用：目标位置未被占用
         Assert.True(mover.GetData<CommandData>().CanMove);
         Assert.Equal(1, playerA.Points); // 零副作用：费用未扣
     }

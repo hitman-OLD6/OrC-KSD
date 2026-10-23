@@ -28,7 +28,7 @@ public class DiyExample08_AssaultAdvanceRetreatTests
         var unit = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
         // 敌方目标在支援线（前线为空 → 满足推进条件）；轰炸机防御 2，被我方 2 攻击毁。
         await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.BomberId, 1);
-        Assert.DoesNotContain(match.Battlefield.FrontLine.Members, slot => !slot.IsEmpty());
+        Assert.Empty(match.Battlefield.FrontLine.Members);
 
         // 推进走 MoveAsync（S6 效果移动入口：不扣指挥点、不动行动位、不受压制阻断；落地经底层移动动作）。
         CommandTestKit.Activate(unit);

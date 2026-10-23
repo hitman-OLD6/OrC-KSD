@@ -154,7 +154,7 @@ public class PlayChainDeploymentTests
 
         Assert.Equal(PlayResultStatus.Failed, again.Status);
         Assert.Equal(PlayFailureReason.UnitAlreadyUnitized, again.FailureReason);
-        Assert.True(front[1].IsEmpty());
+        Assert.Single(front.Members); // 位置未变：只有首次加入的单位
         Assert.Empty(recorder.Updates);
     }
 }

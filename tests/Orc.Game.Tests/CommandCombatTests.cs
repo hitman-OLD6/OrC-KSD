@@ -215,7 +215,6 @@ public class CommandCombatTests
         CommandTestKit.Activate(attacker);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         using var recorder = new UpdateRecorder(match.Engine);
-        var targetSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
 
         var result = await CommandTestKit.RunCommandAsync(match, bridge, attacker, target.Ref);
 
@@ -225,7 +224,7 @@ public class CommandCombatTests
         // 「先数值变化、后死亡信号」：被攻击者的 sc（外部订阅通知）先于 card.died（防御归零的统一死亡衔接——总线触发器阶段），
         // 攻击者的 sc 随后；恰一次死亡。
         Assert.Equal(CommandResultStatus.Success, result.Status);
-        Assert.True(targetSlot.IsEmpty());
+        Assert.DoesNotContain(target, match.Battlefield.FrontLine.Members);
         Assert.True(target.GetData<UnitStateData>().IsDestroyed);
         Assert.Null(target.GetData<UnitStateData>().Line);
         Assert.True(target.Ref.IsAlive); // 实例保留（不销毁）——可查询

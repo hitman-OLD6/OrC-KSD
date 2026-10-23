@@ -135,7 +135,7 @@ public class PlayChainUnitTests
         Assert.Empty(recorder.Updates);
         Assert.Contains(unit, player.Hand);
         Assert.Equal(1, player.Points);
-        Assert.True(line.GetInsertionGaps().At(1).IsEmpty());
+        Assert.Single(line.Members); // 位置未变：支援线仍只有 HQ
         Assert.False(unit.TryGetData<UnitStateData>(out _));
     }
 
@@ -178,7 +178,7 @@ public class PlayChainUnitTests
         // 已单位化（重复部署被拒绝）：目标槽未动、无新更新。
         Assert.Equal(PlayResultStatus.Failed, again.Status);
         Assert.Equal(PlayFailureReason.UnitAlreadyUnitized, again.FailureReason);
-        Assert.True(line.GetInsertionGaps().At(3).IsEmpty());
+        Assert.Equal(2, line.Size); // 位置未动：HQ ＋ 首次部署的单位
         Assert.Empty(recorder.Updates);
     }
 
@@ -202,7 +202,7 @@ public class PlayChainUnitTests
         // 零副作用——不部署、不扣费、不发更新、不离手。
         Assert.Equal(PlayResultStatus.Failed, result.Status);
         Assert.Equal(PlayFailureReason.PlayVerificationRejected, result.FailureReason);
-        Assert.True(line.GetInsertionGaps().At(3).IsEmpty());
+        Assert.Equal(2, line.Size); // 位置未动：HQ ＋ 首次部署的单位
         Assert.False(second.TryGetData<UnitStateData>(out _));
         Assert.Empty(recorder.Updates);
         Assert.Contains(second, player.Hand);

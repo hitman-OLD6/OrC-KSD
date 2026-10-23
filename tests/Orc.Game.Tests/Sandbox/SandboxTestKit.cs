@@ -84,11 +84,13 @@ internal static class SandboxTestKit
     public static object? Resolve(Match match, string reference)
         => match.Engine.References.TryResolve(reference, out var value) ? value : null;
 
-    /// <summary>玩家支援线指定索引的空槽（越界/占用＝断言失败）。</summary>
+    /// <summary>玩家支援线指定序号的插入点（序号越界/线已满＝断言失败——测试前置）。</summary>
     public static Orc.Game.Board.FormationGap EmptySupportSlot(Match match, Player player, int index)
     {
-        var slot = match.Battlefield.GetSupportLine(player).GetInsertionGaps()[index];
-        Assert.True(slot.IsEmpty(), $"支援线槽 {index} 应保持空槽（测试前置）。");
+        var gaps = match.Battlefield.GetSupportLine(player).GetInsertionGaps();
+        Assert.InRange(index, 0, gaps.Count - 1);
+        var slot = gaps[index];
+        Assert.True(slot.IsCurrent, $"支援线插入点 {index} 应在当前快照内（测试前置）。");
         return slot;
     }
 

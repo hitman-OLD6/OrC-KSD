@@ -170,7 +170,7 @@ public class MatchOutcomeTests
         Assert.True(unit.GetData<CommandData>().CanMove);
         Assert.True(unit.GetData<CommandData>().CanAttack);
         Assert.Same(unit, oldSlot);
-        Assert.True(newSlot.IsEmpty());
+        Assert.Empty(match.Battlefield.FrontLine.Members); // 移动未发生：前线仍无元素
         Assert.Contains(handUnit, playerA.Hand);
         Assert.Contains(commandCard, playerA.Hand);
         Assert.Equal(beginsAtEnd, bridge.Begins.Count);
