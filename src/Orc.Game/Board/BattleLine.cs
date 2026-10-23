@@ -127,6 +127,7 @@ public sealed class BattleLine
 
         _members.Insert(gap.Ordinal, card);
         _generation++;
+        _gapSnapshot = null; // 元素变化＝快照缓存作废（否则成员回到旧集合时会复用已失效的空隙实例）
         return true;
     }
 
@@ -141,6 +142,7 @@ public sealed class BattleLine
 
         _members.Insert(ordinal, card);
         _generation++;
+        _gapSnapshot = null; // 同上：元素变化即失效
         return true;
     }
 
@@ -154,6 +156,7 @@ public sealed class BattleLine
         }
 
         _generation++;
+        _gapSnapshot = null; // 元素变化即失效
         return true;
     }
 
@@ -163,5 +166,6 @@ public sealed class BattleLine
         ArgumentNullException.ThrowIfNull(card);
         _members.Add(card);
         _generation++;
+        _gapSnapshot = null;
     }
 }

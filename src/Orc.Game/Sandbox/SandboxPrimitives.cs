@@ -712,8 +712,10 @@ public sealed class SandboxPrimitives
     }
 
     /// <summary>
-    /// 槽位解析（线名 ＋ 线内索引）：越界＝<c>slot-out-of-range</c>；解析结果不在该线内＝<c>slot-not-owned</c>。
+    /// 槽位解析（线名 ＋ 线内**插入空隙序号**）：越界＝<c>slot-out-of-range</c>；解析结果不在该线内＝<c>slot-not-owned</c>。
     /// 风险 1 的应对＝在此承担线归属（引擎原子层不校验线归属）。
+    /// <para>越界**不做钳制**：需求为「可指定精确槽位」，静默改落位点会让调用方（MCP/AI）以为落到了请求的位置。
+    /// 有效范围＝0..N（N 个元素共 N+1 个空隙）；满员＝无空隙＝同样 <c>slot-out-of-range</c>。</para>
     /// </summary>
     private bool TryResolveSlot(Player? player, string line, int index, out FormationGap? slot, out string reason)
     {
@@ -730,13 +732,13 @@ public sealed class SandboxPrimitives
             : _match.Battlefield.FrontLine;
 
         var gapList = battleLine.GetInsertionGaps();
-        if (gapList.Count == 0)
+        if (gapList.Count == 0 || index < 0 || index >= gapList.Count)
         {
             reason = SandboxFailure.SlotOutOfRange;
             return false;
         }
 
-        slot = gapList[Math.Min(Math.Max(index, 0), gapList.Count - 1)];
+        slot = gapList[index];
         reason = string.Empty;
         return true;
     }

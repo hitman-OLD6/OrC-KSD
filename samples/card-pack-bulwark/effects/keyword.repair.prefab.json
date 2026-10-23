@@ -19,13 +19,13 @@
         {
           "id": "onMoved",
           "entry": "HandleMovedAsync",
-          "csx": "Func<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleMovedAsync = async (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Game.Cards.UnitCard host) { return; }\n    if (view.Unit is not Orc.Game.Cards.UnitCard unit || !object.ReferenceEquals(unit, host)) { return; }\n\n    var position = unit.GetData<Orc.Game.Cards.UnitStateData>().Position;\n    if (position is not null && position.Name.StartsWith(\"前线\", StringComparison.Ordinal))\n    {\n        await unit.Keywords.RevokeAsync(\"抢修\"); // 位于前线即失去\n    }\n};\n",
+          "csx": "Func<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleMovedAsync = async (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Game.Cards.UnitCard host) { return; }\n    if (view.Unit is not Orc.Game.Cards.UnitCard unit || !object.ReferenceEquals(unit, host)) { return; }\n\n    // 位置模型：有序列表（所在阵线＝UnitStateData.Line）；「在前线」经 csx 可达包装现算（沙箱屏蔽该类型名）。\n    if (Orc.Game.EffectParsing.PositionRules.IsOnFrontLine(unit))\n    {\n        await unit.Keywords.RevokeAsync(\"抢修\"); // 位于前线即失去\n    }\n};\n",
           "version": 1
         },
         {
           "id": "onDeployed",
           "entry": "HandleDeployedAsync",
-          "csx": "Func<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleDeployedAsync = async (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Game.Cards.UnitCard host) { return; }\n    if (view.Unit is not Orc.Game.Cards.UnitCard unit || !object.ReferenceEquals(unit, host)) { return; }\n\n    var position = unit.GetData<Orc.Game.Cards.UnitStateData>().Position;\n    if (position is not null && position.Name.StartsWith(\"前线\", StringComparison.Ordinal))\n    {\n        await unit.Keywords.RevokeAsync(\"抢修\"); // 部署在前线即失去\n    }\n};\n",
+          "csx": "Func<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleDeployedAsync = async (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Game.Cards.UnitCard host) { return; }\n    if (view.Unit is not Orc.Game.Cards.UnitCard unit || !object.ReferenceEquals(unit, host)) { return; }\n\n    // 位置模型：有序列表（所在阵线＝UnitStateData.Line）；「在前线」经 csx 可达包装现算（沙箱屏蔽该类型名）。\n    if (Orc.Game.EffectParsing.PositionRules.IsOnFrontLine(unit))\n    {\n        await unit.Keywords.RevokeAsync(\"抢修\"); // 部署在前线即失去\n    }\n};\n",
           "version": 1
         }
       ]

@@ -332,6 +332,9 @@ public static class GameHooks
     /// <summary>判定器名：推进前置判定（<c>move.frontline-enemy</c>；K3——前线存活敌方）。</summary>
     public const string JudicatorMoveFrontlineEnemy = JudicatorNames.MoveFrontlineEnemy;
 
+    /// <summary>判定器名：部署位置候选判定（<c>deploy.position.candidates</c>；R4a——部署候选经判定器提供）。</summary>
+    public const string JudicatorDeployPositionCandidates = JudicatorNames.DeployPositionCandidates;
+
     /// <summary>判定器名：抑制资格判定（<c>inhibit.leg.eligibility</c>；词条经 judicatorWrappers 自注册改写）。</summary>
     public const string JudicatorInhibitLegEligibility = JudicatorNames.InhibitLegEligibility;
 
@@ -362,7 +365,7 @@ public static class GameHooks
     /// <summary>判定器名：归属判定（<c>unit.side</c>；通用原子判定——是否同一归属）。</summary>
     public const string JudicatorUnitSide = JudicatorNames.UnitSide;
 
-    /// <summary>判定器名全量（27 条；稳定序＝定义序）。</summary>
+    /// <summary>判定器名全量（28 条；稳定序＝定义序）。</summary>
     public static IReadOnlyList<string> JudicatorNameList { get; } = new[]
     {
         JudicatorCostCheck, JudicatorCounterUse, JudicatorMoveRecheck, JudicatorAttackRecheck, JudicatorActionInput,
@@ -371,6 +374,7 @@ public static class GameHooks
         JudicatorCombatTargetLegal, JudicatorCombatRange, JudicatorCombatGuardEligibility, JudicatorCombatInterception,
         JudicatorCombatCounterEligibility, JudicatorCombatAmbushCondition,
         JudicatorMoveLegEligibility, JudicatorAttackLegEligibility, JudicatorMoveFrontlineEnemy,
+        JudicatorDeployPositionCandidates,
         JudicatorInhibitLegEligibility,
         JudicatorEffectTargetResolve,
         JudicatorPointSlotIncrement, JudicatorPointSlotGain, JudicatorPointSlotLose,
@@ -378,8 +382,9 @@ public static class GameHooks
         JudicatorUnitAdjacent, JudicatorUnitTypeMatch, JudicatorUnitSide,
     };
 
-    /// <summary>判定器名装配面：21 条内置（5 条验证类＋6 条交战类＋3 条动作资格类＋1 条效果选靶类＋5 条资源类
-    /// ＋1 条目标候选合法性〔S2 提入生产装配〕）由 <c>Match.Initialize</c> 固定注册段注册；1 条示范类（DeckTopTag）经外部装配段（<c>judicatorAssembly</c>）可选注入。</summary>
+    /// <summary>判定器名装配面：27 条内置（5 条验证类＋6 条交战类＋3 条动作资格类＋1 条效果选靶类＋5 条资源类
+    /// ＋1 条目标候选合法性〔S2 提入生产装配〕＋1 条部署位置候选〔R4a〕）由 <c>Match.Initialize</c> 固定注册段注册；
+    /// 1 条示范类（DeckTopTag）经外部装配段（<c>judicatorAssembly</c>）可选注入。</summary>
     public static IReadOnlyList<string> BuiltInJudicatorNames { get; } = new[]
     {
         JudicatorCostCheck, JudicatorCounterUse, JudicatorMoveRecheck, JudicatorAttackRecheck, JudicatorActionInput,
@@ -387,6 +392,7 @@ public static class GameHooks
         JudicatorCombatTargetLegal, JudicatorCombatRange, JudicatorCombatGuardEligibility, JudicatorCombatInterception,
         JudicatorCombatCounterEligibility, JudicatorCombatAmbushCondition,
         JudicatorMoveLegEligibility, JudicatorAttackLegEligibility, JudicatorMoveFrontlineEnemy,
+        JudicatorDeployPositionCandidates,
         JudicatorInhibitLegEligibility,
         JudicatorEffectTargetResolve,
         JudicatorPointSlotIncrement, JudicatorPointSlotGain, JudicatorPointSlotLose,

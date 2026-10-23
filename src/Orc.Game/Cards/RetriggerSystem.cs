@@ -182,12 +182,15 @@ public sealed class RetriggerSystem
 
         try
         {
-            if (!unit.TryGetData<UnitStateData>(out var state) || state.Line is null)
+            if (!unit.TryGetData<UnitStateData>(out var state) || state.Line is not { } line)
             {
                 return; // 防御（接收侧已校验「在场存活」）：非在场＝无操作
             }
 
-            await unit.InvokeDeployKeywordAsync(unit.Owner, null, ct);
+            // 位置上下文＝当前快照中「该单位所在位置序号」的插入点（现取现用；Ordinal 即位置序号）。
+            // 位置模型重构时此处曾退化为 null，导致重放上下文丢失位置信息（Slot 无对应物≠可以不给位置）。
+            var position = line.GetInsertionGaps().FirstOrDefault(gap => gap.Ordinal == line.IndexOf(unit));
+            await unit.InvokeDeployKeywordAsync(unit.Owner, position, ct);
         }
         finally
         {
