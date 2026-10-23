@@ -248,7 +248,7 @@ internal sealed class CardServiceSceneEffect : ActiveEffect<CardServiceCastView>
                     // ③ 销毁（杀＋card.destroyed＋资源清理——配套销毁面）
                     await Engine!.DestroyCard(source);
                     // ④ 放回原位置（统一放置面——同槽位）
-                    LastResult = await service.PlaceToSupportLineAsync(newCard, owner, slot.GetInsertionGaps()[0], ct);
+                    LastResult = await service.PlaceToSupportLineAsync(newCard, owner, slot.GetInsertionGaps().At(0), ct);
                     break;
                 }
 

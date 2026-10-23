@@ -67,7 +67,7 @@ public class CommandUpdateTests
         var target = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.WeakId, 0);
         CommandTestKit.Activate(attacker);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
-        var targetSlot = match.Battlefield.FrontLine.GetInsertionGaps()[0];
+        var targetSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
 
         // 发射时点探针：card.died 到达时死亡状态已就绪（消费者查询不到半死状态）。
         var probes = new List<(bool SlotFreed, bool Destroyed, bool LineCleared)>();
@@ -142,7 +142,7 @@ public class CommandUpdateTests
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         using var recorder = new UpdateRecorder(match.Engine);
 
-        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps()[3].Ref);
+        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps().At(3).Ref);
 
         // 移动纯净性：unit.position.changed ＋ 收尾扣行动费的 point.changed（E1-25 后续）；不发 card.died / card.played / turn 类。
         Assert.Equal(CommandResultStatus.Success, result.Status);

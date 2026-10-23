@@ -141,7 +141,7 @@ public class MatchHistoryReadTests
         var service = match.CardService;
         Assert.True(service.TryResolveDefinitionId(diedCard, out var definitionId));
 
-        var target = match.Battlefield.GetSupportLine(playerA).GetInsertionGaps()[1]; // 转换目标位置（原位置——已被死亡链释放为空槽）
+        var target = match.Battlefield.GetSupportLine(playerA).GetInsertionGaps().At(1); // 转换目标位置（原位置——已被死亡链释放为空槽）
         var result = await service.CreateAndPlaceToSupportLineAsync(definitionId!, playerA, target);
 
         // 组合断言：新实例按定义就位、位置正确

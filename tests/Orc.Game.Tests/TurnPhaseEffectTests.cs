@@ -72,8 +72,8 @@ public class TurnPhaseEffectTests
         await match.Initialize();
         var playerA = match.Players[0];
         var unit = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
-        var originalSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1];
-        var displacedSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps()[3];
+        var originalSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1);
+        var displacedSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(3);
 
         // 模拟「被效果临时移位」：单位从原槽移到另一空槽（真实对象、真实槽位变化）。
         originalSlot.Line?.TryRemove(unit);

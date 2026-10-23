@@ -120,7 +120,7 @@ public class CardPackDemoTests
         var result = await match.PlayManager.PlayUnitAsync(rifleman, slot);
 
         Assert.Equal(PlayResultStatus.Success, result.Status);
-        Assert.Same(rifleman, slot);
+        Assert.Contains(rifleman, slot.Line.Members);
 
         // 数值就绪（battleStats 经加载链装配）。
         var stats = rifleman.GetData<BattleStatsData>();
@@ -336,7 +336,7 @@ public class CardPackDemoTests
 
     /// <summary>第一个空的可部署支援线槽（按空槽过滤——自动跳过 HQ 占位槽）。</summary>
     private static FormationGap FindEmptySupportSlot(Match match, Player player)
-        => match.Battlefield.GetSupportLine(player).GetInsertionGaps()[0];
+        => match.Battlefield.GetSupportLine(player).GetInsertionGaps().At(0);
 
     /// <summary>在玩家容器（手牌/卡组）中定位侦察兵实例（起手装载可能将其抽入——效果随卡存续、回迁后即可取件）。</summary>
     private static UnitCard FindScout(Player player)

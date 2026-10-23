@@ -86,7 +86,7 @@ public class DeathrattleAndRetriggerTests
         var playerB = match.Players[1];
 
         var victim = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.WeakId, 1); // 攻 1 / 防 2
-        var victimSlot = match.Battlefield.GetSupportLine(playerB).GetInsertionGaps()[1];
+        var victimSlot = match.Battlefield.GetSupportLine(playerB).GetInsertionGaps().At(1);
 
         // 前置：同卡其它词条（行为态可查证据）＋一项修饰（修饰仍生效证据）＋一项并存效果（效果仍装载证据）。
         Assert.True(await victim.Keywords.GrantAsync(KeywordIds.Forecast));
@@ -291,7 +291,7 @@ public class DeathrattleAndRetriggerTests
         unit.AddEffect(new DeployLogicProbeEffect(unit, "A", view => { order.Add("A"); views.Add(view); return Task.CompletedTask; }));
         unit.AddEffect(new DeployLogicProbeEffect(unit, "B", view => { order.Add("B"); views.Add(view); return Task.CompletedTask; }));
 
-        var slot = match.Battlefield.GetSupportLine(player).GetInsertionGaps()[1];
+        var slot = match.Battlefield.GetSupportLine(player).GetInsertionGaps().At(1);
         var joined = await match.PlayManager.JoinUnitAsync(unit, slot);
         Assert.Equal(PlayResultStatus.Success, joined.Status);
         order.Clear();
@@ -334,7 +334,7 @@ public class DeathrattleAndRetriggerTests
         unit.AddEffect(new DeployLogicProbeEffect(unit, "A", _ => { order.Add("A"); return Task.CompletedTask; }));
         unit.AddEffect(new DeployLogicProbeEffect(unit, "B", _ => throw new InvalidOperationException("重放爆炸（测试）")));
         unit.AddEffect(new DeployLogicProbeEffect(unit, "C", _ => { order.Add("C"); return Task.CompletedTask; }));
-        await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.GetSupportLine(player).GetInsertionGaps()[1]);
+        await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.GetSupportLine(player).GetInsertionGaps().At(1));
 
         // 逐条异常隔离（记录并继续）——单个效果异常不阻断后续效果。
         var accepted = await RetriggerRules.RequestDeployAsync(unit);
@@ -359,7 +359,7 @@ public class DeathrattleAndRetriggerTests
         played.AddEffect(new DeployLogicProbeEffect(played, "乙", _ => { order.Add("乙"); return Task.CompletedTask; }));
 
         // 打出（部署链①段）。
-        var playResult = await match.PlayManager.PlayUnitAsync(played, match.Battlefield.GetSupportLine(playerA).GetInsertionGaps()[1]);
+        var playResult = await match.PlayManager.PlayUnitAsync(played, match.Battlefield.GetSupportLine(playerA).GetInsertionGaps().At(1));
         Assert.Equal(PlayResultStatus.Success, playResult.Status);
         Assert.Equal(new[] { "甲", "乙" }, order);
 

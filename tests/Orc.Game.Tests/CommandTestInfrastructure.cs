@@ -177,7 +177,7 @@ internal static class CommandTestKit
 
     /// <summary>准备单位到前线指定槽（归属＝player——前线共享）。</summary>
     public static Task<UnitCard> PrepareOnFrontAsync(Match match, Player player, string id, int index)
-        => PrepareUnitAsync(match, player, id, match.Battlefield.FrontLine.GetInsertionGaps()[index]);
+        => PrepareUnitAsync(match, player, id, match.Battlefield.FrontLine.GetInsertionGaps().At(index));
 
     /// <summary>“激活”单位（置两 bool——模拟本回合可行动状态；供不经回合恢复的用例）。</summary>
     public static void Activate(UnitCard unit, bool canMove = true, bool canAttack = true)

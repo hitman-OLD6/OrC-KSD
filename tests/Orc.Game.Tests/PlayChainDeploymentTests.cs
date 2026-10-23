@@ -34,7 +34,7 @@ public class PlayChainDeploymentTests
         unit.AddEffect(new DeployLogicProbeEffect(unit, "B", view => { order.Add("B"); views.Add(view); return Task.CompletedTask; }));
         unit.AddEffect(new DeployLogicProbeEffect(unit, "C", view => { order.Add("C"); views.Add(view); return Task.CompletedTask; }));
 
-        var result = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps()[1]);
+        var result = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps().At(1));
 
         // 按注入/执行顺序 A→B→C 触发（顺序可观测）；触发上下文＝被部署单位与目标槽位。
         Assert.Equal(PlayResultStatus.Success, result.Status);
@@ -42,7 +42,7 @@ public class PlayChainDeploymentTests
         Assert.All(views, view =>
         {
             Assert.Same(unit, view.Card);
-            Assert.Same(line.GetInsertionGaps()[1], view.Position);
+            Assert.Same(line.GetInsertionGaps().At(1), view.Position);
         });
     }
 
@@ -56,10 +56,10 @@ public class PlayChainDeploymentTests
         var line = match.Battlefield.PlayerASupportLine;
 
         // 无部署效果＝空转、仍继续单位化与扣费（部署不因此失败）。
-        var result = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps()[1]);
+        var result = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps().At(1));
 
         Assert.Equal(PlayResultStatus.Success, result.Status);
-        Assert.Same(unit, line.GetInsertionGaps()[1]);
+        Assert.Same(unit, line.GetInsertionGaps().At(1));
         Assert.Equal(0, player.Points);
     }
 
@@ -78,12 +78,12 @@ public class PlayChainDeploymentTests
         unit.AddEffect(new DeployLogicProbeEffect(unit, "C", _ => { order.Add("C"); return Task.CompletedTask; }));
         using var recorder = new UpdateRecorder(match.Engine);
 
-        var result = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps()[1]);
+        var result = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps().At(1));
 
         // 单个部署效果异常＝沿用引擎异常隔离（记录并继续）：不阻断部署链与后续效果。
         Assert.Equal(PlayResultStatus.Success, result.Status);
         Assert.Equal(new[] { "A", "C" }, order);
-        Assert.Same(unit, line.GetInsertionGaps()[1]);
+        Assert.Same(unit, line.GetInsertionGaps().At(1));
         Assert.Equal(
             new[]
             {
@@ -103,7 +103,7 @@ public class PlayChainDeploymentTests
         await match.Initialize();
         var player = match.Players[0];
         var unit = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId); // 不加载（来源不问、归属不要求）
-        var front = match.Battlefield.FrontLine.GetInsertionGaps()[0];
+        var front = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
         var fired = new List<string>();
         unit.AddEffect(new DeployLogicProbeEffect(unit, "部署词条", _ => { fired.Add("部署词条"); return Task.CompletedTask; }));
         using var recorder = new UpdateRecorder(match.Engine);
@@ -128,7 +128,7 @@ public class PlayChainDeploymentTests
         var match = PlayChainTestKit.CreatePlayMatch();
         await match.Initialize();
         var unit = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId);
-        var occupied = match.Battlefield.FrontLine.GetInsertionGaps()[1];
+        var occupied = match.Battlefield.FrontLine.GetInsertionGaps().At(1);
         using var recorder = new UpdateRecorder(match.Engine);
 
         var result = await match.PlayManager.JoinUnitAsync(unit, occupied);
@@ -148,9 +148,9 @@ public class PlayChainDeploymentTests
         var unit = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId);
         var front = match.Battlefield.FrontLine;
 
-        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(unit, front.GetInsertionGaps()[0])).Status);
+        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(unit, front.GetInsertionGaps().At(0))).Status);
         using var recorder = new UpdateRecorder(match.Engine);
-        var again = await match.PlayManager.JoinUnitAsync(unit, front.GetInsertionGaps()[1]);
+        var again = await match.PlayManager.JoinUnitAsync(unit, front.GetInsertionGaps().At(1));
 
         Assert.Equal(PlayResultStatus.Failed, again.Status);
         Assert.Equal(PlayFailureReason.UnitAlreadyUnitized, again.FailureReason);

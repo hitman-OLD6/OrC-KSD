@@ -16,7 +16,7 @@ public sealed class TargetingRulesTests
         var match = CommandTestKit.CreateCommandMatch(bridge);
         await match.Initialize();
         var unit = await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[0], CommandTestKit.InfantryId, match.Battlefield.FrontLine.GetInsertionGaps()[0]);
+            match, match.Players[0], CommandTestKit.InfantryId, match.Battlefield.FrontLine.GetInsertionGaps().At(0));
         CommandTestKit.Activate(unit);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
@@ -45,10 +45,10 @@ public sealed class TargetingRulesTests
         var match = CommandTestKit.CreateCommandMatch(bridge);
         await match.Initialize();
         var unit = await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[0], CommandTestKit.InfantryId, match.Battlefield.FrontLine.GetInsertionGaps()[0]);
+            match, match.Players[0], CommandTestKit.InfantryId, match.Battlefield.FrontLine.GetInsertionGaps().At(0));
         CommandTestKit.Activate(unit);
         await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[1], CommandTestKit.InfantryId, match.Battlefield.PlayerBSupportLine.GetInsertionGaps()[1]);
+            match, match.Players[1], CommandTestKit.InfantryId, match.Battlefield.PlayerBSupportLine.GetInsertionGaps().At(1));
 
         var hits = 0;
         var enemy = CommandTestKit.AllUnitsOf(match)
@@ -72,11 +72,11 @@ public sealed class TargetingRulesTests
         var match = CommandTestKit.CreateCommandMatch(bridge);
         await match.Initialize();
         var viewer = await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[0], CommandTestKit.InfantryId, match.Battlefield.FrontLine.GetInsertionGaps()[0]);
+            match, match.Players[0], CommandTestKit.InfantryId, match.Battlefield.FrontLine.GetInsertionGaps().At(0));
         await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[1], CommandTestKit.InfantryId, match.Battlefield.PlayerBSupportLine.GetInsertionGaps()[1]);
+            match, match.Players[1], CommandTestKit.InfantryId, match.Battlefield.PlayerBSupportLine.GetInsertionGaps().At(1));
         await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[1], CommandTestKit.InfantryId, match.Battlefield.PlayerBSupportLine.GetInsertionGaps()[0]);
+            match, match.Players[1], CommandTestKit.InfantryId, match.Battlefield.PlayerBSupportLine.GetInsertionGaps().At(0));
 
         var hits = 0;
         foreach (var enemy in CommandTestKit.AllUnitsOf(match).Where(u => ReferenceEquals(u.Owner, match.Players[1])))

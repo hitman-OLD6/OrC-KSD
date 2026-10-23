@@ -75,7 +75,7 @@ internal static class DiyExampleKit
     }
 
     internal static FormationGap FindEmptySupportSlot(Match match, Player player)
-        => match.Battlefield.GetSupportLine(player).GetInsertionGaps()[0];
+        => match.Battlefield.GetSupportLine(player).GetInsertionGaps().At(0);
 
     internal static string FindRepoRoot()
     {

@@ -404,7 +404,7 @@ public class JudicatorCombatLegalityTests
         Assert.Equal(new object[] { false }, entry.Invoke(new object[] { attacker, ghost.Ref }));
 
         // 未知载体类型（槽位引用）＝false（不异常）。
-        var slotRef = match.Battlefield.FrontLine.GetInsertionGaps()[0].Ref;
+        var slotRef = match.Battlefield.FrontLine.GetInsertionGaps().At(0).Ref;
         Assert.Equal(new object[] { false }, entry.Invoke(new object[] { attacker, slotRef }));
 
         // 对照：合法目标引用＝true（判定器真实求值——非恒假）。
@@ -427,8 +427,8 @@ public class JudicatorCombatLegalityTests
         var enemyFighter = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.FighterId, 0);
         var enemyOnFront = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 1);
         var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
-        var enemySupportSlot = match.Battlefield.GetSupportLine(playerB).GetInsertionGaps()[2];
-        var enemyFrontSlot = match.Battlefield.FrontLine.GetInsertionGaps()[1];
+        var enemySupportSlot = match.Battlefield.GetSupportLine(playerB).GetInsertionGaps().At(2);
+        var enemyFrontSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(1);
 
         // 默认名恒可解析（固定内置注册段——无条件可用）。
         Assert.NotNull(match.Judicators.Resolve(JudicatorNames.CombatTargetLegal));

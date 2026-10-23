@@ -215,7 +215,7 @@ public class CommandCombatTests
         CommandTestKit.Activate(attacker);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         using var recorder = new UpdateRecorder(match.Engine);
-        var targetSlot = match.Battlefield.FrontLine.GetInsertionGaps()[0];
+        var targetSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
 
         var result = await CommandTestKit.RunCommandAsync(match, bridge, attacker, target.Ref);
 
@@ -297,7 +297,7 @@ public class CommandCombatTests
         Assert.Equal(30, mega.GetData<UnitStateData>().Defense);
         Assert.Equal(MatchState.Ended, match.State);
         Assert.Same(playerA, match.Winner);
-        Assert.Same(enemyHq, match.Battlefield.PlayerBSupportLine.GetInsertionGaps()[0]); // HQ 占位不变（占位者＝HQ 实体）
+        Assert.Same(enemyHq, match.Battlefield.PlayerBSupportLine.GetInsertionGaps().At(0)); // HQ 占位不变（占位者＝HQ 实体）
         Assert.Equal(0, playerA.Points); // 当次收尾照常：扣费恰一次
         Assert.False(mega.GetData<CommandData>().CanAttack); // 清位照常
         Assert.False(mega.GetData<CommandData>().CanMove);

@@ -144,7 +144,7 @@ public class CommandRulesTests
         await match.EndTurn(); // → 玩家 A 回合（回合同步恢复：两 bool＝true；槽 2＝2 点）
 
         // 动作 1：移动（坦克仅清 CanMove）。
-        var moveResult = await CommandTestKit.RunCommandAsync(match, bridge, tank, match.Battlefield.FrontLine.GetInsertionGaps()[0].Ref);
+        var moveResult = await CommandTestKit.RunCommandAsync(match, bridge, tank, match.Battlefield.FrontLine.GetInsertionGaps().At(0).Ref);
         Assert.Equal(CommandResultStatus.Success, moveResult.Status);
         Assert.False(tank.GetData<CommandData>().CanMove);
         Assert.True(tank.GetData<CommandData>().CanAttack); // 双动：独立清位、互不影响
@@ -171,7 +171,7 @@ public class CommandRulesTests
         CommandTestKit.Activate(artillery);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
-        var moveResult = await CommandTestKit.RunCommandAsync(match, bridge, artillery, match.Battlefield.FrontLine.GetInsertionGaps()[0].Ref);
+        var moveResult = await CommandTestKit.RunCommandAsync(match, bridge, artillery, match.Battlefield.FrontLine.GetInsertionGaps().At(0).Ref);
 
         // 二选一：非坦克（炮兵）执行移动后，另一动作同被清（禁止再攻击）。
         Assert.Equal(CommandResultStatus.Success, moveResult.Status);
@@ -349,7 +349,7 @@ public class CommandRulesTests
         Assert.True(match.CommandManager.IsUnitGuarded(y)); // 入场（Join）触达维护
         Assert.True(match.CommandManager.IsHqGuarded(playerA)); // HQ 两侧任一邻位：H（槽 1）→ HQ 获守护
         CommandTestKit.Activate(h);
-        var moveResult = await CommandTestKit.RunCommandAsync(match, bridge, h, match.Battlefield.FrontLine.GetInsertionGaps()[0].Ref);
+        var moveResult = await CommandTestKit.RunCommandAsync(match, bridge, h, match.Battlefield.FrontLine.GetInsertionGaps().At(0).Ref);
         Assert.Equal(CommandResultStatus.Success, moveResult.Status);
         Assert.False(match.CommandManager.IsUnitGuarded(y)); // 守护者移走（移动触达维护）→ 失去
         Assert.False(match.CommandManager.IsHqGuarded(playerA)); // HQ 无守护源（G2 死、H 走）→ 不获

@@ -28,7 +28,7 @@ public class P2ActionFamilyTests
         var unit = await CommandTestKit.PrepareOnFrontAsync(match, player, CommandTestKit.InfantryId, 0);
         CommandTestKit.Activate(unit);
 
-        var support = match.Battlefield.GetSupportLine(player).GetInsertionGaps()[0];
+        var support = match.Battlefield.GetSupportLine(player).GetInsertionGaps().At(0);
         var points = player.Points;
         using var recorder = new UpdateRecorder(match.Engine);
 
@@ -63,9 +63,9 @@ public class P2ActionFamilyTests
         Assert.Equal(CommandBlockReason.Suppressed, availability.Move.BlockReason);
 
         // 效果移动不受压制阻断（动作本身零压制判定）。
-        var destination = match.Battlefield.GetSupportLine(player).GetInsertionGaps()[0];
+        var destination = match.Battlefield.GetSupportLine(player).GetInsertionGaps().At(0);
         Assert.True(await match.CommandManager.MoveUnitAsync(unit, destination));
-        Assert.Same(destination, unit.GetData<UnitStateData>().Line);
+        Assert.Same(destination.Line, unit.GetData<UnitStateData>().Line);
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public class P2ActionFamilyTests
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         var points = player.Points;
 
-        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps()[0].Ref);
+        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps().At(0).Ref);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(points - unit.Modifiers.GetEffectiveValue(CardStatFields.OperateCost), player.Points);

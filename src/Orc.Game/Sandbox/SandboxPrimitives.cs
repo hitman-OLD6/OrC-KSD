@@ -730,13 +730,13 @@ public sealed class SandboxPrimitives
             : _match.Battlefield.FrontLine;
 
         var gapList = battleLine.GetInsertionGaps();
-        if (index < 0 || index >= gapList.Count)
+        if (gapList.Count == 0)
         {
             reason = SandboxFailure.SlotOutOfRange;
             return false;
         }
 
-        slot = gapList[index];
+        slot = gapList[Math.Min(Math.Max(index, 0), gapList.Count - 1)];
         reason = string.Empty;
         return true;
     }

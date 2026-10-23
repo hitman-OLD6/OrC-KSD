@@ -438,11 +438,11 @@ public class CovertMechanismTests
         recorder.Clear();
 
         // 移动（支援线 → 前线空槽）：成功且解密行为不发生。
-        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps()[0].Ref);
+        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps().At(0).Ref);
         Assert.Equal(CommandResultStatus.Success, result.Status);
 
         Assert.True(CovertRules.IsCovert(unit)); // 仍隐蔽
-        Assert.Same(unit, match.Battlefield.FrontLine.GetInsertionGaps()[0]); // 移动已发生
+        Assert.Same(unit, match.Battlefield.FrontLine.GetInsertionGaps().At(0)); // 移动已发生
         Assert.DoesNotContain(recorder.Updates, u => u.Type == GameUpdates.UnitRevealed);
     }
 
@@ -542,7 +542,7 @@ public class CovertMechanismTests
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
         // 部署（部署链收尾发起同伴选择）：隐蔽友方不可被选为同伴（候选剔除）；强行提交被拒。
-        var task = match.PlayManager.PlayUnitAsync(pincer, supportLine.GetInsertionGaps()[3]);
+        var task = match.PlayManager.PlayUnitAsync(pincer, supportLine.GetInsertionGaps().At(3));
         var (description, responder) = await bridge.WaitForNextBeginAsync();
         Assert.DoesNotContain(covertFriend.Ref, description.AllowedTargets);
         Assert.Contains(plainFriend.Ref, description.AllowedTargets);
@@ -581,7 +581,7 @@ public class CovertMechanismTests
 
         // 隐蔽单位自己部署钳击：作为来源不受限（可选他人为同伴——交互照常发起）；
         // 候选面仍剔除其他隐蔽单位（只有普通友方可选）。
-        var task = match.PlayManager.PlayUnitAsync(covertPincer, supportLine.GetInsertionGaps()[3]);
+        var task = match.PlayManager.PlayUnitAsync(covertPincer, supportLine.GetInsertionGaps().At(3));
         var (description, responder) = await bridge.WaitForNextBeginAsync();
         Assert.DoesNotContain(covertFriend.Ref, description.AllowedTargets);
         Assert.Contains(plainFriend.Ref, description.AllowedTargets);
@@ -614,11 +614,11 @@ public class CovertMechanismTests
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
         // 合法候选为空（隐蔽被剔）＝不发起选择、不形成、部署正常完成。
-        var result = await match.PlayManager.PlayUnitAsync(pincer, supportLine.GetInsertionGaps()[3]);
+        var result = await match.PlayManager.PlayUnitAsync(pincer, supportLine.GetInsertionGaps().At(3));
         Assert.Equal(PlayResultStatus.Success, result.Status);
         Assert.Empty(bridge.Begins);
         Assert.False(match.CommandManager.Pincers.IsPaired(pincer));
-        Assert.Same(pincer, supportLine.GetInsertionGaps()[3]);
+        Assert.Same(pincer, supportLine.GetInsertionGaps().At(3));
     }
 
     // ---------- 攻击候选不受影响：隐蔽单位出现在攻击候选面（可被攻击） ----------

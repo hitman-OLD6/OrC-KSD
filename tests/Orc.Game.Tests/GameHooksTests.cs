@@ -71,8 +71,8 @@ public class GameHooksTests
         using var recorder = new UpdateRecorder(engine);
         var unit = new UnitCard(engine, new CardDefinition("单位", 1, 2, 3, 4, faction: Faction.Germany, rarity: Rarity.Standard));
         var line = new BattleLine(4);
-        var oldPosition = line.GetInsertionGaps()[0];
-        var newPosition = line.GetInsertionGaps()[1];
+        var oldPosition = line.GetInsertionGaps().At(0);
+        var newPosition = line.GetInsertionGaps().At(1);
 
         await GameUpdates.EmitCardDied(engine, unit);
         await GameUpdates.EmitUnitJoined(engine, unit, new BoardPosition(oldPosition.Line, oldPosition.Ordinal));

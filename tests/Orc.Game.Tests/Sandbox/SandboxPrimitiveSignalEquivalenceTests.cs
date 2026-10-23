@@ -31,7 +31,7 @@ public sealed class SandboxPrimitiveSignalEquivalenceTests
         // 效果侧路径：创建 → PlaceToSupportLineAsync（效果运行期使用的同一原子组合）。
         var effectCard = await effectMatch.CardService.CreateAsync(SandboxTestKit.UnitId, effectPlayer);
         var placed = await effectMatch.CardService.PlaceToSupportLineAsync(
-            (Orc.Game.Cards.UnitCard)effectCard, effectPlayer, effectMatch.Battlefield.GetSupportLine(effectPlayer).GetInsertionGaps()[4]);
+            (Orc.Game.Cards.UnitCard)effectCard, effectPlayer, effectMatch.Battlefield.GetSupportLine(effectPlayer).GetInsertionGaps().At(4));
         Assert.True(placed.IsSuccess);
 
         // 逐条一致（含 CreateAsync 的 card.load）：不多不少。
@@ -42,10 +42,10 @@ public sealed class SandboxPrimitiveSignalEquivalenceTests
         // 状态面同样一致（不在场单位 → 在场单位，位置＝指定槽）。
         var primitiveCard = (UnitCard)SandboxTestKit.Resolve(primitiveMatch, primitiveResult.Ref!)!;
         Assert.Same(
-            primitiveMatch.Battlefield.GetSupportLine(primitivePlayer).GetInsertionGaps()[4],
+            primitiveMatch.Battlefield.GetSupportLine(primitivePlayer).GetInsertionGaps().At(4),
             primitiveCard.GetData<UnitStateData>().Line);
         Assert.Same(
-            effectMatch.Battlefield.GetSupportLine(effectPlayer).GetInsertionGaps()[4],
+            effectMatch.Battlefield.GetSupportLine(effectPlayer).GetInsertionGaps().At(4),
             ((Orc.Game.Cards.UnitCard)effectCard).GetData<UnitStateData>().Line);
     }
 }

@@ -69,7 +69,7 @@ public class MatchOutcomeTests
         Assert.Equal(MatchState.Ended, match.State);
         Assert.Same(playerA, match.Winner);
         Assert.Equal(0, playerB.HqHealth);
-        Assert.Same(playerB.Hq, match.Battlefield.PlayerBSupportLine.GetInsertionGaps()[0]);
+        Assert.Same(playerB.Hq, match.Battlefield.PlayerBSupportLine.GetInsertionGaps().At(0));
         Assert.Equal(0, playerA.Points);
         Assert.False(striker.GetData<CommandData>().CanAttack);
         Assert.False(striker.GetData<CommandData>().CanMove);
@@ -134,18 +134,18 @@ public class MatchOutcomeTests
         Assert.Equal(PlayResultStatus.Failed, prePlay.Status);
         Assert.Equal(PlayFailureReason.GameEnded, prePlay.FailureReason);
 
-        var playUnit = await match.PlayManager.PlayUnitAsync(handUnit, match.Battlefield.PlayerASupportLine.GetInsertionGaps()[3]);
+        var playUnit = await match.PlayManager.PlayUnitAsync(handUnit, match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(3));
         Assert.Equal(PlayFailureReason.GameEnded, playUnit.FailureReason);
 
-        var joinUnit = await match.PlayManager.JoinUnitAsync(handUnit, match.Battlefield.PlayerASupportLine.GetInsertionGaps()[3]);
+        var joinUnit = await match.PlayManager.JoinUnitAsync(handUnit, match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(3));
         Assert.Equal(PlayFailureReason.GameEnded, joinUnit.FailureReason);
 
         var playCommand = await match.PlayManager.PlayOrderAsync(commandCard);
         Assert.Equal(PlayFailureReason.GameEnded, playCommand.FailureReason);
 
         // ④移动/攻击流程的触发器级对外入口：直接驱动＝ValidationRejected（零副作用——槽位/状态不变）。
-        var oldSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1];
-        var newSlot = match.Battlefield.FrontLine.GetInsertionGaps()[0];
+        var oldSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1);
+        var newSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
         var moveStream = await match.CommandManager.UnitMoveTrigger.InvokeAsync(
             match.Engine,
             new Dictionary<string, object?>
@@ -277,14 +277,14 @@ public class MatchOutcomeTests
         var state1 = match.State;
         var winner1 = match.Winner;
         var hq1 = match.Players[1].HqHealth;
-        var frontOccupant1 = match.Battlefield.FrontLine.GetInsertionGaps()[0];
+        var frontOccupant1 = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
         var players1 = match.Players.Count;
         var manager1 = match.CommandManager;
 
         var state2 = match.State;
         var winner2 = match.Winner;
         var hq2 = match.Players[1].HqHealth;
-        var frontOccupant2 = match.Battlefield.FrontLine.GetInsertionGaps()[0];
+        var frontOccupant2 = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
         var players2 = match.Players.Count;
         var manager2 = match.CommandManager;
 

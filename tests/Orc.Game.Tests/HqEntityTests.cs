@@ -72,8 +72,8 @@ public class HqEntityTests
         Assert.Contains(playerB.Hq.Ref, report.Attack.Candidates);
 
         // h) 否定（显式）：不存在「槽引用形态的 HQ 目标」产出（不留双承载的必要证据）
-        Assert.DoesNotContain(match.Battlefield.PlayerBSupportLine.GetInsertionGaps()[0].Ref, report.Attack.Candidates);
-        Assert.DoesNotContain(match.Battlefield.PlayerASupportLine.GetInsertionGaps()[0].Ref, report.Attack.Candidates); // 己方 HQ 槽亦不产出
+        Assert.DoesNotContain(match.Battlefield.PlayerBSupportLine.GetInsertionGaps().At(0).Ref, report.Attack.Candidates);
+        Assert.DoesNotContain(match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(0).Ref, report.Attack.Candidates); // 己方 HQ 槽亦不产出
     }
 
     [Fact]
@@ -174,7 +174,7 @@ public class HqEntityTests
         // 不入死亡/销毁链（Q2 语义）：不发 card.died / card.destroyed；不置「已毁」、不清槽位、不注销效果/修饰
         Assert.DoesNotContain(GameUpdates.CardDied, recorder.Types);
         Assert.DoesNotContain(Orc.Core.Updates.CardDestroyed, recorder.Types);
-        Assert.Same(hq, match.Battlefield.PlayerBSupportLine.GetInsertionGaps()[0]); // 占位保留（居中槽）
+        Assert.Same(hq, match.Battlefield.PlayerBSupportLine.GetInsertionGaps().At(0)); // 占位保留（居中槽）
         Assert.Single(hq.Modifiers.All); // 修饰器保留（不因归零清理）
         Assert.IsType<AddModifier>(hq.Modifiers.All[0]);
         Assert.Single(hq.LethalInterventions); // 挂钩保留（挂载物冻结保持）

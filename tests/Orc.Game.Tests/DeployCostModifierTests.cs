@@ -141,7 +141,7 @@ public class DeployCostModifierTests
         Assert.True(responder.Complete(
             description.RequestId,
             TargeterTestKit.Selection(
-                TargeterTestKit.PrimarySlot(description), match.Battlefield.PlayerASupportLine.GetInsertionGaps()[0].Ref)));
+                TargeterTestKit.PrimarySlot(description), match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(0).Ref)));
         var deployed = await task;
 
         Assert.Equal(PlayResultStatus.Success, deployed.Status);

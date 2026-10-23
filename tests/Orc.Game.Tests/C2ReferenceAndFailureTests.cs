@@ -204,7 +204,7 @@ public class C2ReferenceAndFailureTests
         await match.Initialize();
         var playerA = match.Players[0];
 
-        var occupied = match.Battlefield.GetSupportLine(playerA).GetInsertionGaps()[1];
+        var occupied = match.Battlefield.GetSupportLine(playerA).GetInsertionGaps().At(1);
         await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1); // 占位
 
         using var recorder = new UpdateRecorder(match.Engine);

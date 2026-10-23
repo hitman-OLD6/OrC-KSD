@@ -30,7 +30,7 @@ public class CommandSystemTests
         var support = match.Battlefield.PlayerASupportLine;
         var front = match.Battlefield.FrontLine;
 
-        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, front.GetInsertionGaps()[0].Ref);
+        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, front.GetInsertionGaps().At(0).Ref);
 
         // 成功：旧槽移除 → 放入目标空槽（原槽变为空槽）；扣 1 点行动费；两 bool 外层更新（步兵：二选一全清）。
         Assert.Equal(CommandResultStatus.Success, result.Status);
@@ -53,8 +53,8 @@ public class CommandSystemTests
         CommandTestKit.Activate(unit);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         using var recorder = new UpdateRecorder(match.Engine);
-        var oldSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1];
-        var newSlot = match.Battlefield.FrontLine.GetInsertionGaps()[2];
+        var oldSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1);
+        var newSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(2);
 
         var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, newSlot.Ref);
 
@@ -94,7 +94,7 @@ public class CommandSystemTests
             return Task.CompletedTask;
         });
 
-        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps()[0].Ref);
+        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps().At(0).Ref);
 
         Assert.Equal(CommandResultStatus.Success, result.Status);
         var state = Assert.Single(probes);
@@ -117,7 +117,7 @@ public class CommandSystemTests
         CommandTestKit.Activate(unit);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
-        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps()[0].Ref);
+        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps().At(0).Ref);
 
         // 坦克双动：移动仅清 CanMove；CanAttack 保留（两动作独立清位）。
         Assert.Equal(CommandResultStatus.Success, result.Status);
@@ -235,7 +235,7 @@ public class CommandSystemTests
         await match.Initialize();
         // 加入路径不要求归属：构造无主已单位化单位（Owner＝null）。
         var unit = (UnitCard)match.CardLibrary.Instantiate(CommandTestKit.InfantryId);
-        var joinResult = await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.PlayerASupportLine.GetInsertionGaps()[3]); // 槽 3（避开 HQ 占位槽）
+        var joinResult = await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(3)); // 槽 3（避开 HQ 占位槽）
         Assert.Equal(PlayResultStatus.Success, joinResult.Status);
         CommandTestKit.Activate(unit);
 
@@ -324,8 +324,8 @@ public class CommandSystemTests
         var unit = await CommandTestKit.PrepareOnSupportAsync(match, player, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(unit);
         using var recorder = new UpdateRecorder(match.Engine);
-        var oldSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1];
-        var newSlot = match.Battlefield.FrontLine.GetInsertionGaps()[0];
+        var oldSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1);
+        var newSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
 
         // 直接驱动内层移动触发器（越层）：执行段＝槽位变更＋发射更新；「两 bool 不写、费用不扣」——只在外层更新。
         var stream = await match.CommandManager.UnitMoveTrigger.InvokeAsync(
@@ -412,7 +412,7 @@ public class CommandSystemTests
         Assert.Equal(expected, description.AllowedTargets);
         Assert.DoesNotContain(enemyOnSupport.Ref, description.AllowedTargets);
         Assert.DoesNotContain(playerB.Hq.Ref, description.AllowedTargets); // W3-3：HQ 目标＝实体引用（步兵不可达）
-        Assert.DoesNotContain(front.GetInsertionGaps()[0].Ref, description.AllowedTargets); // 移动剔除（前线空槽不作为移动候选）
+        Assert.DoesNotContain(front.GetInsertionGaps().At(0).Ref, description.AllowedTargets); // 移动剔除（前线空槽不作为移动候选）
 
         // 无效目标点击＝选择器终局 Failed → targeter 内部重入（同一选择器）。
         var rejected = responder.Complete(

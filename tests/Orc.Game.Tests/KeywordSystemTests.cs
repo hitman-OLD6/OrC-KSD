@@ -39,7 +39,7 @@ public class KeywordSystemTests
             return Task.CompletedTask;
         });
 
-        var result = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps()[1]);
+        var result = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps().At(1));
 
         Assert.Equal(PlayResultStatus.Success, result.Status);
         var mid = Assert.Single(probes);
@@ -57,7 +57,7 @@ public class KeywordSystemTests
         var player = match.Players[0];
         var unit = await CommandTestKit.InstantiateLoadedAsync(match, player, CommandTestKit.InfantryId, toHand: true);
 
-        var result = await match.PlayManager.PlayUnitAsync(unit, match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);
+        var result = await match.PlayManager.PlayUnitAsync(unit, match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));
 
         // 非闪击单位部署当回合保持 false/false（回合恢复方可行动）。
         Assert.Equal(PlayResultStatus.Success, result.Status);
@@ -75,7 +75,7 @@ public class KeywordSystemTests
         // 闪击仅部署路径生效：加入路径（unit.joined）不置位——保持 false/false。
         var unit = (UnitCard)match.CardLibrary.Instantiate(CommandTestKit.BlitzId);
         await unit.LoadAsync(player);
-        var result = await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.FrontLine.GetInsertionGaps()[0]);
+        var result = await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.FrontLine.GetInsertionGaps().At(0));
 
         Assert.Equal(PlayResultStatus.Success, result.Status);
         Assert.False(unit.GetData<CommandData>().CanMove);
@@ -130,7 +130,7 @@ public class KeywordSystemTests
         await match.EndTurn(); // → A 回合 5（3 点；两 bool 恢复）
 
         // 动作 1：移动（坦克双动：仅清 CanMove）。
-        var move = await CommandTestKit.RunCommandAsync(match, bridge, furyTank, match.Battlefield.FrontLine.GetInsertionGaps()[0].Ref);
+        var move = await CommandTestKit.RunCommandAsync(match, bridge, furyTank, match.Battlefield.FrontLine.GetInsertionGaps().At(0).Ref);
         Assert.Equal(CommandResultStatus.Success, move.Status);
         Assert.False(furyTank.GetData<CommandData>().CanMove);
         Assert.True(furyTank.GetData<CommandData>().CanAttack);

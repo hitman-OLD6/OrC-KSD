@@ -23,9 +23,9 @@ public sealed class KeywordProgramTests
     {
         var bridge = new MockTargeterBridge();
         var (m,u,k) = await Create(new() { Rules = [new() { Rule="move.retreat", Value="1" }] }, bridge:bridge);
-        await m.PlayManager.JoinUnitAsync(u,m.Battlefield.FrontLine.GetInsertionGaps()[0]);
+        await m.PlayManager.JoinUnitAsync(u,m.Battlefield.FrontLine.GetInsertionGaps().At(0));
         CommandTestKit.Activate(u); bridge.CollectScript=CommandTestKit.AllRefsScript(m);
-        var support=m.Battlefield.PlayerASupportLine.GetInsertionGaps()[0];
+        var support=m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(0);
         var points=m.Players[0].Points;
         Assert.Contains(support.Ref,m.CommandManager.GetCommandAvailability(u).Move.Candidates);
         await CommandTestKit.CancelCommandAsync(m,bridge,u);
@@ -41,13 +41,13 @@ public sealed class KeywordProgramTests
     {
         var bridge=new MockTargeterBridge();
         var (m,u,k)=await Create(new(){Rules=[new(){Rule="move.retreat",Value="1"}]},bridge:bridge);
-        await m.PlayManager.JoinUnitAsync(u,m.Battlefield.FrontLine.GetInsertionGaps()[0]);
+        await m.PlayManager.JoinUnitAsync(u,m.Battlefield.FrontLine.GetInsertionGaps().At(0));
         CommandTestKit.Activate(u); bridge.CollectScript=CommandTestKit.AllRefsScript(m);
-        var support=m.Battlefield.PlayerASupportLine.GetInsertionGaps()[0];var points=m.Players[0].Points;
+        var support=m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(0);var points=m.Players[0].Points;
         var task=m.CommandManager.BeginMoveAsync(u);var request=await bridge.WaitForNextBeginAsync();
         await u.Keywords.RevokeAsync(k);
         request.Responder.Complete(request.Description.RequestId,TargeterTestKit.Selection(TargetSlot.DefaultName,support.Ref));
-        Assert.False((await task).IsSuccess);Assert.Same(m.Battlefield.FrontLine.GetInsertionGaps()[0],u.GetData<UnitStateData>().Line);
+        Assert.False((await task).IsSuccess);Assert.Same(m.Battlefield.FrontLine.GetInsertionGaps().At(0),u.GetData<UnitStateData>().Line);
         Assert.Equal(points,m.Players[0].Points);Assert.False(m.CommandManager.GetCommandAvailability(u).Move.CanUse);
     }
     [Fact]
@@ -56,7 +56,7 @@ public sealed class KeywordProgramTests
         var bridge=new MockTargeterBridge();
         var (m,u,k)=await Create(new(){Rules=[new(){Rule="attack.limit",Value="2"}],Handlers=[new(){Event="unit.attack.after",Subject="self",
             When=[new("attacks","gte","2")],Actions=[new(){Op="keyword.remove",Target="self"}]}]},bridge:bridge);
-        await m.PlayManager.JoinUnitAsync(u,m.Battlefield.FrontLine.GetInsertionGaps()[0]);
+        await m.PlayManager.JoinUnitAsync(u,m.Battlefield.FrontLine.GetInsertionGaps().At(0));
         CommandTestKit.Activate(u);bridge.CollectScript=CommandTestKit.AllRefsScript(m);
         var hq=m.Players[1].Hq;var points=m.Players[0].Points;
         await CommandTestKit.CancelCommandAsync(m,bridge,u);
@@ -74,7 +74,7 @@ public sealed class KeywordProgramTests
         foreach(var attack in new[]{false,true})
         {
             var (m,u,_)=await Create(new(){Handlers=[new(){Actions=[A("move.set","1"),A("attack.set",attack?"1":"0")]}]});
-            var result=await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);Assert.Equal(PlayResultStatus.Success,result.Status);
+            var result=await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));Assert.Equal(PlayResultStatus.Success,result.Status);
             Assert.True(u.GetData<CommandData>().CanMove);Assert.Equal(attack,u.GetData<CommandData>().CanAttack);
         }
     }
@@ -86,7 +86,7 @@ public sealed class KeywordProgramTests
             new(){Event="unit.attack.before",When=[new("state.ready","eq","1")],Actions=[new(){Op="buff",Value="3",Temporary=true}]},
             new(){Event="unit.attack.after",When=[new("state.ready","eq","1")],Actions=[A("state.set","0","ready"),A("state.set","0","ticks"),A("emit",key:"keyword.consumed")]}
         ]},3);
-        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);var component=Assert.Single(KeywordProgramRuntime.Components(u));
+        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));var component=Assert.Single(KeywordProgramRuntime.Components(u));
         for(var i=0;i<3;i++)await m.Engine.Emit("turn.start",new Dictionary<string,object?>{{"Player",m.Players[0]}});
         Assert.Equal(1,component.State["ready"]);Assert.Equal(3,component.State["ticks"]);
         await m.Engine.Emit("turn.start",new Dictionary<string,object?>{{"Player",m.Players[0]}});Assert.Equal(3,component.State["ticks"]);
@@ -99,7 +99,7 @@ public sealed class KeywordProgramTests
     public async Task RuleDenialComposesWithRangeAndRevokeRestoresAvailability()
     {
         var (m,u,k)=await Create(new(){Rules=[new(){Rule="move.allowed",Value="0"},new(){Rule="combat.range",Value="1"}]});
-        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);CommandTestKit.Activate(u);
+        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));CommandTestKit.Activate(u);
         var e=await CommandTestKit.PrepareOnSupportAsync(m,m.Players[1],CommandTestKit.InfantryId,1);
         var availability=m.CommandManager.GetCommandAvailability(u);Assert.False(availability.Move.CanUse);Assert.Contains(e.Ref,availability.Attack.Candidates);
         await u.Keywords.RevokeAsync(k);Assert.True(m.CommandManager.GetCommandAvailability(u).Move.CanUse);
@@ -116,7 +116,7 @@ public sealed class KeywordProgramTests
     public async Task PreventDeathOnceRetainsOneDefenseAndLaterDeathStillExecutes()
     {
         var (m,u,_)=await Create(new(){State=new(){{"used",0}},Handlers=[new(){Event="unit.destroy.before",When=[new("state.used","eq","0")],Actions=[A("state.set","1","used"),A("death.cancel"),A("health.set","1")]}]});
-        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);
+        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));
         await EffectRuntime.ResolveFor(u)!.DamageAsync(u,100);
         Assert.False(u.GetData<UnitStateData>().IsDestroyed);Assert.Equal(1,u.Modifiers.GetEffectiveValue(CardStatFields.Defense));
         await EffectRuntime.ResolveFor(u)!.DamageAsync(u,1);Assert.True(u.GetData<UnitStateData>().IsDestroyed);
@@ -131,7 +131,7 @@ public sealed class KeywordProgramTests
             State = new() { { "consulted", 0 } },
             Handlers = [new() { Event = "unit.destroy.before", Actions = [A("state.add", "1", "consulted")] }],
         });
-        await m.PlayManager.PlayUnitAsync(u, m.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);
+        await m.PlayManager.PlayUnitAsync(u, m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));
         var calls = 0;
         m.CommandManager.DeathAction.Handle.Register(
             "测试拦截器",
@@ -148,7 +148,7 @@ public sealed class KeywordProgramTests
 
         Assert.Equal(1, calls);
         Assert.False(u.GetData<UnitStateData>().IsDestroyed);
-        Assert.Same(m.Battlefield.PlayerASupportLine.GetInsertionGaps()[1], u.GetData<UnitStateData>().Line);
+        Assert.Same(m.Battlefield.PlayerASupportLine, u.GetData<UnitStateData>().Line);
         // 拦截器先于内置词条 handler：取消后词条程序全程未被咨询（「任一取消即终止」次序保持）。
         Assert.Equal(0, Assert.Single(KeywordProgramRuntime.Components(u)).State["consulted"]);
 
@@ -160,9 +160,9 @@ public sealed class KeywordProgramTests
     public async Task EffectDisplacementUsesThePortalWithoutPayingOrConsumingActions()
     {
         var (m, u, _) = await Create(new());
-        await m.PlayManager.JoinUnitAsync(u, m.Battlefield.FrontLine.GetInsertionGaps()[0]);
+        await m.PlayManager.JoinUnitAsync(u, m.Battlefield.FrontLine.GetInsertionGaps().At(0));
         CommandTestKit.Activate(u);
-        var support = m.Battlefield.PlayerASupportLine.GetInsertionGaps()[0];
+        var support = m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(0);
         var points = m.Players[0].Points;
 
         // S6/R16：压制只影响「能否被指挥」，不阻断效果移动。
@@ -173,19 +173,19 @@ public sealed class KeywordProgramTests
         Assert.Same(support, u.GetData<UnitStateData>().Line);
         Assert.Equal(points, m.Players[0].Points);
         Assert.True(u.GetData<CommandData>().CanMove);
-        Assert.False(await m.CommandManager.MoveUnitAsync(u, m.Battlefield.FrontLine.GetInsertionGaps()[1]));
+        Assert.False(await m.CommandManager.MoveUnitAsync(u, m.Battlefield.FrontLine.GetInsertionGaps().At(1)));
     }
 
     [Fact]
     public async Task RecordValueIsBoundToEachCreatedCardRatherThanGlobalOrSourceReference()
     {
         var (m,u,_)=await Create(new(){Handlers=[new(){Actions=[A("capture","target.attack","recordedAttack"),new(){Op="create.hand",Key=CommandTestKit.InfantryId,Bindings=new(){{"damage","data.recordedAttack"}}}]}]});
-        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);
+        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));
         var first=m.Players[0].Hand.Single(c=>c.TryGetData<KeywordProgramData>(out _));Assert.Equal(2,first.GetData<KeywordProgramData>().Values["damage"]);
         await EffectRuntime.ResolveFor(u)!.BuffAsync(u,3,0);
         Assert.Equal(2,first.GetData<KeywordProgramData>().Values["damage"]);
         var (other,v,_)=await Create(new(){Handlers=[new(){Actions=[new(){Op="create.hand",Key=CommandTestKit.InfantryId,Bindings=new(){{"damage","7"}}}]}]});
-        await other.PlayManager.PlayUnitAsync(v,other.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);Assert.Equal(2,first.GetData<KeywordProgramData>().Values["damage"]);
+        await other.PlayManager.PlayUnitAsync(v,other.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));Assert.Equal(2,first.GetData<KeywordProgramData>().Values["damage"]);
         Assert.Equal(7,other.Players[0].Hand.Single(c=>c.TryGetData<KeywordProgramData>(out _)).GetData<KeywordProgramData>().Values["damage"]);
     }
     [Fact]
@@ -203,7 +203,7 @@ public sealed class KeywordProgramTests
             new(){Event="unit.attack.before",When=[new("state.ready","eq","1")],Actions=[new(){Op="buff",Value="3",Temporary=true}]},
             new(){Event="unit.attack.after",Actions=[A("state.set","0","ready")]}
         ]},bridge:bridge);
-        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);var enemy=await CommandTestKit.PrepareOnFrontAsync(m,m.Players[1],CommandTestKit.InfantryId,0);
+        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));var enemy=await CommandTestKit.PrepareOnFrontAsync(m,m.Players[1],CommandTestKit.InfantryId,0);
         bridge.CollectScript=CommandTestKit.AllRefsScript(m);CommandTestKit.Activate(u);
         await CommandTestKit.CancelCommandAsync(m,bridge,u);Assert.Equal(1,Assert.Single(KeywordProgramRuntime.Components(u)).State["ready"]);
         var result=await CommandTestKit.RunCommandAsync(m,bridge,u,enemy.Ref);Assert.True(result.IsSuccess);
@@ -214,23 +214,23 @@ public sealed class KeywordProgramTests
     {
         var bridge=new MockTargeterBridge();var (m,u,_)=await Create(new(){Handlers=[new(){Actions=[A("capture","target.attack","loaded","choose.unit")]}]},bridge:bridge);
         var enemy=await CommandTestKit.PrepareOnFrontAsync(m,m.Players[1],CommandTestKit.BeastId,0);bridge.CollectScript=CommandTestKit.AllRefsScript(m);
-        var points=m.Players[0].Points;var play=m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);var pending=await bridge.WaitForNextBeginAsync();pending.Responder.Cancel(pending.Description.RequestId);await play;
+        var points=m.Players[0].Points;var play=m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));var pending=await bridge.WaitForNextBeginAsync();pending.Responder.Cancel(pending.Description.RequestId);await play;
         Assert.Equal(points,m.Players[0].Points);Assert.Contains(u,m.Players[0].Hand);Assert.False(u.TryGetData<UnitStateData>(out _));
-        play=m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);pending=await bridge.WaitForNextBeginAsync();pending.Responder.Complete(pending.Description.RequestId,TargeterTestKit.Selection(TargetSlot.DefaultName,enemy.Ref));
+        play=m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));pending=await bridge.WaitForNextBeginAsync();pending.Responder.Complete(pending.Description.RequestId,TargeterTestKit.Selection(TargetSlot.DefaultName,enemy.Ref));
         Assert.Equal(PlayResultStatus.Success,(await play).Status);Assert.Equal(6,u.GetData<KeywordProgramData>().Values["loaded"]);
     }
     [Fact]
     public async Task TemporaryCopyHasNoSourceKeywordAndOnlyItsHandInstanceExpires()
     {
         var (m,u,k)=await Create(new(){Handlers=[new(){Actions=[new(){Op="copy.hand",Temporary=true}]}]});
-        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);var copy=Assert.Single(m.Players[0].Hand.OfType<CardBase>(),c=>c.Definition==u.Definition);
+        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));var copy=Assert.Single(m.Players[0].Hand.OfType<CardBase>(),c=>c.Definition==u.Definition);
         Assert.False(copy.Keywords.Has(k));await m.EndTurn();Assert.DoesNotContain(copy,m.Players[0].Hand);Assert.False(u.GetData<UnitStateData>().IsDestroyed);
     }
     [Fact]
     public async Task ActiveSkillChecksAndPaysPointsAndAttackOpportunityOnce()
     {
         var (m,u,_)=await Create(new(){Skills=[new(){Id="test",Name="强化",Cost="1",SpendAttack=true,Actions=[A("buff","2")]}]});
-        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);CommandTestKit.Activate(u);var component=Assert.Single(KeywordProgramRuntime.Components(u));
+        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));CommandTestKit.Activate(u);var component=Assert.Single(KeywordProgramRuntime.Components(u));
         Assert.False(component.CanUse("test"));await EffectRuntime.ResolveFor(u)!.GainPointsAsync(u,2);Assert.True(component.CanUse("test"));
         Assert.True(await component.UseAsync("test"));Assert.Equal(1,m.Players[0].Points);Assert.False(await component.UseAsync("test"));Assert.Equal(4,u.Modifiers.GetEffectiveValue(CardStatFields.Attack));
     }
@@ -252,7 +252,7 @@ public sealed class KeywordProgramTests
     {
         var (m,u,k)=await Create(new(){Skills=[new(){Id="extra",Name="额外行动",Cost="0",SpendMove=false,SpendAttack=false,
             Actions=[A("move.set","1"),A("attack.set","1"),new(){Op="keyword.remove",Target="self",Key=""}]}]});
-        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);CommandTestKit.Activate(u,false,false);
+        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));CommandTestKit.Activate(u,false,false);
         var c=Assert.Single(KeywordProgramRuntime.Components(u));Assert.True(await c.UseAsync("extra"));
         Assert.True(u.GetData<CommandData>().CanMove);Assert.True(u.GetData<CommandData>().CanAttack);
         Assert.False(u.Keywords.Has(k));Assert.False(await c.UseAsync("extra"));
@@ -263,7 +263,7 @@ public sealed class KeywordProgramTests
         var (m,u,_)=await Create(new(){State=new(){{"owed",0}},Handlers=[
             new(){Event="unit.destroy.before",Subject="self",When=[new("state.owed","eq","0")],Actions=[A("state.set","1","owed"),new(){Op="death.cancel",Target="self"},new(){Op="health.set",Target="self",Value="1"}]},
             new(){Event="turn.start",Subject="owner",When=[new("state.owed","eq","1")],Actions=[new(){Op="kill",Target="self"}]}]});
-        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);
+        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));
         await EffectRuntime.ResolveFor(u)!.DamageAsync(u,100);
         Assert.False(u.GetData<UnitStateData>().IsDestroyed);Assert.Equal(1,u.Modifiers.GetEffectiveValue(CardStatFields.Defense));
         await m.Engine.Emit("turn.start",new Dictionary<string,object?>{{"Player",m.Players[0]}});
@@ -275,7 +275,7 @@ public sealed class KeywordProgramTests
         const string routed="u_routed_test";
         var (m,u,_,__)=await CreateWithExtra(new(){Handlers=[new(){Event="unit.destroy.before",Subject="self",Actions=[
             new(){Op="death.cancel",Target="self"},new(){Op="replace",Target="self",Key=routed}]}]},UnitDef(routed,"溃军",0,1,1));
-        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);
+        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));
         await EffectRuntime.ResolveFor(u)!.DamageAsync(u,100);
         var occupant=m.Battlefield.PlayerASupportLine.Members[1] as CardBase;
         Assert.NotNull(occupant);Assert.True(m.CardLibrary.TryGetRegisteredId(occupant!.Definition,out var id));Assert.Equal(routed,id);
@@ -287,7 +287,7 @@ public sealed class KeywordProgramTests
         var bridge=new MockTargeterBridge();
         var (m,u,_,__)=await CreateWithExtra(new(){Handlers=[new(){Event="unit.attack.after",Subject="self",Actions=[
             new(){Op="replace",Target="attack.target",Key=routed}]}]},UnitDef(routed,"溃军",0,1,1),bridge);
-        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);
+        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));
         var enemy=await CommandTestKit.PrepareOnFrontAsync(m,m.Players[1],CommandTestKit.InfantryId,0);
         await EffectRuntime.ResolveFor(enemy)!.BuffAsync(enemy,0,5);
         CommandTestKit.Activate(u);bridge.CollectScript=CommandTestKit.AllRefsScript(m);
@@ -300,7 +300,7 @@ public sealed class KeywordProgramTests
     {
         var (m,u,k)=await Create(new(){Handlers=[new(){Event="card.leaving",Subject="self",Actions=[new(){Op="copy.hand",Target="self",Value="2"}]}],
             Skills=[new(){Id="muster",Name="复员归队",Cost="0",SpendMove=false,SpendAttack=false,Actions=[new(){Op="return.hand",Target="self"}]}]});
-        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);var c=Assert.Single(KeywordProgramRuntime.Components(u));
+        await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));var c=Assert.Single(KeywordProgramRuntime.Components(u));
         Assert.True(await c.UseAsync("muster"));
         var copies=m.Players[0].Hand.OfType<CardBase>().Where(x=>ReferenceEquals(x.Definition,u.Definition)).ToList();
         static void Walk(Orc.Core.EventStream s,List<string> acc){foreach(var e in s.Entries)if(e.Level>=LogLevel.Error)acc.Add($"{e.Source}:{e.Message}");foreach(var c in s.Children)Walk(c,acc);}
@@ -320,7 +320,7 @@ public sealed class KeywordProgramTests
             new(){Rule="move.allowed",Scope="pair",Value="0",Priority=1},
             new(){Rule="attack.allowed",Scope="pair",Value="0",Priority=1}]},bridge:bridge);
         var enemy=await CommandTestKit.PrepareOnFrontAsync(m,m.Players[1],CommandTestKit.InfantryId,0);
-        var play=m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);
+        var play=m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));
         var pending=await bridge.WaitForNextBeginAsync();
         pending.Responder.Complete(pending.Description.RequestId,TargeterTestKit.Selection(TargetSlot.DefaultName,enemy.Ref));
         Assert.Equal(PlayResultStatus.Success,(await play).Status);

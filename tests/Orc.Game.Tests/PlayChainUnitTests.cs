@@ -86,8 +86,8 @@ public class PlayChainUnitTests
         Assert.Equal(1, description.Slots[0].Max);
 
         // 确认（选中左侧阵型空隙）→ 自动衔接打出链。
-        var target = line.GetInsertionGaps()[1];
-        Assert.True(responder.Complete(description.RequestId, TargeterTestKit.Selection(TargetSlot.DefaultName, line.GetInsertionGaps()[0].Ref)));
+        var target = line.GetInsertionGaps().At(1);
+        Assert.True(responder.Complete(description.RequestId, TargeterTestKit.Selection(TargetSlot.DefaultName, line.GetInsertionGaps().At(0).Ref)));
         var result = await task;
 
         Assert.Equal(PlayResultStatus.Success, result.Status);
@@ -135,7 +135,7 @@ public class PlayChainUnitTests
         Assert.Empty(recorder.Updates);
         Assert.Contains(unit, player.Hand);
         Assert.Equal(1, player.Points);
-        Assert.True(line.GetInsertionGaps()[1].IsEmpty());
+        Assert.True(line.GetInsertionGaps().At(1).IsEmpty());
         Assert.False(unit.TryGetData<UnitStateData>(out _));
     }
 
@@ -146,7 +146,7 @@ public class PlayChainUnitTests
         await match.Initialize();
         var player = match.Players[0];
         var unit = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(match, player);
-        var occupied = match.Battlefield.FrontLine.GetInsertionGaps()[2];
+        var occupied = match.Battlefield.FrontLine.GetInsertionGaps().At(2);
         using var recorder = new UpdateRecorder(match.Engine);
 
         var result = await match.PlayManager.PlayUnitAsync(unit, occupied);
@@ -169,16 +169,16 @@ public class PlayChainUnitTests
         var unit = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(match, player);
         var line = match.Battlefield.PlayerASupportLine;
 
-        var first = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps()[1]);
+        var first = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps().At(1));
         Assert.Equal(PlayResultStatus.Success, first.Status);
 
         using var recorder = new UpdateRecorder(match.Engine);
-        var again = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps()[3]); // 目标槽＝槽 3（避开 HQ 占位槽）
+        var again = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps().At(3)); // 目标槽＝槽 3（避开 HQ 占位槽）
 
         // 已单位化（重复部署被拒绝）：目标槽未动、无新更新。
         Assert.Equal(PlayResultStatus.Failed, again.Status);
         Assert.Equal(PlayFailureReason.UnitAlreadyUnitized, again.FailureReason);
-        Assert.True(line.GetInsertionGaps()[3].IsEmpty());
+        Assert.True(line.GetInsertionGaps().At(3).IsEmpty());
         Assert.Empty(recorder.Updates);
     }
 
@@ -193,16 +193,16 @@ public class PlayChainUnitTests
         var line = match.Battlefield.PlayerASupportLine;
 
         // 第一张正常部署（点数 1 → 0）
-        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.PlayUnitAsync(first, line.GetInsertionGaps()[1])).Status);
+        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.PlayUnitAsync(first, line.GetInsertionGaps().At(1))).Status);
 
         using var recorder = new UpdateRecorder(match.Engine);
-        var result = await match.PlayManager.PlayUnitAsync(second, line.GetInsertionGaps()[3]); // 目标槽＝槽 3（避开 HQ 占位槽）
+        var result = await match.PlayManager.PlayUnitAsync(second, line.GetInsertionGaps().At(3)); // 目标槽＝槽 3（避开 HQ 占位槽）
 
         // 复验失败（打出段；原因与预打出阶段拒绝在阶段上可区分）：仅本次取消语义＋留痕；
         // 零副作用——不部署、不扣费、不发更新、不离手。
         Assert.Equal(PlayResultStatus.Failed, result.Status);
         Assert.Equal(PlayFailureReason.PlayVerificationRejected, result.FailureReason);
-        Assert.True(line.GetInsertionGaps()[3].IsEmpty());
+        Assert.True(line.GetInsertionGaps().At(3).IsEmpty());
         Assert.False(second.TryGetData<UnitStateData>(out _));
         Assert.Empty(recorder.Updates);
         Assert.Contains(second, player.Hand);
@@ -220,7 +220,7 @@ public class PlayChainUnitTests
         var raw = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId); // 未加载（无归属）
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => match.PlayManager.PlayUnitAsync(raw, match.Battlefield.FrontLine.GetInsertionGaps()[0]));
+            () => match.PlayManager.PlayUnitAsync(raw, match.Battlefield.FrontLine.GetInsertionGaps().At(0)));
     }
 
     [Fact]

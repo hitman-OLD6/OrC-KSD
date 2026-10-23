@@ -76,7 +76,7 @@ public class UnitTurnsInPlayTests
         Assert.True(responder.Complete(
             description.RequestId,
             TargeterTestKit.Selection(
-                TargeterTestKit.PrimarySlot(description), match.Battlefield.PlayerASupportLine.GetInsertionGaps()[0].Ref)));
+                TargeterTestKit.PrimarySlot(description), match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(0).Ref)));
         var deployed = await task;
 
         Assert.Equal(PlayResultStatus.Success, deployed.Status);
@@ -126,7 +126,7 @@ public class UnitTurnsInPlayTests
         // S9 转换组合＝离场＋销毁＋按定义重建（加入路径）＋放回原位置
         await match.CommandManager.LeaveBattlefieldAsync(unit);
         await match.Engine.DestroyCard(unit);
-        var result = await match.CardService.CreateAndPlaceToSupportLineAsync(CommandTestKit.InfantryId, playerA, originalSlot.GetInsertionGaps()[0]);
+        var result = await match.CardService.CreateAndPlaceToSupportLineAsync(CommandTestKit.InfantryId, playerA, originalSlot.GetInsertionGaps().At(0));
 
         Assert.Equal(CardPlaceStatus.Placed, result.Status);
         var rebuilt = (UnitCard)result.Card!;

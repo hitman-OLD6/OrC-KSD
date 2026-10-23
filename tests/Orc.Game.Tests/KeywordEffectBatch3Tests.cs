@@ -53,7 +53,7 @@ public class KeywordEffectBatch3Tests
         Assert.False(effect.IsMounted);
         Assert.True(unit.Keywords.Has(KeywordIds.Blitz)); // 词条不动（效果独立卸载）
 
-        var result = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps()[1]);
+        var result = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps().At(1));
         Assert.Equal(PlayResultStatus.Success, result.Status);
         Assert.False(unit.GetData<CommandData>().CanMove);  // 部署已完成：未置位（效果已卸载）
         Assert.False(unit.GetData<CommandData>().CanAttack);
@@ -83,7 +83,7 @@ public class KeywordEffectBatch3Tests
         Assert.False(unitX.Keywords.Has(KeywordIds.Blitz)); // 存在性清除（参值不可读）
         Assert.Null(FindEffect(unitX, BlitzEffectName));
 
-        var resultX = await match.PlayManager.PlayUnitAsync(unitX, line.GetInsertionGaps()[1]);
+        var resultX = await match.PlayManager.PlayUnitAsync(unitX, line.GetInsertionGaps().At(1));
         Assert.Equal(PlayResultStatus.Success, resultX.Status);
         Assert.False(unitX.GetData<CommandData>().CanMove);
         Assert.False(unitX.GetData<CommandData>().CanAttack);
@@ -95,7 +95,7 @@ public class KeywordEffectBatch3Tests
         var effectY = Assert.IsType<DynamicPassiveEffect>(FindEffect(unitY, BlitzEffectName));
         Assert.True(effectY.IsMounted);
 
-        var resultY = await match.PlayManager.PlayUnitAsync(unitY, line.GetInsertionGaps()[3]);
+        var resultY = await match.PlayManager.PlayUnitAsync(unitY, line.GetInsertionGaps().At(3));
         Assert.Equal(PlayResultStatus.Success, resultY.Status);
         Assert.True(unitY.GetData<CommandData>().CanMove);
         Assert.True(unitY.GetData<CommandData>().CanAttack);
@@ -148,7 +148,7 @@ public class KeywordEffectBatch3Tests
         var effect = Assert.IsType<DynamicPassiveEffect>(FindEffect(grantee, BlitzEffectName));
         Assert.True(effect.IsMounted);
 
-        var result = await match.PlayManager.PlayUnitAsync(grantee, line.GetInsertionGaps()[1]);
+        var result = await match.PlayManager.PlayUnitAsync(grantee, line.GetInsertionGaps().At(1));
         Assert.Equal(PlayResultStatus.Success, result.Status);
         Assert.True(grantee.GetData<CommandData>().CanMove);
         Assert.True(grantee.GetData<CommandData>().CanAttack);
@@ -159,7 +159,7 @@ public class KeywordEffectBatch3Tests
         Assert.True(await revoked.Keywords.RevokeAsync(KeywordIds.Blitz));
         Assert.Null(FindEffect(revoked, BlitzEffectName));
 
-        var result2 = await match.PlayManager.PlayUnitAsync(revoked, line.GetInsertionGaps()[3]);
+        var result2 = await match.PlayManager.PlayUnitAsync(revoked, line.GetInsertionGaps().At(3));
         Assert.Equal(PlayResultStatus.Success, result2.Status);
         Assert.False(revoked.GetData<CommandData>().CanMove);
         Assert.False(revoked.GetData<CommandData>().CanAttack);
@@ -178,7 +178,7 @@ public class KeywordEffectBatch3Tests
 
         // X 部署（真实）→ 置位 true/true（装载→部署生效）。
         var unitX = await CommandTestKit.InstantiateLoadedAsync(match, player, CommandTestKit.BlitzId, toHand: true);
-        var resultX = await match.PlayManager.PlayUnitAsync(unitX, line.GetInsertionGaps()[1]);
+        var resultX = await match.PlayManager.PlayUnitAsync(unitX, line.GetInsertionGaps().At(1));
         Assert.Equal(PlayResultStatus.Success, resultX.Status);
         Assert.True(unitX.GetData<CommandData>().CanMove);
         Assert.True(unitX.GetData<CommandData>().CanAttack);
@@ -188,7 +188,7 @@ public class KeywordEffectBatch3Tests
 
         // Y 部署（真实）→ Y 自己置位；X 保持 false/false（其他单位部署时本单位不被置位——过滤成立）。
         var unitY = await CommandTestKit.InstantiateLoadedAsync(match, player, CommandTestKit.BlitzId, toHand: true);
-        var resultY = await match.PlayManager.PlayUnitAsync(unitY, line.GetInsertionGaps()[3]);
+        var resultY = await match.PlayManager.PlayUnitAsync(unitY, line.GetInsertionGaps().At(3));
         Assert.Equal(PlayResultStatus.Success, resultY.Status);
         Assert.True(unitY.GetData<CommandData>().CanMove);   // Y 置位（自己）
         Assert.True(unitY.GetData<CommandData>().CanAttack);

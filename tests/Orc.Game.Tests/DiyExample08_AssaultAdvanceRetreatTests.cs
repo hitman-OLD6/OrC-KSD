@@ -146,7 +146,7 @@ public class DiyExample08_AssaultAdvanceRetreatTests
             }
 
             // ⑤ 否则撤退：移回己方支援线空槽（不是回手牌）。S6：指定槽效果入口（零资源消耗）。
-            var destination = match.Battlefield.GetSupportLine(owner).GetInsertionGaps()[0];
+            var destination = match.Battlefield.GetSupportLine(owner).GetInsertionGaps().At(0);
             await match.CommandManager.MoveUnitAsync(unit, destination, ct);
             return AssaultOutcome.Retreated;
         }

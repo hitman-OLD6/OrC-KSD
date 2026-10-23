@@ -79,7 +79,7 @@ public class CardDataComponentTests
         await host.AddUnitTypeAsync(UnitType.Infantry);
         await host.AddUnitTypeAsync(UnitType.Tank);
 
-        Assert.Same(line.GetInsertionGaps()[1], state.Line);
+        Assert.Same(line.GetInsertionGaps().At(1), state.Line);
         Assert.True(state.IsDestroyed);
         Assert.Equal(new[] { UnitType.Infantry, UnitType.Tank }, state.UnitTypes);
     }

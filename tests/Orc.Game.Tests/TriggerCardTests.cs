@@ -113,7 +113,7 @@ public class TriggerCardTests
         CommandTestKit.Activate(mover);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         var moveLog = ProbeMove(match.CommandManager);
-        var frontSlot = match.Battlefield.FrontLine.GetInsertionGaps()[0];
+        var frontSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
 
         var result = await CommandTestKit.RunCommandAsync(match, bridge, mover, frontSlot.Ref);
 
@@ -133,8 +133,8 @@ public class TriggerCardTests
         var effectHost = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 2);
         CommandTestKit.Activate(mover);
         var moveLog = ProbeMove(match.CommandManager);
-        var oldSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1];
-        var newSlot = match.Battlefield.FrontLine.GetInsertionGaps()[0];
+        var oldSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1);
+        var newSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
 
         // 效果引发移动：显式携带触发者（构造调用方式）——真实执行、填充正确
         var stream = await match.CommandManager.UnitMoveTrigger.InvokeAsync(
@@ -166,7 +166,7 @@ public class TriggerCardTests
 
         var commandLog = ProbeCommand(match.CommandManager);
         var moveLog = ProbeMove(match.CommandManager);
-        var frontSlot = match.Battlefield.FrontLine.GetInsertionGaps()[0];
+        var frontSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
 
         // 效果引发指挥：经入口可选参数显式携带触发者
         var task = match.CommandManager.BeginCommandAsync(mover, triggerCard: effectHost.Ref);
@@ -195,7 +195,7 @@ public class TriggerCardTests
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         var commandLog = ProbeCommand(match.CommandManager);
         var moveLog = ProbeMove(match.CommandManager);
-        var frontSlot = match.Battlefield.FrontLine.GetInsertionGaps()[0];
+        var frontSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
 
         // 主动指挥：入口缺省（不携带）——指挥与嵌套移动均空（向后兼容）
         var result = await CommandTestKit.RunCommandAsync(match, bridge, mover, frontSlot.Ref);

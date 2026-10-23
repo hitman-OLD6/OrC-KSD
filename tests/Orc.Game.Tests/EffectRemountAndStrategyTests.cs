@@ -62,7 +62,7 @@ public class EffectRemountAndStrategyTests
         var effect = Assert.Single(source.Effects);
         Assert.True(effect.IsMounted);
 
-        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(source, frontLine.GetInsertionGaps()[1])).Status);
+        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(source, frontLine.GetInsertionGaps().At(1))).Status);
         Assert.Equal(4, AttackOf(beneficiary)); // 2 + 2（相邻光环生效）
 
         source.RemoveEffect(effect); // 移除→托管注销（按来源；受益侧衔接）
@@ -102,7 +102,7 @@ public class EffectRemountAndStrategyTests
         Assert.Equal(0, effect.PingCount);
 
         await unit.LoadAsync(playerA);
-        var join = await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.FrontLine.GetInsertionGaps()[0]);
+        var join = await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.FrontLine.GetInsertionGaps().At(0));
         Assert.Equal(PlayResultStatus.Success, join.Status);
 
         // 上场（card.placed 到达）：实际逻辑挂载（订阅出现）＋行为生效
@@ -132,7 +132,7 @@ public class EffectRemountAndStrategyTests
         Assert.Equal(0, effect.PingCount);
 
         await unit.LoadAsync(playerA);
-        var join = await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.FrontLine.GetInsertionGaps()[0]);
+        var join = await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.FrontLine.GetInsertionGaps().At(0));
         Assert.Equal(PlayResultStatus.Success, join.Status);
         Assert.True(unit.IsPlaced);
 
@@ -159,12 +159,12 @@ public class EffectRemountAndStrategyTests
 
         // 非该类事件不误触发：另一张卡部署（unit.deployed 被发射）→ 本卡效果过滤、不计数
         var other = await CommandTestKit.InstantiateLoadedAsync(match, playerA, CommandTestKit.InfantryId, toHand: true);
-        var otherDeploy = await match.PlayManager.PlayUnitAsync(other, match.Battlefield.FrontLine.GetInsertionGaps()[1]);
+        var otherDeploy = await match.PlayManager.PlayUnitAsync(other, match.Battlefield.FrontLine.GetInsertionGaps().At(1));
         Assert.Equal(PlayResultStatus.Success, otherDeploy.Status);
         Assert.Equal(0, effect.DeployCount);
 
         // 本卡部署：经真实部署链恰触发一次
-        var deploy = await match.PlayManager.PlayUnitAsync(unit, match.Battlefield.FrontLine.GetInsertionGaps()[0]);
+        var deploy = await match.PlayManager.PlayUnitAsync(unit, match.Battlefield.FrontLine.GetInsertionGaps().At(0));
         Assert.Equal(PlayResultStatus.Success, deploy.Status);
         Assert.Equal(1, effect.DeployCount);
     }
@@ -204,7 +204,7 @@ public class EffectRemountAndStrategyTests
             return Task.CompletedTask;
         });
 
-        var result = await match.PlayManager.PlayUnitAsync(unit, match.Battlefield.FrontLine.GetInsertionGaps()[0]);
+        var result = await match.PlayManager.PlayUnitAsync(unit, match.Battlefield.FrontLine.GetInsertionGaps().At(0));
         Assert.Equal(PlayResultStatus.Success, result.Status);
 
         // card.placed：单位化（组件挂载＋槽位占用）成功之后、完成信号（unit.deployed）之前——每次成功部署恰一次

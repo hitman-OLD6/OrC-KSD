@@ -82,8 +82,8 @@ public class CommandFrontLineTests
         var mover = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
         await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.WeakId, 1); // 敌占前线（槽 1）
         CommandTestKit.Activate(mover);
-        var oldSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1];
-        var targetSlot = match.Battlefield.FrontLine.GetInsertionGaps()[0]; // 空槽（前置不满足——防御性双保险拒绝）
+        var oldSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1);
+        var targetSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0); // 空槽（前置不满足——防御性双保险拒绝）
 
         // 执行兜底复验：分派后、执行前复验前置条件——不满足＝ValidationRejected（零副作用：槽位不变、行动状态不消耗）。
         var stream = await match.CommandManager.UnitMoveTrigger.InvokeAsync(

@@ -45,7 +45,7 @@ public class EntryPointBeginTests
 
         Assert.Equal(CommandResultStatus.Success, result.Status);
         Assert.Same(front[0], mover.GetData<UnitStateData>().Line);
-        Assert.True(match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1].IsEmpty());
+        Assert.True(match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1).IsEmpty());
         Assert.False(mover.GetData<CommandData>().CanMove);      // 收尾清位
         Assert.Equal(pointsBefore - 1, playerA.Points);          // 收尾扣费（行动费 1）
     }
@@ -68,7 +68,7 @@ public class EntryPointBeginTests
         var result = await task;
 
         Assert.Equal(CommandResultStatus.Cancelled, result.Status);
-        Assert.Same(match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1], mover.GetData<UnitStateData>().Line);
+        Assert.Same(match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1), mover.GetData<UnitStateData>().Line);
         Assert.True(mover.GetData<CommandData>().CanMove);       // 未消耗行动
         Assert.Equal(pointsBefore, playerA.Points);              // 未扣费
     }

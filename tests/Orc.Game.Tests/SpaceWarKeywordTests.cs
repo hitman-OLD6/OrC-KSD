@@ -115,7 +115,7 @@ public sealed class SpaceWarKeywordTests : IDisposable
         var match = CreateMatch("test.shield", [new KeywordDeclaration(Shield)], bridge);
         await match.Initialize();
         var unit = await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[0], "test.shield", match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);
+            match, match.Players[0], "test.shield", match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));
 
         await match.EffectRuntime.DamageAsync(unit, 2);
         Assert.Equal(1, Loss(unit));
@@ -134,7 +134,7 @@ public sealed class SpaceWarKeywordTests : IDisposable
         var match = CreateMatch("test.shield.zero", [new KeywordDeclaration(Shield)], bridge);
         await match.Initialize();
         var unit = await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[0], "test.shield.zero", match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);
+            match, match.Players[0], "test.shield.zero", match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));
 
         var damaged = 0;
         match.Engine.Subscribe((kind, _, _) =>
@@ -160,7 +160,7 @@ public sealed class SpaceWarKeywordTests : IDisposable
         var match = CreateMatch("test.shield.attack", [new KeywordDeclaration(Shield)], bridge);
         await match.Initialize();
         var unit = await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[0], "test.shield.attack", match.Battlefield.FrontLine.GetInsertionGaps()[0]);
+            match, match.Players[0], "test.shield.attack", match.Battlefield.FrontLine.GetInsertionGaps().At(0));
         CommandTestKit.Activate(unit);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
@@ -185,9 +185,9 @@ public sealed class SpaceWarKeywordTests : IDisposable
         var match = CreateMatch("test.reaction", [new KeywordDeclaration(Reaction, 2)], bridge);
         await match.Initialize();
         var unit = await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[0], "test.reaction", match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);
+            match, match.Players[0], "test.reaction", match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));
         var enemy = await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[1], "test.reaction", match.Battlefield.PlayerBSupportLine.GetInsertionGaps()[1]);
+            match, match.Players[1], "test.reaction", match.Battlefield.PlayerBSupportLine.GetInsertionGaps().At(1));
 
         Assert.Equal(2, unit.Keywords.GetValue(Reaction));
 
@@ -223,7 +223,7 @@ public sealed class SpaceWarKeywordTests : IDisposable
             "test.sponge", [new KeywordDeclaration(Shield), new KeywordDeclaration(Sponge)], bridge);
         await match.Initialize();
         var unit = await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[0], "test.sponge", match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);
+            match, match.Players[0], "test.sponge", match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));
 
         await match.EffectRuntime.DamageAsync(unit, 5);
         Assert.Equal(1, Loss(unit));
@@ -240,7 +240,7 @@ public sealed class SpaceWarKeywordTests : IDisposable
         var match = CreateMatch("test.sponge.alone", [new KeywordDeclaration(Sponge)], bridge);
         await match.Initialize();
         var unit = await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[0], "test.sponge.alone", match.Battlefield.PlayerASupportLine.GetInsertionGaps()[1]);
+            match, match.Players[0], "test.sponge.alone", match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));
 
         await match.EffectRuntime.DamageAsync(unit, 3);
         Assert.Equal(3, Loss(unit));
@@ -253,13 +253,13 @@ public sealed class SpaceWarKeywordTests : IDisposable
         var match = CreateMatch("test.guerrilla", [new KeywordDeclaration(Guerrilla)], bridge);
         await match.Initialize();
         var unit = await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[0], "test.guerrilla", match.Battlefield.FrontLine.GetInsertionGaps()[0]);
+            match, match.Players[0], "test.guerrilla", match.Battlefield.FrontLine.GetInsertionGaps().At(0));
         CommandTestKit.Activate(unit);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
         Assert.True(match.CommandManager.GetCommandAvailability(unit).Move.CanUse, "游击：前线可撤退");
 
-        var support = match.Battlefield.PlayerASupportLine.GetInsertionGaps()[0];
+        var support = match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(0);
         var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, support.Ref);
 
         Assert.True(result.IsSuccess);
@@ -273,7 +273,7 @@ public sealed class SpaceWarKeywordTests : IDisposable
         var match = CommandTestKit.CreateCommandMatch(bridge);
         await match.Initialize();
         var unit = await CommandTestKit.PrepareUnitAsync(
-            match, match.Players[0], CommandTestKit.InfantryId, match.Battlefield.FrontLine.GetInsertionGaps()[0]);
+            match, match.Players[0], CommandTestKit.InfantryId, match.Battlefield.FrontLine.GetInsertionGaps().At(0));
         CommandTestKit.Activate(unit);
 
         Assert.False(match.CommandManager.GetCommandAvailability(unit).Move.CanUse);

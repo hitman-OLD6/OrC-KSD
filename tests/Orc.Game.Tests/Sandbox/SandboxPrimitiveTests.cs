@@ -77,7 +77,7 @@ public sealed class SandboxPrimitiveTests
         // 占位者：对手支援线 0 号槽。
         var occupant = await match.CardService.CreateAsync(SandboxTestKit.UnitId, opponent);
         await match.CardService.PlaceToSupportLineAsync(
-            (UnitCard)occupant, opponent, match.Battlefield.GetSupportLine(opponent).GetInsertionGaps()[0]);
+            (UnitCard)occupant, opponent, match.Battlefield.GetSupportLine(opponent).GetInsertionGaps().At(0));
 
         var before = SandboxTestKit.Snapshot(match);
         var blocked = await match.Sandbox.InstantiateAsync(SandboxTestKit.UnitId, player, "frontline", 0);
@@ -93,7 +93,7 @@ public sealed class SandboxPrimitiveTests
 
         // 槽位被占（把新单位放到已占位槽）——硬门槛之一。
         var second = await match.CardService.CreateAsync(SandboxTestKit.UnitId, opponent);
-        var target = match.Battlefield.GetSupportLine(opponent).GetInsertionGaps()[1];
+        var target = match.Battlefield.GetSupportLine(opponent).GetInsertionGaps().At(1);
         var third = await match.CardService.CreateAsync(SandboxTestKit.UnitId, opponent);
         await match.CardService.PlaceToSupportLineAsync((UnitCard)third, opponent, target);
 
@@ -244,7 +244,7 @@ public sealed class SandboxPrimitiveTests
         Assert.Contains(Updates.CardPlaced, updates);
         Assert.Contains(GameUpdates.UnitJoined, updates);
 
-        var slot = match.Battlefield.GetSupportLine(player).GetInsertionGaps()[4];
+        var slot = match.Battlefield.GetSupportLine(player).GetInsertionGaps().At(4);
         Assert.NotNull(slot);
         Assert.Equal(result.Ref, ((FormationGap)slot!).Id.ToString("N"));
     }
@@ -264,7 +264,7 @@ public sealed class SandboxPrimitiveTests
         Assert.Contains(Updates.CardPlaced, updates);
         Assert.Contains(GameUpdates.UnitJoined, updates);
 
-        var slot = match.Battlefield.FrontLine.GetInsertionGaps()[1];
+        var slot = match.Battlefield.FrontLine.GetInsertionGaps().At(1);
         var unit = Assert.IsType<UnitCard>(slot);
         Assert.Equal(result.Ref, unit.Id.ToString("N"));
         Assert.Same(slot.Line, unit.GetData<UnitStateData>().Line);
@@ -317,7 +317,7 @@ public sealed class SandboxPrimitiveTests
         Assert.Contains(Updates.CardPlaced, updates);
         Assert.Contains(GameUpdates.UnitJoined, updates);
         Assert.DoesNotContain(card, player.Hand); // 不得「既在手牌又在场」
-        Assert.Same(card, match.Battlefield.GetSupportLine(player).GetInsertionGaps()[4]);
+        Assert.Same(card, match.Battlefield.GetSupportLine(player).GetInsertionGaps().At(4));
     }
 
     [Fact]
@@ -330,10 +330,10 @@ public sealed class SandboxPrimitiveTests
         var result = await match.Sandbox.UnitizeAsync(card, "frontline", 3);
 
         Assert.True(result.Ok, result.Reason);
-        var slot = match.Battlefield.FrontLine.GetInsertionGaps()[3];
+        var slot = match.Battlefield.FrontLine.GetInsertionGaps().At(3);
         var unit = Assert.IsType<UnitCard>(slot);
         var state = unit.GetData<UnitStateData>();
-        Assert.Same(slot, state.Line);
+        Assert.Same(slot.Line, state.Line);
         Assert.Equal(3, state.Line!.IndexOf(unit));
         Assert.False(state.IsDestroyed);
     }
@@ -355,8 +355,8 @@ public sealed class SandboxPrimitiveTests
         var result = await match.Sandbox.UnitizeAsync(mine, "support", 0);
 
         Assert.True(result.Ok, result.Reason);
-        Assert.Same(enemy, match.Battlefield.GetSupportLine(opponent).GetInsertionGaps()[0]);
-        Assert.Same(mine, match.Battlefield.GetSupportLine(player).GetInsertionGaps()[0]);
+        Assert.Same(enemy, match.Battlefield.GetSupportLine(opponent).GetInsertionGaps().At(0));
+        Assert.Same(mine, match.Battlefield.GetSupportLine(player).GetInsertionGaps().At(0));
     }
 
     [Fact]
@@ -394,8 +394,8 @@ public sealed class SandboxPrimitiveTests
         Assert.True(result.Ok, result.Reason);
         Assert.Contains(GameUpdates.UnitPositionChanged, updates);
         Assert.Equal(0, origin.Size);
-        Assert.Same(unit, match.Battlefield.FrontLine.GetInsertionGaps()[2]);
-        Assert.Same(match.Battlefield.FrontLine.GetInsertionGaps()[2], unit.GetData<UnitStateData>().Line);
+        Assert.Same(unit, match.Battlefield.FrontLine.GetInsertionGaps().At(2));
+        Assert.Same(match.Battlefield.FrontLine.GetInsertionGaps().At(2), unit.GetData<UnitStateData>().Line);
     }
 
     [Fact]
