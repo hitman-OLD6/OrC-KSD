@@ -39,6 +39,13 @@ public enum PlayFailureReason
     /// <summary>目标槽位非空（部署 / 加入拒绝；零副作用）。</summary>
     TargetSlotOccupied,
 
+    /// <summary>
+    /// 目标位置已过期（提交的 <see cref="Orc.Game.Board.FormationGap"/> 属历史快照、线已变化；零副作用）。
+    /// <para>与 <see cref="TargetSlotOccupied"/> 区分：这里位置并没有被占，是引用本身失效——
+    /// 调用方须按「现取现用」重取插入点，而不是当作"被占用"重试。</para>
+    /// </summary>
+    PositionStale,
+
     /// <summary>单位已单位化（重复部署 / 重复加入拒绝；零副作用）。</summary>
     UnitAlreadyUnitized,
 

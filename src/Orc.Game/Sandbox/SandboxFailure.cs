@@ -33,6 +33,10 @@ public static class SandboxFailure
     /// <summary>目标槽位已被占用（<see cref="CardPlaceFailureReason.TargetSlotOccupied"/>／<see cref="PlayFailureReason.TargetSlotOccupied"/>）。</summary>
     public const string TargetSlotOccupied = "target-slot-occupied";
 
+    /// <summary>目标位置已过期（提交的插入点属历史快照、线已变化——<see cref="CardPlaceFailureReason.PositionStale"/>／<see cref="PlayFailureReason.PositionStale"/>）。
+    /// <para>与 <see cref="TargetSlotOccupied"/> 区分：过期须重取插入点，"被占"才是位置真被占。</para></summary>
+    public const string PositionStale = "position-stale";
+
     /// <summary>单位已单位化（<see cref="CardPlaceFailureReason.UnitAlreadyUnitized"/>／<see cref="PlayFailureReason.UnitAlreadyUnitized"/>）。</summary>
     public const string UnitAlreadyUnitized = "unit-already-unitized";
 

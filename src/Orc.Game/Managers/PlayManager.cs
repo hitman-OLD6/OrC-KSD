@@ -297,7 +297,8 @@ public sealed class PlayManager
 
     /// <summary>
     /// 加入路径（后端入口；不问来源、非交互路径）：加入触发器 → 共用单位化触发器；不扣费、不走部署词条；
-    /// 单位化完成后发 unit.joined。目标槽位由调用方给定、须为空槽（非空＝拒绝、可观测；邻位规则不适用）。
+    /// 单位化完成后发 unit.joined。目标位置由调用方给定、须是**当前快照**的插入点：
+    /// 快照过期＝<see cref="PlayFailureReason.PositionStale"/>，位置真被占＝<see cref="PlayFailureReason.TargetSlotOccupied"/>（均可观测）；邻位规则不适用。
     /// 归属不要求（加入不涉及手牌/扣费）；单位化装配失败不留矛盾中间态。
     /// </summary>
     /// <exception cref="ArgumentNullException">card / target 为 null。</exception>
@@ -322,7 +323,8 @@ public sealed class PlayManager
 
         if (!target.IsCurrent)
         {
-            return PlayResult.Failure(PlayFailureReason.TargetSlotOccupied);
+            // 过期快照（非"被占用"）：线在取得插入点之后已变化——独立成因、仍不抛（入口契约不变）。
+            return PlayResult.Failure(PlayFailureReason.PositionStale);
         }
 
         if (card.TryGetData<UnitStateData>(out _))

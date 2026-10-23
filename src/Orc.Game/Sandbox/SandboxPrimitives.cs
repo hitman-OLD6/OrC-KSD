@@ -752,10 +752,12 @@ public sealed class SandboxPrimitives
             return stateReason;
         }
 
+        // 到线放置：目标是**插入空隙**（不是槽位实体）——"非 null"不代表被占，只有快照失效才不可用。
+        // 满员时 TryResolveSlot 已在解析期返回 slot-out-of-range（无空隙可给）。
         if (request.Zone is LineSupport or LineFrontline
-            && request.ResolvedSlot is not null)
+            && request.ResolvedSlot is not { IsCurrent: true })
         {
-            return SandboxFailure.TargetSlotOccupied;
+            return SandboxFailure.SlotOutOfRange;
         }
 
         return null;
@@ -783,9 +785,10 @@ public sealed class SandboxPrimitives
             return SandboxFailure.UnitAlreadyUnitized;
         }
 
-        if (request.ResolvedSlot is not null)
+        // 同上：空隙非 null ＝ 有可用落位请求，不是"已被占用"。
+        if (request.ResolvedSlot is not { IsCurrent: true })
         {
-            return SandboxFailure.TargetSlotOccupied;
+            return SandboxFailure.SlotOutOfRange;
         }
 
         return null;
@@ -885,7 +888,7 @@ public sealed class SandboxPrimitives
             return SandboxFailure.SameSlot;
         }
 
-        return !destination.IsCurrent ? SandboxFailure.PlacementRejected : SandboxFailure.TargetSlotOccupied;
+        return !destination.IsCurrent ? SandboxFailure.PositionStale : SandboxFailure.TargetSlotOccupied;
     }
 
     private static void Succeed(SandboxPrimitiveResult result, Card card, string? line, int? slotIndex)

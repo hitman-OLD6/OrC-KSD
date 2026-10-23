@@ -54,6 +54,12 @@ public enum CardPlaceFailureReason
     /// <summary>目标槽位非空（运行时状态竞争——业务失败、不抛）。</summary>
     TargetSlotOccupied,
 
+    /// <summary>
+    /// 目标位置已过期（提交的 <see cref="Orc.Game.Board.FormationGap"/> 属历史快照、线已变化——业务失败、不抛）。
+    /// <para>与 <see cref="TargetSlotOccupied"/> 区分："过期"是引用失效（须重取插入点），"被占"是位置真被占。</para>
+    /// </summary>
+    PositionStale,
+
     /// <summary>单位已单位化（非待放置状态——业务失败、不抛）。</summary>
     UnitAlreadyUnitized,
 
@@ -316,7 +322,8 @@ public sealed class MatchCardService
 
     /// <summary>
     /// 放置到支援线（指定空槽——既有「加入路径」语义：非部署——发 unit.joined、不扣费、不走部署词条）。
-    /// 槽位由调用方指定、须为空槽（被占＝业务失败结果对象）；槽位须在目标玩家的支援线内（前置契约）。
+    /// 槽位由调用方指定、须为当前快照的插入点：快照过期＝业务失败结果对象（<see cref="CardPlaceFailureReason.PositionStale"/>）；
+    /// 槽位须在目标玩家的支援线内（前置契约）。
     /// </summary>
     /// <exception cref="ArgumentNullException">card / player / slot 为 null。</exception>
     /// <exception cref="ArgumentException">槽位不在目标玩家支援线内（前置契约不符——明确拒绝）。</exception>
@@ -330,10 +337,17 @@ public sealed class MatchCardService
         ValidatePlacementTarget(card, player);
 
         var line = RequireSupportLine(player);
-        if (!ContainsSlot(line, slot))
+        if (!ReferenceEquals(slot.Line, line))
         {
+            // 真契约错误：拿的是别的线的插入点（调用方错误——异常）。
             throw new ArgumentException(
                 $"目标槽位 '{slot.Name}' 不在玩家 #{player.Index} 的支援线内（前置契约不符——放置被拒绝）。", nameof(slot));
+        }
+
+        if (!ContainsSlot(line, slot))
+        {
+            // 同线但快照过期：玩家动作失败（结果对象，不抛）——与"被占用"分开归类。
+            return CardPlaceResult.Rejected(CardPlaceFailureReason.PositionStale, card);
         }
 
         var action = _joinUnitAction
@@ -634,18 +648,15 @@ public sealed class MatchCardService
                 "支援线查询面未装配（独立构造场景不支持阵线面——装配性错误）。");
 
     /// <summary>线内槽位归属校验（引用相等——线内索引枚举）。</summary>
+    /// <summary>
+    /// 空隙是否属于该线（有序列表模型）：身份＝所属线 ＋ 当前快照有效。
+    /// <para>
+    /// **不要**在 <see cref="BattleLine.Members"/>（卡牌成员）里找空隙：成员是 <c>Card</c>、空隙是
+    /// <see cref="FormationGap"/>，两者不同实体，遍历永远不命中（此前实现即由此对所有合法空隙抛异常）。
+    /// </para>
+    /// </summary>
     private static bool ContainsSlot(BattleLine line, FormationGap slot)
-    {
-        foreach (var candidate in line.Members)
-        {
-            if (ReferenceEquals(candidate, slot))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+        => ReferenceEquals(slot.Line, line) && slot.IsCurrent;
 
     /// <summary>解析卡牌的定义注册 id（素材解析：经卡牌库反查；未注册＝明确拒绝、不静默）。</summary>
     private string ResolveDefinitionId(CardBase card)
