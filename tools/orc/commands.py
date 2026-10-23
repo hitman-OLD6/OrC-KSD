@@ -73,6 +73,7 @@ _ENGINE_REJECT_TEXT = {
     "GameEnded": "对局已结束",
     "PhaseBlocked": "当前相位不允许这个动作",
     "TargetSlotOccupied": "目标位置已被占用",
+    "PositionStale": "位置已变化，请重选",
     "PlayVerificationRejected": "打出校验未通过（目标或时机不合法）",
     "PlayChainFault": "打出链内部出错（可在 log 里查看）",
 }

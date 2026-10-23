@@ -80,6 +80,17 @@ public class SandboxPrimitiveToolTests
         Assert.Equal(0, unitized.EngineResult!["slot"]!.GetValue<int>());
         Assert.Equal("support", unitized.EngineResult!["line"]!.GetValue<string>());
 
+        // 位置模型：`slot` 是**该线当前快照的插入空隙序号**（N 个元素共 N+1 个空隙），
+        // 空前线只有 0 号一个插入点。要让 2 号成为合法插入点，先铺 2 个单位（空隙 0/1）。
+        foreach (var fillSlot in new[] { 0, 1 })
+        {
+            var filler = await fixture.InvokeAsync(
+                "sandbox.instantiate",
+                $$"""{"definitionId":"sbx.primitive.unit","owner":0,"zone":"frontline","slot":{{fillSlot}}}""");
+            Assert.True(filler.Ok, filler.Message);
+            Assert.Equal(fillSlot, filler.EngineResult!["slot"]!.GetValue<int>());
+        }
+
         var moved = await fixture.InvokeAsync(
             "sandbox.move",
             $$"""{"ref":"{{reference}}","line":"frontline","slot":2}""");

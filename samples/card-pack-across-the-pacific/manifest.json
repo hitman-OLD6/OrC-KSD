@@ -4,23 +4,23 @@
   "guid": "deef3211-f0fc-5dd9-beb0-149722d895bf",
   "kind": "cardpack",
   "name": "跨越海洋",
-  "version": "072db264c834700366e9ecc29b53e5dc",
+  "version": "ce8b9e35138198adca54102d2c0d43de",
   "metadata": [
+    "cards/atp.amphibious-landing.card.json.meta.json",
     "cards/atp.beachhead-supply.card.json.meta.json",
-    "cards/atp.rapid-landing.card.json.meta.json",
+    "cards/atp.lvt-1.card.json.meta.json",
     "cards/atp.lvt-2.card.json.meta.json",
     "cards/atp.lvt-4.card.json.meta.json",
-    "cards/atp.amphibious-landing.card.json.meta.json",
     "cards/atp.mass-landing.card.json.meta.json",
-    "cards/atp.lvt-1.card.json.meta.json",
-    "cards/atp.rifleman.card.json.meta.json",
+    "cards/atp.rapid-landing.card.json.meta.json",
     "cards/atp.rifle-regiment.card.json.meta.json",
+    "cards/atp.rifleman.card.json.meta.json",
+    "effects/atp.amphibious-landing.effect.prefab.json.meta.json",
     "effects/atp.beachhead-supply.effect.prefab.json.meta.json",
-    "effects/atp.rapid-landing.effect.prefab.json.meta.json",
+    "effects/atp.lvt-1.landing.prefab.json.meta.json",
     "effects/atp.lvt-2.aura.prefab.json.meta.json",
     "effects/atp.lvt-4.landing.prefab.json.meta.json",
-    "effects/atp.amphibious-landing.effect.prefab.json.meta.json",
     "effects/atp.mass-landing.effect.prefab.json.meta.json",
-    "effects/atp.lvt-1.landing.prefab.json.meta.json"
+    "effects/atp.rapid-landing.effect.prefab.json.meta.json"
   ]
 }
