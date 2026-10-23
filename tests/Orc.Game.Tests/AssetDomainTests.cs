@@ -68,6 +68,8 @@ public class AssetDomainTests
             "src/Orc/Core/AssetDomain.cs",
             "src/Orc.Game/Cards/CardBase.cs",
             "src/Orc.Game/Cards/CardLibrary.cs",
+            "src/Orc.Manager/AssetLibrary.cs",  // 资产管理面（域的合法消费方：按域枚举/对账资产条目）
+            "src/Orc.Server/Pool/PackPool.cs",  // 卡池对账面（域的合法消费方：按域核对卡池装配来源）
         };
 
         var allowedPrefixes = new[]
