@@ -269,7 +269,7 @@ public class KeywordComponentTests
         Assert.True(await victim.Keywords.GrantAsync(DemoKeyword, 7));
         Assert.True(victim.GetData<CommandData>().CanMove); // 行为生效
 
-        var killer = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.BeastId, 1); // 攻 6 / 防 7
+        var killer = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.BeastId, 0); // 攻 6 / 防 7
         CommandTestKit.Activate(killer);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         var kill = await CommandTestKit.RunCommandAsync(match, bridge, killer, victim.Ref);

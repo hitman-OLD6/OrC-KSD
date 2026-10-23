@@ -91,16 +91,19 @@ public sealed class SandboxPrimitiveTests
         Assert.Equal(SandboxFailure.UnitAlreadyUnitized, occupied.Reason);
         Assert.Equal(beforeSecond, SandboxTestKit.Snapshot(match));
 
-        // 槽位被占（把新单位放到已占位槽）——硬门槛之一。
+        // 槽位不可用（硬门槛之一）：支援线满员＝无插入点 ⇒ slot-out-of-range，零状态变更。
+        // （列表模型下插入点没有「被占用」形态——占用即快照变化，原语自行解析空隙，故此处以「无空隙」表达目标不可用。）
         var second = await match.CardService.CreateAsync(SandboxTestKit.UnitId, opponent);
-        var target = match.Battlefield.GetSupportLine(opponent).GetInsertionGaps().At(1);
-        var third = await match.CardService.CreateAsync(SandboxTestKit.UnitId, opponent);
-        await match.CardService.PlaceToSupportLineAsync((UnitCard)third, opponent, target);
+        while (!match.Battlefield.GetSupportLine(opponent).IsFull)
+        {
+            var filler = await match.Sandbox.InstantiateAsync(SandboxTestKit.UnitId, opponent, "support", 0);
+            Assert.True(filler.Ok, filler.Reason);
+        }
 
         var snapshot = SandboxTestKit.Snapshot(match);
-        var rejected = await match.Sandbox.UnitizeAsync(second, "support", 1);
+        var rejected = await match.Sandbox.UnitizeAsync(second, "support", 0);
         Assert.False(rejected.Ok);
-        Assert.Equal(SandboxFailure.TargetSlotOccupied, rejected.Reason);
+        Assert.Equal(SandboxFailure.SlotOutOfRange, rejected.Reason);
         Assert.Equal(snapshot, SandboxTestKit.Snapshot(match));
         Assert.True(before.Length > 0);
     }
@@ -236,17 +239,24 @@ public sealed class SandboxPrimitiveTests
         var player = match.Players[0];
         var updates = SandboxTestKit.TrackUpdates(match);
 
+        // 支援线容量 5 元素（HQ 计入）：先铺到 4 个元素（空隙 0..4），再请求精确的 4 号插入点（最右端）。
+        var supportLine = match.Battlefield.GetSupportLine(player);
+        for (var i = 1; i <= 3; i++)
+        {
+            var seed = await match.Sandbox.InstantiateAsync(SandboxTestKit.UnitId, player, "support", 1);
+            Assert.True(seed.Ok, seed.Reason);
+        }
+
         var result = await match.Sandbox.InstantiateAsync(SandboxTestKit.UnitId, player, "support", 4);
 
         Assert.True(result.Ok, result.Reason);
         Assert.Equal("support", result.Line);
-        Assert.Equal(4, result.Slot);
+        Assert.Equal(4, result.Slot); // 精确槽位：请求 4＝报告 4
         Assert.Contains(Updates.CardPlaced, updates);
         Assert.Contains(GameUpdates.UnitJoined, updates);
 
-        var slot = match.Battlefield.GetSupportLine(player).GetInsertionGaps().At(4);
-        Assert.NotNull(slot);
-        Assert.Equal(result.Ref, ((FormationGap)slot!).Id.ToString("N"));
+        var placed = Assert.IsType<UnitCard>(supportLine[4]);
+        Assert.Equal(result.Ref, placed.Id.ToString("N")); // 落在该插入点（ref＝落地单位）
     }
 
     [Fact]
@@ -256,18 +266,22 @@ public sealed class SandboxPrimitiveTests
         var player = match.Players[0];
         var updates = SandboxTestKit.TrackUpdates(match);
 
+        // 前线先铺 1 个元素（唯一空隙 0），再请求精确的 1 号插入点（最右端）。
+        var frontLine = match.Battlefield.FrontLine;
+        Assert.True((await match.Sandbox.InstantiateAsync(SandboxTestKit.UnitId, player, "frontline", 0)).Ok);
+
         var result = await match.Sandbox.InstantiateAsync(SandboxTestKit.UnitId, player, "frontline", 1);
 
         Assert.True(result.Ok, result.Reason);
         Assert.Equal("frontline", result.Line);
-        Assert.Equal(1, result.Slot);
+        Assert.Equal(1, result.Slot); // 精确槽位：请求 1＝报告 1
         Assert.Contains(Updates.CardPlaced, updates);
         Assert.Contains(GameUpdates.UnitJoined, updates);
 
-        var slot = match.Battlefield.FrontLine.GetInsertionGaps().At(1);
-        var unit = Assert.IsType<UnitCard>(slot);
+        var unit = Assert.IsType<UnitCard>(frontLine[1]);
         Assert.Equal(result.Ref, unit.Id.ToString("N"));
-        Assert.Same(slot.Line, unit.GetData<UnitStateData>().Line);
+        Assert.Same(frontLine, unit.GetData<UnitStateData>().Line);
+        Assert.Equal(1, unit.GetData<UnitStateData>().Line!.IndexOf(unit));
         Assert.False(unit.GetData<UnitStateData>().IsDestroyed);
     }
 
@@ -292,7 +306,7 @@ public sealed class SandboxPrimitiveTests
         var player = match.Players[0];
 
         var before = SandboxTestKit.Snapshot(match);
-        var result = await match.Sandbox.InstantiateAsync(SandboxTestKit.OrderId, player, "support", 3);
+        var result = await match.Sandbox.InstantiateAsync(SandboxTestKit.OrderId, player, "support", 0);
 
         Assert.False(result.Ok);
         Assert.Equal(SandboxFailure.NotAUnitCard, result.Reason);
@@ -311,13 +325,13 @@ public sealed class SandboxPrimitiveTests
         Assert.Contains(card, player.Hand);
 
         var updates = SandboxTestKit.TrackUpdates(match);
-        var result = await match.Sandbox.UnitizeAsync(card, "support", 4);
+        var result = await match.Sandbox.UnitizeAsync(card, "support", 1); // 插入点 1＝HQ 之后（追加）
 
         Assert.True(result.Ok, result.Reason);
         Assert.Contains(Updates.CardPlaced, updates);
         Assert.Contains(GameUpdates.UnitJoined, updates);
         Assert.DoesNotContain(card, player.Hand); // 不得「既在手牌又在场」
-        Assert.Same(card, match.Battlefield.GetSupportLine(player).GetInsertionGaps().At(4));
+        Assert.Same(card, match.Battlefield.GetSupportLine(player)[1]); // 落在该插入点（按线＋序号核对）
     }
 
     [Fact]
@@ -327,14 +341,14 @@ public sealed class SandboxPrimitiveTests
         var player = match.Players[0];
         var card = await match.CardService.CreateAsync(SandboxTestKit.UnitId, player);
 
-        var result = await match.Sandbox.UnitizeAsync(card, "frontline", 3);
+        var result = await match.Sandbox.UnitizeAsync(card, "frontline", 0); // 空前线唯一插入点
 
         Assert.True(result.Ok, result.Reason);
-        var slot = match.Battlefield.FrontLine.GetInsertionGaps().At(3);
-        var unit = Assert.IsType<UnitCard>(slot);
+        var frontLine = match.Battlefield.FrontLine;
+        var unit = Assert.IsType<UnitCard>(frontLine[0]);
         var state = unit.GetData<UnitStateData>();
-        Assert.Same(slot.Line, state.Line);
-        Assert.Equal(3, state.Line!.IndexOf(unit));
+        Assert.Same(frontLine, state.Line);
+        Assert.Equal(0, state.Line!.IndexOf(unit));
         Assert.False(state.IsDestroyed);
     }
 
@@ -355,8 +369,8 @@ public sealed class SandboxPrimitiveTests
         var result = await match.Sandbox.UnitizeAsync(mine, "support", 0);
 
         Assert.True(result.Ok, result.Reason);
-        Assert.Same(enemy, match.Battlefield.GetSupportLine(opponent).GetInsertionGaps().At(0));
-        Assert.Same(mine, match.Battlefield.GetSupportLine(player).GetInsertionGaps().At(0));
+        Assert.Same(enemy, match.Battlefield.GetSupportLine(opponent)[0]);
+        Assert.Same(mine, match.Battlefield.GetSupportLine(player)[0]);
     }
 
     [Fact]
@@ -389,13 +403,17 @@ public sealed class SandboxPrimitiveTests
         var origin = unit.GetData<UnitStateData>().Line!;
 
         var updates = SandboxTestKit.TrackUpdates(match);
-        var result = await match.Sandbox.MoveAsync(unit, "frontline", 2);
+        var result = await match.Sandbox.MoveAsync(unit, "frontline", 0);
 
         Assert.True(result.Ok, result.Reason);
         Assert.Contains(GameUpdates.UnitPositionChanged, updates);
-        Assert.Equal(0, origin.Size);
-        Assert.Same(unit, match.Battlefield.FrontLine.GetInsertionGaps().At(2));
-        Assert.Same(match.Battlefield.FrontLine.GetInsertionGaps().At(2), unit.GetData<UnitStateData>().Line);
+        // 支援线只留 HQ（槽 0 的占位实体）：单位已离开原线（-1 才是"不在线上"的唯一判据）。
+        Assert.Equal(1, origin.Size);
+        Assert.Equal(-1, origin.IndexOf(unit));
+        // 落地位置＝插入后序号（有序列表模型：不居中重排）；线对象是 BattleLine，不是空隙。
+        Assert.Same(match.Battlefield.FrontLine, unit.GetData<UnitStateData>().Line);
+        // 空前线只有 1 个插入点（0）：请求 0＝落到 0 号位（越界不再钳制——越界走 slot-out-of-range）。
+        Assert.Equal(0, match.Battlefield.FrontLine.IndexOf(unit));
     }
 
     [Fact]
@@ -404,14 +422,16 @@ public sealed class SandboxPrimitiveTests
         var match = await SandboxTestKit.CreateMatchAsync();
         var player = match.Players[0];
         var mover = await CommandTestKit.PrepareOnSupportAsync(match, player, SandboxTestKit.UnitId, 0);
-        var blocker = await CommandTestKit.PrepareOnSupportAsync(match, player, SandboxTestKit.UnitId, 1);
-        var blockedSlot = blocker.GetData<UnitStateData>().Line!;
+        await CommandTestKit.PrepareOnSupportAsync(match, player, SandboxTestKit.UnitId, 1);
+        var origin = mover.GetData<UnitStateData>().Line!;
 
+        // 列表模型下「目标位置已被占用」不是可表达的目标（插入点永远落在元素之间）：
+        // 目标不可用的最近形态＝请求自己当前所在的位置 ⇒ same-slot 拒绝、零副作用（原用例的「硬门槛拒绝」语义保持）。
         var before = SandboxTestKit.Snapshot(match);
-        var result = await match.Sandbox.MoveAsync(mover, "support", blockedSlot.Size);
+        var result = await match.Sandbox.MoveAsync(mover, "support", origin.IndexOf(mover));
 
         Assert.False(result.Ok);
-        Assert.Equal(SandboxFailure.TargetSlotOccupied, result.Reason);
+        Assert.Equal(SandboxFailure.SameSlot, result.Reason);
         Assert.Equal(before, SandboxTestKit.Snapshot(match));
     }
 
@@ -448,7 +468,8 @@ public sealed class SandboxPrimitiveTests
         Assert.True(result.Ok, result.Reason);
         Assert.Contains(GameUpdates.CardDying, updates); // 死亡链（不是一步式销毁）
         Assert.Contains(GameUpdates.CardDied, updates);
-        Assert.Equal(0, slot.Size);
+        Assert.DoesNotContain(unit, slot.Members); // 清位：单位已离场
+        Assert.Equal(1, slot.Size); // 只余 HQ
         Assert.True(unit.GetData<UnitStateData>().IsDestroyed);
     }
 

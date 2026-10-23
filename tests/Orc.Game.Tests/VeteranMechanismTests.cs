@@ -543,28 +543,28 @@ public class VeteranMechanismTests
         Assert.Empty(recorder.Updates);
 
         // ③ 无老兵版本·未声明（基础形态未声明 BecomesVeteran）：拒绝。
-        var plain = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 1);
+        var plain = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
         recorder.Clear();
         var notDeclared = await plain.InvokeVeteranTriggerAsync();
         Assert.Equal(VeteranPromotionRejectionReason.VersionNotDeclared, notDeclared.RejectionReason);
         Assert.Empty(recorder.Updates);
 
         // ④ 无老兵版本·目标缺失（声明了但运行时查不到对应老兵定义）：拒绝。
-        var orphan = await CommandTestKit.PrepareOnFrontAsync(match, playerA, OrphanId, 2);
+        var orphan = await CommandTestKit.PrepareOnFrontAsync(match, playerA, OrphanId, 1);
         recorder.Clear();
         var missing = await orphan.InvokeVeteranTriggerAsync();
         Assert.Equal(VeteranPromotionRejectionReason.VersionMissing, missing.RejectionReason);
         Assert.Empty(recorder.Updates);
 
         // ⑤ 无老兵版本·目标不完整（老兵定义缺 VeteranOf）：拒绝。
-        var incomplete = await CommandTestKit.PrepareOnFrontAsync(match, playerA, IncompleteId, 3);
+        var incomplete = await CommandTestKit.PrepareOnFrontAsync(match, playerA, IncompleteId, 2);
         recorder.Clear();
         var incompleteResult = await incomplete.InvokeVeteranTriggerAsync();
         Assert.Equal(VeteranPromotionRejectionReason.VersionIncomplete, incompleteResult.RejectionReason);
         Assert.Empty(recorder.Updates);
 
         // ⑥ 无老兵版本·来源错配（老兵定义来源未指向当前卡）：拒绝。
-        var mismatch = await CommandTestKit.PrepareOnFrontAsync(match, playerA, MismatchId, 4);
+        var mismatch = await CommandTestKit.PrepareOnFrontAsync(match, playerA, MismatchId, 3);
         recorder.Clear();
         var mismatchResult = await mismatch.InvokeVeteranTriggerAsync();
         Assert.Equal(VeteranPromotionRejectionReason.VersionSourceMismatch, mismatchResult.RejectionReason);

@@ -28,7 +28,7 @@ public class CommandCombatTests
         // 适配（后置项 A）：原「炮兵 × 炮兵」组合现属豁免表（攻击者＝炮兵不受任何反击、不会互伤）——
         // 迁移为非豁免组合「战斗机（攻 3 / 防 2）× 炮兵（攻 2 / 防 2）」（覆盖语义保持：互伤同归）。
         var attacker = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.FighterId, 0); // 攻 3 / 防 2
-        var target = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.ArtilleryId, 2); // 攻 2 / 防 2
+        var target = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.ArtilleryId, 1); // 攻 2 / 防 2
         CommandTestKit.Activate(attacker);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         using var recorder = new UpdateRecorder(match.Engine);
@@ -166,7 +166,7 @@ public class CommandCombatTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var attacker = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.FighterId, 0); // 攻 3 / 防 2
-        var target = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.ArtilleryId, 2); // 攻 2 / 防 2
+        var target = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.ArtilleryId, 1); // 攻 2 / 防 2
         CommandTestKit.Activate(attacker);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         using var recorder = new UpdateRecorder(match.Engine);
@@ -259,7 +259,7 @@ public class CommandCombatTests
         // 适配（后置项 A）：原「炮兵 × 炮兵」组合现属豁免表（攻击者＝炮兵不受任何反击——攻击者不会死亡）——
         // 迁移为非豁免组合「脆皮步兵（攻 1 / 防 2）× 炮兵（攻 2 / 防 2）」：以攻击者死亡告终（覆盖语义保持）。
         var attacker = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.WeakId, 0);
-        var target = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.ArtilleryId, 2);
+        var target = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.ArtilleryId, 1);
         CommandTestKit.Activate(attacker);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
@@ -296,7 +296,7 @@ public class CommandCombatTests
         Assert.Equal(30, mega.GetData<UnitStateData>().Defense);
         Assert.Equal(MatchState.Ended, match.State);
         Assert.Same(playerA, match.Winner);
-        Assert.Same(enemyHq, match.Battlefield.PlayerBSupportLine.GetInsertionGaps().At(0)); // HQ 占位不变（占位者＝HQ 实体）
+        Assert.Same(enemyHq, match.Battlefield.PlayerBSupportLine[0]); // 位置不变：HQ 仍是敌方支援线位置 0 的元素
         Assert.Equal(0, playerA.Points); // 当次收尾照常：扣费恰一次
         Assert.False(mega.GetData<CommandData>().CanAttack); // 清位照常
         Assert.False(mega.GetData<CommandData>().CanMove);
@@ -339,7 +339,7 @@ public class CommandCombatTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var attacker = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.BeastId, 0); // 攻 6 / 防 7
-        var ambusher = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.AmbushId, 2); // 攻 5 / 防 6
+        var ambusher = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.AmbushId, 1); // 攻 5 / 防 6
         CommandTestKit.Activate(attacker);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
@@ -381,7 +381,7 @@ public class CommandCombatTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var killer = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.BeastId, 0); // 攻 6 / 防 7
-        var ambusher = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.AmbushId, 2); // 攻 5 / 防 6
+        var ambusher = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.AmbushId, 1); // 攻 5 / 防 6
         CommandTestKit.Activate(killer);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
@@ -392,7 +392,7 @@ public class CommandCombatTests
 
         // 手动驱动「造成攻击伤害」（模拟对局内结算路径）：探针攻击者满足伏击条件（防 2 ＜ 伏击兵攻 5），
         // 但伏击兵已死 → 不再改写（resolution 未被置位）。
-        var probe = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.WeakId, 3);
+        var probe = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.WeakId, 1);
         var resolution = new AttackDamageResolution();
         await match.CommandManager.AttackDamageTrigger.InvokeAsync(
             match.Engine,

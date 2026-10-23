@@ -24,8 +24,8 @@ public class CommandRulesTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var attacker = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
-        var enemyOnFront = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 1);
-        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
+        var enemyOnFront = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 0);
+        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(attacker);
 
         var report = match.CommandManager.GetCommandAvailability(attacker);
@@ -45,7 +45,7 @@ public class CommandRulesTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var attacker = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
-        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
+        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
         var enemyOnFront = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(attacker);
 
@@ -98,7 +98,7 @@ public class CommandRulesTests
         var playerB = match.Players[1];
         var typeless = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.TypelessId, 1);
         var enemyOnFront = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 0);
-        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
+        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(typeless);
 
         // 零类型＝基线：仅相邻（视同步兵）——支援线→敌前线允许、→敌支援线/HQ 禁止。
@@ -116,7 +116,7 @@ public class CommandRulesTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var mix = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.MixId, 1);
-        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
+        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
         var enemyOnFront = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 0);
         CommandTestKit.Activate(mix);
 
@@ -138,7 +138,7 @@ public class CommandRulesTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var tank = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.TankId, 1);
-        var enemy = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
+        var enemy = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         await match.EndTurn(); // → 玩家 B 回合
         await match.EndTurn(); // → 玩家 A 回合（回合同步恢复：两 bool＝true；槽 2＝2 点）
@@ -167,7 +167,7 @@ public class CommandRulesTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var artillery = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.ArtilleryId, 1);
-        await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2); // 提供合法攻击目标
+        await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1); // 提供合法攻击目标
         CommandTestKit.Activate(artillery);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
@@ -248,11 +248,11 @@ public class CommandRulesTests
         await match.Initialize();
         var playerA = match.Players[0];
         var playerB = match.Players[1];
-        // B 支援线：守护兵 x2（槽 1、槽 4——不相邻）。
+        // B 支援线：守护兵 x2（位置 1＝紧随 HQ、位置 2）——守护者自身永不获被守护；HQ 由位置 1 的守护者保护。
         var guardian1 = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.GuardianId, 1);
         var guardian2 = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.GuardianId, 2);
         var infantry = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
-        var artillery = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.ArtilleryId, 2);
+        var artillery = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.ArtilleryId, 1);
         CommandTestKit.Activate(infantry);
         CommandTestKit.Activate(artillery);
         var enemyHq = playerB.Hq; // W3-3：HQ 目标＝实体引用
@@ -280,16 +280,17 @@ public class CommandRulesTests
         await match.Initialize();
         var playerA = match.Players[0];
         var playerB = match.Players[1];
-        await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.GuardianId, 1); // 守护者（槽 1＝HQ 左邻）
-        var nearUnit = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 0); // 落槽 0：与守护者相邻（差 1）→ 获
-        var farUnit = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 0); // 落槽 3：与守护者差 2（隔 HQ 槽 2）→ 不获
+        // 有序列表模型：「物理相邻」＝元素位置序号差 1；"不相邻"不再靠空格，而是靠中间夹一个元素。
+        await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.GuardianId, 1); // 守护者：位置 1（紧随 HQ）
+        var nearUnit = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2); // 位置 2：与守护者差 1 → 获
+        var farUnit = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 3); // 位置 3：与守护者差 2（中间隔着 nearUnit）→ 不获
         var crossLineUnit = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 0); // 跨线 → 不获
 
         Assert.True(match.CommandManager.IsUnitGuarded(nearUnit));
-        Assert.False(match.CommandManager.IsUnitGuarded(farUnit)); // 隔空槽不相邻（物理邻位＝索引差 1）
+        Assert.False(match.CommandManager.IsUnitGuarded(farUnit)); // 非邻位不相邻（物理邻位＝索引差 1）
         Assert.False(match.CommandManager.IsUnitGuarded(crossLineUnit)); // 跨线不计
 
-        // HQ 两侧任一邻位同规则：守护者在槽 1（HQ 左邻）→ HQ 获保护。
+        // HQ 两侧任一邻位同规则：守护者在位置 1（HQ 邻位）→ HQ 获保护。
         Assert.True(match.CommandManager.IsHqGuarded(playerB));
     }
 
@@ -299,10 +300,12 @@ public class CommandRulesTests
         var match = CommandTestKit.CreateCommandMatch();
         await match.Initialize();
         var playerB = match.Players[1];
-        // B 支援线：守护者落槽 4（与 HQ〔槽 2〕间隔槽 3 空位）→ HQ 与守护者隔空 → 不获保护。
-        await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.GuardianId, 3);
+        // B 支援线：HQ（位置 0）＋中间单位（位置 1）＋守护者（位置 2）——守护者与 HQ 位置差 2 → 不相邻 → 不获保护。
+        // 有序列表模型没有"空格"：把一个位置隔开必须由另一个元素占位（判定式"索引差 1"未变）。
+        await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
+        await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.GuardianId, 2);
 
-        Assert.False(match.CommandManager.IsHqGuarded(playerB)); // 隔空不相邻（物理邻位＝索引差 1）
+        Assert.False(match.CommandManager.IsHqGuarded(playerB)); // 隔一个元素＝不相邻（物理邻位＝索引差 1）
     }
 
     [Fact]
@@ -315,12 +318,12 @@ public class CommandRulesTests
         var playerB = match.Players[1];
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
-        // 场景（新布局适配）：支援线 HQ 居中后，单个可部署位的邻格仅一侧、无法表达「两守护者夹持」——
-        // 多源场景改在无占位的前线表达：A 前线 X（槽 2）＋守护者 G1（槽 1）、G2（槽 3）。
-        var x = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 2);
+        // 场景（有序列表适配）：多源场景在无占位的前线表达——X 先入场（插入点 0），
+        // 再把两个守护者插到 X 两侧（插入点 0 与末尾）→ [G1, X, G2]（X 与两者均相邻）。
+        var x = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
         Assert.False(match.CommandManager.IsUnitGuarded(x)); // 入场前无守护源
-        var g1 = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.GuardianId, 1);
-        var g2 = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.GuardianId, 3);
+        var g1 = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.GuardianId, 0); // 插到 X 左侧
+        var g2 = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.GuardianId, 2); // 追加到末尾（右侧）
         Assert.True(match.CommandManager.IsUnitGuarded(x)); // 入场占位触达维护
 
         // 「移走其一仍保留」→ 新布局等价面：失其一仍保留（多守护源存在性判定——前线单位不可移动
@@ -340,14 +343,14 @@ public class CommandRulesTests
         Assert.True(g2.GetData<UnitStateData>().IsDestroyed);
         Assert.False(match.CommandManager.IsUnitGuarded(x)); // 守护者死亡 → 清位后等效触达维护
 
-        // 移动触点（支援线单位移动〔仅推进〕触发维护）：Y（槽 0）＋守护者 H（槽 1＝HQ 左邻）——
-        // H 移动走 → Y／HQ 失去被守护（HQ 联动）。
+        // 移动触点（支援线单位移动〔仅推进〕触发维护）：Y（位置 0）＋守护者 H（位置 1）——
+        // 布局 [Y, H, HQ]：H 两侧邻位＝Y 与 HQ；H 移动走 → Y／HQ 失去被守护（HQ 联动）。
         await match.EndTurn(); // → 玩家 A 回合
         var y = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 0);
         Assert.False(match.CommandManager.IsUnitGuarded(y)); // 入场前无守护源
-        var h = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.GuardianId, 0);
+        var h = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.GuardianId, 1);
         Assert.True(match.CommandManager.IsUnitGuarded(y)); // 入场（Join）触达维护
-        Assert.True(match.CommandManager.IsHqGuarded(playerA)); // HQ 两侧任一邻位：H（槽 1）→ HQ 获守护
+        Assert.True(match.CommandManager.IsHqGuarded(playerA)); // HQ 邻位：H（位置 1）→ HQ 获守护
         CommandTestKit.Activate(h);
         var moveResult = await CommandTestKit.RunCommandAsync(match, bridge, h, match.Battlefield.FrontLine.GetInsertionGaps().At(0).Ref);
         Assert.Equal(CommandResultStatus.Success, moveResult.Status);

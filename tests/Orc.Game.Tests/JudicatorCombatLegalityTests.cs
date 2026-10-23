@@ -1,5 +1,6 @@
 using Orc.Core;
 using Orc.Game;
+using Orc.Game.Board;
 using Orc.Game.Cards;
 using Orc.Game.Commanding;
 using Orc.Game.Judicators;
@@ -31,9 +32,10 @@ public class JudicatorCombatLegalityTests
         await match.Initialize();
         var playerA = match.Players[0];
         var playerB = match.Players[1];
+        // 布置（有序列表模型）：前线首个元素＝插入点 0；敌方支援线 HQ 之后＝插入点 1。
         var attacker = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
-        var enemyOnFront = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 1);
-        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
+        var enemyOnFront = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 0);
+        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(attacker);
 
         // 候选链（可用性）：经 combat.target.legal 逐候选过滤——相邻可达、跨线不可达。
@@ -81,10 +83,10 @@ public class JudicatorCombatLegalityTests
         await match.Initialize();
         var playerA = match.Players[0];
         var playerB = match.Players[1];
-        // B 前线：守护兵（槽 0）＋步兵（槽 1）——相邻（索引差 1）→ 步兵获「被守护」。
+        // B 前线：守护兵（位置 0）＋步兵（位置 1）——相邻（索引差 1）→ 步兵获「被守护」。
         await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.GuardianId, 0);
         var guarded = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 1);
-        var infantry = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 2);
+        var infantry = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
         var artillery = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.ArtilleryId, 2);
         CommandTestKit.Activate(infantry);
         CommandTestKit.Activate(artillery);
@@ -111,10 +113,10 @@ public class JudicatorCombatLegalityTests
         await match.Initialize();
         var playerA = match.Players[0];
         var playerB = match.Players[1];
-        // B 支援线：守护兵（槽 1）→ HQ（槽 2）被守护。
+        // B 支援线：守护兵（位置 1，紧随 HQ）→ HQ 被守护。
         await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.GuardianId, 1);
         var infantry = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
-        var artillery = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.ArtilleryId, 2);
+        var artillery = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.ArtilleryId, 1);
         CommandTestKit.Activate(infantry);
         CommandTestKit.Activate(artillery);
 
@@ -188,7 +190,7 @@ public class JudicatorCombatLegalityTests
         var artillery = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.ArtilleryId, 1);
         var fighter = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.FighterId, 2);
         var bomber = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.BomberId, 1);
-        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
+        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(artillery);
         CommandTestKit.Activate(fighter);
         CommandTestKit.Activate(bomber);
@@ -209,8 +211,8 @@ public class JudicatorCombatLegalityTests
         var infantry = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
         var tank = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.TankId, 2);
         var typeless = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.TypelessId, 1);
-        var enemyOnFront = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 1);
-        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
+        var enemyOnFront = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 0);
+        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(infantry);
         CommandTestKit.Activate(tank);
         CommandTestKit.Activate(typeless);
@@ -256,7 +258,7 @@ public class JudicatorCombatLegalityTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var attacker = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
-        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
+        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(attacker);
         var attackTrigger = match.CommandManager.UnitAttackTrigger;
         var refs = new[] { attacker.Ref, enemyOnSupport.Ref };
@@ -295,7 +297,7 @@ public class JudicatorCombatLegalityTests
         var playerB = match.Players[1];
         await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.GuardianId, 0);
         var guarded = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 1);
-        var infantry = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 2);
+        var infantry = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(infantry);
         var attackTrigger = match.CommandManager.UnitAttackTrigger;
         var refs = new[] { infantry.Ref, guarded.Ref };
@@ -363,7 +365,7 @@ public class JudicatorCombatLegalityTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var attacker = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
-        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
+        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(attacker);
         var attackTrigger = match.CommandManager.UnitAttackTrigger;
         var refs = new[] { attacker.Ref, enemyOnSupport.Ref };
@@ -408,7 +410,7 @@ public class JudicatorCombatLegalityTests
         Assert.Equal(new object[] { false }, entry.Invoke(new object[] { attacker, slotRef }));
 
         // 对照：合法目标引用＝true（判定器真实求值——非恒假）。
-        var enemyOnFront = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 1);
+        var enemyOnFront = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 0);
         Assert.Equal(new object[] { true }, entry.Invoke(new object[] { attacker, enemyOnFront.Ref }));
     }
 
@@ -426,9 +428,14 @@ public class JudicatorCombatLegalityTests
         var bomber = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.BomberId, 1);
         var enemyFighter = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.FighterId, 0);
         var enemyOnFront = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 1);
-        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
-        var enemySupportSlot = match.Battlefield.GetSupportLine(playerB).GetInsertionGaps().At(2);
-        var enemyFrontSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(1);
+        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
+
+        // 载荷口径：C2/C4 的目标参＝**已落地位置**（BoardPosition：线 + 元素位置序号）。
+        // 不可用插入空隙序号代替元素序号（插入点是"请求落位"、不是位置），也不可传线本身。
+        var enemySupportLine = enemyOnSupport.GetData<UnitStateData>().Line!;
+        var enemyFrontLine = enemyOnFront.GetData<UnitStateData>().Line!;
+        var enemySupportPosition = new BoardPosition(enemySupportLine, enemySupportLine.IndexOf(enemyOnSupport));
+        var enemyFrontPosition = new BoardPosition(enemyFrontLine, enemyFrontLine.IndexOf(enemyOnFront));
 
         // 默认名恒可解析（固定内置注册段——无条件可用）。
         Assert.NotNull(match.Judicators.Resolve(JudicatorNames.CombatTargetLegal));
@@ -436,11 +443,11 @@ public class JudicatorCombatLegalityTests
         Assert.NotNull(match.Judicators.Resolve(JudicatorNames.CombatGuardEligibility));
         Assert.NotNull(match.Judicators.Resolve(JudicatorNames.CombatInterception));
 
-        // C2（combat.range；（攻击者, 目标槽位）→ bool）直接调用：炮＝任意线；步＝仅相邻。
+        // C2（combat.range；（攻击者, 目标位置）→ bool）直接调用：炮＝任意线；步＝仅相邻。
         var range = match.Judicators.Resolve(JudicatorNames.CombatRange);
-        Assert.Equal(new object[] { true }, range.Invoke(new object[] { artillery, enemySupportSlot }));
-        Assert.Equal(new object[] { false }, range.Invoke(new object[] { infantry, enemySupportSlot }));
-        Assert.Equal(new object[] { true }, range.Invoke(new object[] { infantry, enemyFrontSlot }));
+        Assert.Equal(new object[] { true }, range.Invoke(new object[] { artillery, enemySupportPosition }));
+        Assert.Equal(new object[] { false }, range.Invoke(new object[] { infantry, enemySupportPosition }));
+        Assert.Equal(new object[] { true }, range.Invoke(new object[] { infantry, enemyFrontPosition }));
 
         // C3（combat.guard.eligibility；（攻击者）→ bool）直接调用：炮/轰＝有资格；步/战斗机＝无资格。
         var guard = match.Judicators.Resolve(JudicatorNames.CombatGuardEligibility);
@@ -449,13 +456,13 @@ public class JudicatorCombatLegalityTests
         Assert.Equal(new object[] { true }, guard.Invoke(new object[] { bomber }));
         Assert.Equal(new object[] { false }, guard.Invoke(new object[] { enemyFighter }));
 
-        // C4（combat.interception；（攻击者, 目标槽位, 目标是否战斗机）→ bool）直接调用：
+        // C4（combat.interception；（攻击者, 目标位置, 目标是否战斗机）→ bool）直接调用：
         // 轰炸机∧非战斗机目标∧同线存活敌战斗机＝拦截；目标战斗机/跨线/非轰炸机攻击者＝不拦截。
         var interception = match.Judicators.Resolve(JudicatorNames.CombatInterception);
-        Assert.Equal(new object[] { true }, interception.Invoke(new object[] { bomber, enemyFrontSlot, false }));
-        Assert.Equal(new object[] { false }, interception.Invoke(new object[] { bomber, enemyFrontSlot, true }));
-        Assert.Equal(new object[] { false }, interception.Invoke(new object[] { bomber, enemySupportSlot, false }));
-        Assert.Equal(new object[] { false }, interception.Invoke(new object[] { artillery, enemyFrontSlot, false }));
+        Assert.Equal(new object[] { true }, interception.Invoke(new object[] { bomber, enemyFrontPosition, false }));
+        Assert.Equal(new object[] { false }, interception.Invoke(new object[] { bomber, enemyFrontPosition, true }));
+        Assert.Equal(new object[] { false }, interception.Invoke(new object[] { bomber, enemySupportPosition, false }));
+        Assert.Equal(new object[] { false }, interception.Invoke(new object[] { artillery, enemyFrontPosition, false }));
 
         // 对照（防未使用变量）：目标引用仍在场（本测试仅只读调用、零副作用）。
         Assert.True(enemyOnFront.Ref.IsAlive);
@@ -472,8 +479,8 @@ public class JudicatorCombatLegalityTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var attacker = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
-        var enemyOnFront = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 1);
-        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
+        var enemyOnFront = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 0);
+        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(attacker);
 
         // 独立构造（不经 Match 装配链/注册表）：内置默认交战判定器族（C1＋C2/C3/C4 内置实例）构造即可用。

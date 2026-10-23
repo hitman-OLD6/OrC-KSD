@@ -23,15 +23,17 @@ public sealed class SandboxPrimitiveSignalEquivalenceTests
         var primitiveUpdates = SandboxTestKit.TrackUpdates(primitiveMatch);
         var effectUpdates = SandboxTestKit.TrackUpdates(effectMatch);
 
-        // 原语路径：unitize → JoinUnitAsync（加入链）。
+        // 原语路径：unitize → JoinUnitAsync（加入链）。（slot＝插入空隙序号：0＝HQ 前、1＝HQ 后）
+        var primitiveLine = primitiveMatch.Battlefield.GetSupportLine(primitivePlayer);
+        var effectLine = effectMatch.Battlefield.GetSupportLine(effectPlayer);
         var card = await primitiveMatch.CardService.CreateAsync(SandboxTestKit.UnitId, primitivePlayer);
-        var primitiveResult = await primitiveMatch.Sandbox.UnitizeAsync(card, "support", 4);
+        var primitiveResult = await primitiveMatch.Sandbox.UnitizeAsync(card, "support", 1);
         Assert.True(primitiveResult.Ok, primitiveResult.Reason);
 
         // 效果侧路径：创建 → PlaceToSupportLineAsync（效果运行期使用的同一原子组合）。
         var effectCard = await effectMatch.CardService.CreateAsync(SandboxTestKit.UnitId, effectPlayer);
         var placed = await effectMatch.CardService.PlaceToSupportLineAsync(
-            (Orc.Game.Cards.UnitCard)effectCard, effectPlayer, effectMatch.Battlefield.GetSupportLine(effectPlayer).GetInsertionGaps().At(4));
+            (Orc.Game.Cards.UnitCard)effectCard, effectPlayer, effectLine.GetInsertionGaps().At(1));
         Assert.True(placed.IsSuccess);
 
         // 逐条一致（含 CreateAsync 的 card.load）：不多不少。
@@ -39,13 +41,11 @@ public sealed class SandboxPrimitiveSignalEquivalenceTests
         Assert.Contains(Updates.CardPlaced, primitiveUpdates);
         Assert.Contains(GameUpdates.UnitJoined, primitiveUpdates);
 
-        // 状态面同样一致（不在场单位 → 在场单位，位置＝指定槽）。
+        // 状态面同样一致（不在场单位 → 在场单位，位置＝指定插入点所在的线＋序号）。
         var primitiveCard = (UnitCard)SandboxTestKit.Resolve(primitiveMatch, primitiveResult.Ref!)!;
-        Assert.Same(
-            primitiveMatch.Battlefield.GetSupportLine(primitivePlayer).GetInsertionGaps().At(4),
-            primitiveCard.GetData<UnitStateData>().Line);
-        Assert.Same(
-            effectMatch.Battlefield.GetSupportLine(effectPlayer).GetInsertionGaps().At(4),
-            ((Orc.Game.Cards.UnitCard)effectCard).GetData<UnitStateData>().Line);
+        Assert.Same(primitiveLine, primitiveCard.GetData<UnitStateData>().Line);
+        Assert.Equal(1, primitiveLine.IndexOf(primitiveCard));
+        Assert.Same(effectLine, ((Orc.Game.Cards.UnitCard)effectCard).GetData<UnitStateData>().Line);
+        Assert.Equal(1, effectLine.IndexOf((Orc.Game.Cards.UnitCard)effectCard));
     }
 }

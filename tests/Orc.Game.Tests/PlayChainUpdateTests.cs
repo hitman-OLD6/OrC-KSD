@@ -23,7 +23,7 @@ public class PlayChainUpdateTests
         var unit = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(match, player);
         var line = match.Battlefield.PlayerASupportLine;
 
-        // 发射时点探针：unit.deployed 到达时，单位化（组件挂载＋槽位占用）是否已完成。
+        // 发射时点探针：unit.deployed 到达时，单位化（组件挂载＋落位）是否已完成。
         var deployedProbe = new List<(bool HasComponents, bool Occupied)>();
         using var probe = match.Engine.Subscribe((type, payload, ct) =>
         {
@@ -33,7 +33,7 @@ public class PlayChainUpdateTests
                 var position = (BoardPosition)payload[GameUpdates.PayloadPosition]!;
                 deployedProbe.Add((
                     deployedUnit.TryGetData<UnitStateData>(out _),
-                    ReferenceEquals(position, deployedUnit)));
+                    position.Line.Contains(deployedUnit) && position.Index == position.Line.IndexOf(deployedUnit)));
             }
 
             return Task.CompletedTask;
@@ -59,7 +59,7 @@ public class PlayChainUpdateTests
         var deployedPayload = recorder.Updates[2].Payload!;
         Assert.Same(unit, deployedPayload[GameUpdates.PayloadUnit]);
         Assert.Equal(1, ((BoardPosition)deployedPayload[GameUpdates.PayloadPosition]!).Index);
-        // 时点：位于单位化完成（组件挂载＋槽位占用）之后
+        // 时点：位于单位化完成（组件挂载＋落位）之后
         var state = Assert.Single(deployedProbe);
         Assert.True(state.HasComponents);
         Assert.True(state.Occupied);
@@ -84,7 +84,9 @@ public class PlayChainUpdateTests
         Assert.Same(unit, placedPayload[GameUpdates.PayloadCard]);
         var joinedPayload = recorder.Updates[1].Payload!;
         Assert.Same(unit, joinedPayload[GameUpdates.PayloadUnit]);
-        Assert.Same(front, joinedPayload[GameUpdates.PayloadPosition]);
+        var joinedPosition = Assert.IsType<BoardPosition>(joinedPayload[GameUpdates.PayloadPosition]);
+        Assert.Same(match.Battlefield.FrontLine, joinedPosition.Line); // 落位＝请求的空隙所在阵线（按线＋序号核对）
+        Assert.Equal(0, joinedPosition.Index);
     }
 
     [Fact]

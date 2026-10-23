@@ -91,7 +91,7 @@ public class OfficialCardDataSmokeTests
         var playResult = await match.PlayManager.PlayUnitAsync(unit, supportLine.GetInsertionGaps().At(1));
 
         Assert.Equal(PlayResultStatus.Success, playResult.Status);
-        Assert.Same(unit, supportLine.GetInsertionGaps().At(1));
+        Assert.Same(unit, supportLine[1]); // 落在插入点 1＝支援线 HQ 之后（位置即元素顺序）
 
         // 数值经加载链就绪（组件 loader 驱动：battleStats）。
         var stats = unit.GetData<BattleStatsData>();

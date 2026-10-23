@@ -23,8 +23,8 @@ public class CommandFrontLineTests
         await match.Initialize();
         var playerA = match.Players[0];
         var playerB = match.Players[1];
-        var mover = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 2);
-        var beast = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.BeastId, 1); // 攻 6 / 防 7
+        var mover = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
+        var beast = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.BeastId, 2); // 攻 6 / 防 7
         var blocker = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.WeakId, 0); // 攻 1 / 防 2（敌占前线）
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         await match.EndTurn(); // → B 回合
@@ -50,8 +50,8 @@ public class CommandFrontLineTests
 
         var recovered = match.CommandManager.GetCommandAvailability(mover);
         Assert.True(recovered.Move.CanUse);
-        Assert.Equal(new[] { front[0].Ref, front[1].Ref, front[2].Ref, front[3].Ref, front[4].Ref },
-            recovered.Move.Candidates);
+        // 候选＝前线**全部插入空隙**（有序列表模型：N 个元素 → N+1 个落位请求；旧断言枚举的"5 个物理格子"已无对应物）。
+        Assert.Equal(front.GetInsertionGaps().Select(gap => gap.Ref), recovered.Move.Candidates);
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public class CommandFrontLineTests
         var match = CommandTestKit.CreateCommandMatch();
         await match.Initialize();
         var playerA = match.Players[0];
-        // 己方已占前线（无敌人）＝前置满足：推进候选＝前线空槽（被占槽除外）。
+        // 己方已占前线（无敌人）＝前置满足：推进候选＝前线全部插入空隙（有序列表模型：N 元素 → N+1 个落位请求）。
         await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
         var mover = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(mover);
@@ -69,7 +69,7 @@ public class CommandFrontLineTests
         var report = match.CommandManager.GetCommandAvailability(mover);
 
         Assert.True(report.Move.CanUse);
-        Assert.Equal(new[] { front[1].Ref, front[2].Ref, front[3].Ref, front[4].Ref }, report.Move.Candidates);
+        Assert.Equal(front.GetInsertionGaps().Select(gap => gap.Ref), report.Move.Candidates);
     }
 
     [Fact]
@@ -80,10 +80,10 @@ public class CommandFrontLineTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var mover = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
-        await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.WeakId, 1); // 敌占前线（槽 1）
+        await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.WeakId, 0); // 敌占前线（位置 0）
         CommandTestKit.Activate(mover);
-        var oldSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1);
-        var targetSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0); // 空槽（前置不满足——防御性双保险拒绝）
+        var oldSlot = new Orc.Game.Board.BoardPosition(match.Battlefield.PlayerASupportLine, 1); // 已成事实的位置（载荷口径）
+        var targetSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0); // 目标空隙（前置不满足——防御性双保险拒绝）
 
         // 执行兜底复验：分派后、执行前复验前置条件——不满足＝ValidationRejected（零副作用：槽位不变、行动状态不消耗）。
         var stream = await match.CommandManager.UnitMoveTrigger.InvokeAsync(
@@ -96,8 +96,8 @@ public class CommandFrontLineTests
             });
 
         Assert.Equal(ExecutionOutcome.ValidationRejected, stream.Outcome);
-        Assert.Same(mover, oldSlot);
-        Assert.Empty(match.Battlefield.FrontLine.Members); // 零副作用：目标位置未被占用
+        Assert.Same(mover, match.Battlefield.PlayerASupportLine[1]); // 原位不变（位置元素仍是该单位）
+        Assert.DoesNotContain(mover, match.Battlefield.FrontLine.Members); // 零副作用：移动未落位（前线只剩既有的敌方占位）
         Assert.True(mover.GetData<CommandData>().CanMove);
         Assert.Equal(1, playerA.Points); // 零副作用：费用未扣
     }
@@ -112,7 +112,7 @@ public class CommandFrontLineTests
         var bomber = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.BomberId, 1);
         var enemyFighter = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.FighterId, 0);
         var frontInfantry = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 1);
-        var supportInfantry = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
+        var supportInfantry = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(bomber);
 
         var report = match.CommandManager.GetCommandAvailability(bomber);
@@ -158,7 +158,7 @@ public class CommandFrontLineTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var beast = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.BeastId, 0);
-        var bomber = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.BomberId, 2);
+        var bomber = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.BomberId, 1);
         var enemyFighter = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.FighterId, 1);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         await match.EndTurn(); // → B 回合
@@ -223,7 +223,7 @@ public class CommandFrontLineTests
         await match.Initialize();
         var playerA = match.Players[0];
         var playerB = match.Players[1];
-        var fighter = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.FighterId, 2);
+        var fighter = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.FighterId, 1);
         var artillery = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.ArtilleryId, 2);
         await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.FighterId, 1); // 敌支援线战斗机
         CommandTestKit.Activate(fighter);

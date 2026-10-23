@@ -71,13 +71,13 @@ public class GameHooksTests
         using var recorder = new UpdateRecorder(engine);
         var unit = new UnitCard(engine, new CardDefinition("单位", 1, 2, 3, 4, faction: Faction.Germany, rarity: Rarity.Standard));
         var line = new BattleLine(4);
-        var oldPosition = line.GetInsertionGaps().At(0);
-        var newPosition = line.GetInsertionGaps().At(1);
+        var oldPosition = new BoardPosition(line, 0);
+        var newPosition = new BoardPosition(line, 1);
 
         await GameUpdates.EmitCardDied(engine, unit);
-        await GameUpdates.EmitUnitJoined(engine, unit, new BoardPosition(oldPosition.Line, oldPosition.Ordinal));
-        await GameUpdates.EmitUnitDeployed(engine, unit, new BoardPosition(newPosition.Line, newPosition.Ordinal));
-        await GameUpdates.EmitUnitPositionChanged(engine, unit, new BoardPosition(oldPosition.Line, oldPosition.Ordinal), new BoardPosition(newPosition.Line, newPosition.Ordinal));
+        await GameUpdates.EmitUnitJoined(engine, unit, oldPosition);
+        await GameUpdates.EmitUnitDeployed(engine, unit, newPosition);
+        await GameUpdates.EmitUnitPositionChanged(engine, unit, oldPosition, newPosition);
 
         Assert.Equal(
             new[] { GameUpdates.CardDied, GameUpdates.UnitJoined, GameUpdates.UnitDeployed, GameUpdates.UnitPositionChanged },
@@ -211,13 +211,14 @@ public class GameHooksTests
             .Select(field => (string)field.GetRawConstantValue()!)
             .ToList();
 
-        Assert.Equal(27, names.Count);
+        Assert.Equal(28, names.Count); // = 内置 27（含 deploy.position.candidates）＋外部示范 1
         Assert.Equal(names.OrderBy(v => v, StringComparer.Ordinal),
             GameHooks.JudicatorNameList.OrderBy(v => v, StringComparer.Ordinal));
 
-        // 装配面：25 内置固定注册段（4 验证类＋6 交战类＋4 动作资格类〔含抑制资格〕＋1 效果选靶类＋5 资源类
-        // ＋1 目标候选合法性〔S2 提入〕＋1 回合归属〔R4〕＋3 通用关系类〔相邻/兵种/归属〕） + 1 外部装配段 = 全量 26
-        Assert.Equal(26, GameHooks.BuiltInJudicatorNames.Count);
+        // 装配面：27 内置固定注册段（5 验证类＋6 交战类＋4 动作资格类〔含抑制资格〕＋1 效果选靶类＋5 资源类
+        // ＋1 目标候选合法性〔S2 提入〕＋1 部署位置候选〔R4a〕＋1 回合归属〔R4〕＋3 通用关系类〔相邻/兵种/归属〕）
+        // + 1 外部装配段 = 全量 28
+        Assert.Equal(27, GameHooks.BuiltInJudicatorNames.Count);
         Assert.Single(GameHooks.ExternalJudicatorNames);
         Assert.Equal(GameHooks.JudicatorNameList.OrderBy(v => v, StringComparer.Ordinal),
             GameHooks.BuiltInJudicatorNames.Concat(GameHooks.ExternalJudicatorNames)

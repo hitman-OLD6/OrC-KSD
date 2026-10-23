@@ -122,7 +122,7 @@ public class KeywordSystemTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var furyTank = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.FuryTankId, 1); // 坦克＋奋战
-        var enemy = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2); // 防 5
+        var enemy = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1); // 防 5
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         await match.EndTurn();
         await match.EndTurn();
@@ -205,8 +205,8 @@ public class KeywordSystemTests
         Assert.Contains(blitz.Keywords.Components, component => component.Keyword == KeywordIds.Blitz);
 
         // 死亡后：登记保留（可查询）；不再参与结算（候选层——尸体不在场）。
-        var killer = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.BeastId, 4);
-        var ambusher = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.AmbushId, 2);
+        var killer = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.BeastId, 0);
+        var ambusher = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.AmbushId, 1);
         CommandTestKit.Activate(killer);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         var kill = await CommandTestKit.RunCommandAsync(match, bridge, killer, ambusher.Ref);

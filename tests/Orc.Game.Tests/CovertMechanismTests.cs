@@ -153,7 +153,7 @@ public class CovertMechanismTests
         var playerB = match.Players[1];
 
         var covert = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CovertScoutId, 1); // 敌方隐蔽
-        var plain = await CommandTestKit.PrepareOnSupportAsync(match, playerA, PlainUnitId, 2);   // 我方普通（对照）
+        var plain = await CommandTestKit.PrepareOnSupportAsync(match, playerA, PlainUnitId, 1);   // 我方普通（对照）
         Assert.True(CovertRules.IsCovert(covert));
 
         // 生产装配默认链：判定器经内置注册段解析可用（S2 提入生产装配——非测试私装）。
@@ -197,7 +197,7 @@ public class CovertMechanismTests
         var playerB = match.Players[1];
 
         var covert = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CovertScoutId, 1);
-        var plain = await CommandTestKit.PrepareOnSupportAsync(match, playerA, PlainUnitId, 2);
+        var plain = await CommandTestKit.PrepareOnSupportAsync(match, playerA, PlainUnitId, 1);
 
         var registration = match.Judicators.Resolve(JudicatorNames.TargetCandidateEligibility);
         var rule = new JudicatorSelectionRule(registration, playerA.Hq, new EffectSelector("all", IncludeCovert: true)); // 请求级覆盖
@@ -289,7 +289,7 @@ public class CovertMechanismTests
         var playerB = match.Players[1];
 
         var attacker = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1); // 攻 2 / 防 5（支援线→敌前线）
-        var defender = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CovertScoutId, 1);                // 隐蔽 2 / 5
+        var defender = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CovertScoutId, 0);                // 隐蔽 2 / 5
         CommandTestKit.Activate(attacker);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
@@ -340,7 +340,7 @@ public class CovertMechanismTests
         var playerB = match.Players[1];
 
         var attacker = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CovertScoutId, 1); // 隐蔽攻击者（支援线→敌前线）
-        var defender = await CommandTestKit.PrepareOnFrontAsync(match, playerB, PlainUnitId, 1);    // 普通目标
+        var defender = await CommandTestKit.PrepareOnFrontAsync(match, playerB, PlainUnitId, 0);    // 普通目标
         CommandTestKit.Activate(attacker);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
@@ -398,7 +398,7 @@ public class CovertMechanismTests
         var playerB = match.Players[1];
 
         var attacker = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CovertScoutId, 1); // 隐蔽攻击者（支援线→敌前线）
-        var defender = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CovertScoutId, 1);  // 隐蔽被攻击者
+        var defender = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CovertScoutId, 0);  // 隐蔽被攻击者
         CommandTestKit.Activate(attacker);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
@@ -442,7 +442,7 @@ public class CovertMechanismTests
         Assert.Equal(CommandResultStatus.Success, result.Status);
 
         Assert.True(CovertRules.IsCovert(unit)); // 仍隐蔽
-        Assert.Same(unit, match.Battlefield.FrontLine.GetInsertionGaps().At(0)); // 移动已发生
+        Assert.Same(unit, match.Battlefield.FrontLine.Members[0]); // 移动已发生（前线唯一元素）
         Assert.DoesNotContain(recorder.Updates, u => u.Type == GameUpdates.UnitRevealed);
     }
 
@@ -614,11 +614,11 @@ public class CovertMechanismTests
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
         // 合法候选为空（隐蔽被剔）＝不发起选择、不形成、部署正常完成。
-        var result = await match.PlayManager.PlayUnitAsync(pincer, supportLine.GetInsertionGaps().At(3));
+        var result = await match.PlayManager.PlayUnitAsync(pincer, supportLine.GetInsertionGaps().At(2));
         Assert.Equal(PlayResultStatus.Success, result.Status);
         Assert.Empty(bridge.Begins);
         Assert.False(match.CommandManager.Pincers.IsPaired(pincer));
-        Assert.Same(pincer, supportLine.GetInsertionGaps().At(3));
+        Assert.Same(pincer, supportLine.Members[^1]);
     }
 
     // ---------- 攻击候选不受影响：隐蔽单位出现在攻击候选面（可被攻击） ----------
@@ -633,7 +633,7 @@ public class CovertMechanismTests
         var playerB = match.Players[1];
 
         var attacker = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
-        var defender = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CovertScoutId, 1);
+        var defender = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CovertScoutId, 0);
         CommandTestKit.Activate(attacker);
 
         var availability = match.CommandManager.GetCommandAvailability(attacker);

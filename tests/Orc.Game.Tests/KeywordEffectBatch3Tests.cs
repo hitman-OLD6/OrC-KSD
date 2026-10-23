@@ -95,7 +95,7 @@ public class KeywordEffectBatch3Tests
         var effectY = Assert.IsType<DynamicPassiveEffect>(FindEffect(unitY, BlitzEffectName));
         Assert.True(effectY.IsMounted);
 
-        var resultY = await match.PlayManager.PlayUnitAsync(unitY, line.GetInsertionGaps().At(3));
+        var resultY = await match.PlayManager.PlayUnitAsync(unitY, line.GetInsertionGaps().At(2));
         Assert.Equal(PlayResultStatus.Success, resultY.Status);
         Assert.True(unitY.GetData<CommandData>().CanMove);
         Assert.True(unitY.GetData<CommandData>().CanAttack);
@@ -115,7 +115,8 @@ public class KeywordEffectBatch3Tests
 
         // 注销前：订阅活着（重置两 bool → 部署信号分发 → 置位）。
         CommandTestKit.Activate(unit, false, false);
-        await GameUpdates.EmitUnitDeployed(match.Engine, unit, new BoardPosition(unit.GetData<UnitStateData>().Line!, unit.GetData<UnitStateData>().Line!.IndexOf(unit)));
+        var deployedAt = new BoardPosition(unit.GetData<UnitStateData>().Line!, unit.GetData<UnitStateData>().Line!.IndexOf(unit));
+        await GameUpdates.EmitUnitDeployed(match.Engine, unit, deployedAt);
         Assert.True(unit.GetData<CommandData>().CanMove);
 
         // 致死：死亡注销撤销行为（效果卸载随动）——不抛错；登记保留（照常可读）。
@@ -125,8 +126,9 @@ public class KeywordEffectBatch3Tests
         Assert.Empty(unit.Effects);                        // 行为撤销（效果卸载随动）
 
         // 注销后不再产生订阅：重置两 bool → 部署信号分发 → 不再被处理（保持 false/false）。
+        // 死亡后 Line 已置空（模型事实），信号位置沿用生前取得的 BoardPosition 值。
         CommandTestKit.Activate(unit, false, false);
-        await GameUpdates.EmitUnitDeployed(match.Engine, unit, new BoardPosition(unit.GetData<UnitStateData>().Line!, unit.GetData<UnitStateData>().Line!.IndexOf(unit)));
+        await GameUpdates.EmitUnitDeployed(match.Engine, unit, deployedAt);
         Assert.False(unit.GetData<CommandData>().CanMove);
         Assert.False(unit.GetData<CommandData>().CanAttack);
     }
@@ -159,7 +161,7 @@ public class KeywordEffectBatch3Tests
         Assert.True(await revoked.Keywords.RevokeAsync(KeywordIds.Blitz));
         Assert.Null(FindEffect(revoked, BlitzEffectName));
 
-        var result2 = await match.PlayManager.PlayUnitAsync(revoked, line.GetInsertionGaps().At(3));
+        var result2 = await match.PlayManager.PlayUnitAsync(revoked, line.GetInsertionGaps().At(2));
         Assert.Equal(PlayResultStatus.Success, result2.Status);
         Assert.False(revoked.GetData<CommandData>().CanMove);
         Assert.False(revoked.GetData<CommandData>().CanAttack);
@@ -188,7 +190,7 @@ public class KeywordEffectBatch3Tests
 
         // Y 部署（真实）→ Y 自己置位；X 保持 false/false（其他单位部署时本单位不被置位——过滤成立）。
         var unitY = await CommandTestKit.InstantiateLoadedAsync(match, player, CommandTestKit.BlitzId, toHand: true);
-        var resultY = await match.PlayManager.PlayUnitAsync(unitY, line.GetInsertionGaps().At(3));
+        var resultY = await match.PlayManager.PlayUnitAsync(unitY, line.GetInsertionGaps().At(2));
         Assert.Equal(PlayResultStatus.Success, resultY.Status);
         Assert.True(unitY.GetData<CommandData>().CanMove);   // Y 置位（自己）
         Assert.True(unitY.GetData<CommandData>().CanAttack);

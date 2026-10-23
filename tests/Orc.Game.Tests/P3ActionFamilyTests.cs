@@ -107,12 +107,13 @@ public class P3ActionFamilyTests
 
         // 部署与加入各经同一处理端落地：card.placed 恰一次、状态一致。
         var deployed = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(match, player);
-        var joinSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(0);
+        var supportLine = match.Battlefield.PlayerASupportLine;
+        var joinSlot = supportLine.GetInsertionGaps().At(0);
         var joinUnit = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId);
 
         Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.PlayUnitAsync(deployed, joinSlot)).Status);
         Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(joinUnit, match.Battlefield.FrontLine.GetInsertionGaps().At(0))).Status);
-        Assert.Same(joinSlot, deployed.GetData<UnitStateData>().Line);
+        Assert.Same(supportLine, deployed.GetData<UnitStateData>().Line); // 部署落在请求的阵线（空隙身份随快照失效，故按线核对）
         Assert.NotNull(joinUnit.GetData<UnitStateData>().Line);
     }
 
@@ -150,10 +151,18 @@ public class P3ActionFamilyTests
         var match = PlayChainTestKit.CreatePlayMatch();
         await match.Initialize();
         var unit = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId);
-        var occupied = match.Battlefield.FrontLine.GetInsertionGaps().At(1);
+
+        // 非法目标＝**过期快照**（先取空隙、阵线随后变化）：空隙身份随快照失效，属结构性拒绝。
+        var front = match.Battlefield.FrontLine;
+        var staleGap = front.GetInsertionGaps().At(0);
+        var occupant = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(
+            match, match.Players[0], PlayChainTestKit.UnitCheapId, toHand: false);
+        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(occupant, front.GetInsertionGaps().At(0))).Status);
+        Assert.False(staleGap.IsCurrent);
+
         using var recorder = new UpdateRecorder(match.Engine);
 
-        var result = await match.CommandManager.JoinBattlefieldAction.JoinAtAsync(unit, occupied);
+        var result = await match.CommandManager.JoinBattlefieldAction.JoinAtAsync(unit, staleGap);
 
         Assert.Equal(ActionOutcomeKind.TargetInvalid, result.Targets[0].Outcome);
         Assert.Empty(recorder.Updates);

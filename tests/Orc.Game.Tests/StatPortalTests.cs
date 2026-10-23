@@ -287,7 +287,7 @@ public class StatPortalTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var attacker = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0); // 攻 2/防 5
-        var target = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2); // 攻 2/防 5
+        var target = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1); // 攻 2/防 5（支援线 HQ 之后）
         var source = new object();
         await target.Modifiers.AddModifierAsync(new AddModifier(CardStatFields.Defense, 2, source)); // 受击前挂修饰：上限 7
         CommandTestKit.Activate(attacker);

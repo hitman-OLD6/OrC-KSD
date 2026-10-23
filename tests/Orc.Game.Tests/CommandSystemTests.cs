@@ -36,7 +36,7 @@ public class CommandSystemTests
         Assert.Equal(CommandResultStatus.Success, result.Status);
         Assert.Equal(1, support.Size);
         Assert.Same(unit, front[0]);
-        Assert.Same(front[0], unit.GetData<UnitStateData>().Line);
+        Assert.Same(front, unit.GetData<UnitStateData>().Line);
         Assert.Equal(0, player.Points);
         Assert.False(unit.GetData<CommandData>().CanMove);
         Assert.False(unit.GetData<CommandData>().CanAttack);
@@ -54,7 +54,7 @@ public class CommandSystemTests
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         using var recorder = new UpdateRecorder(match.Engine);
         var oldSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1);
-        var newSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(2);
+        var newSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
 
         var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, newSlot.Ref);
 
@@ -235,7 +235,7 @@ public class CommandSystemTests
         await match.Initialize();
         // 加入路径不要求归属：构造无主已单位化单位（Owner＝null）。
         var unit = (UnitCard)match.CardLibrary.Instantiate(CommandTestKit.InfantryId);
-        var joinResult = await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(3)); // 槽 3（避开 HQ 占位槽）
+        var joinResult = await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1)); // 插入点 1＝紧随 HQ（HQ 位置不变）
         Assert.Equal(PlayResultStatus.Success, joinResult.Status);
         CommandTestKit.Activate(unit);
 
@@ -324,7 +324,9 @@ public class CommandSystemTests
         var unit = await CommandTestKit.PrepareOnSupportAsync(match, player, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(unit);
         using var recorder = new UpdateRecorder(match.Engine);
-        var oldSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1);
+        // OldPosition＝**已成事实的位置**（BoardPosition）；NewPosition＝**请求落位**（FormationGap）——
+        // 与 DispatchMoveAsync 的载荷口径一致（PositionOf 现算 BoardPosition、候选给空隙）。
+        var oldPosition = new BoardPosition(match.Battlefield.PlayerASupportLine, 1);
         var newSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
 
         // 直接驱动内层移动触发器（越层）：执行段＝槽位变更＋发射更新；「两 bool 不写、费用不扣」——只在外层更新。
@@ -333,12 +335,12 @@ public class CommandSystemTests
             new Dictionary<string, object?>
             {
                 [CommandDataKeys.Unit] = unit.Ref,
-                [CommandDataKeys.OldPosition] = oldSlot.Ref,
+                [CommandDataKeys.OldPosition] = oldPosition.Ref,
                 [CommandDataKeys.NewPosition] = newSlot.Ref,
             });
 
         Assert.Equal(ExecutionOutcome.Normal, stream.Outcome);
-        Assert.Same(unit, newSlot);
+        Assert.Contains(unit, newSlot.Line.Members); // 已落到新空隙所在的线（空隙身份会随快照失效，故不看空隙本身）
         Assert.True(unit.GetData<CommandData>().CanMove);  // 内层不写
         Assert.True(unit.GetData<CommandData>().CanAttack); // 内层不写
         Assert.Equal(1, player.Points);                     // 内层不扣费
@@ -384,7 +386,9 @@ public class CommandSystemTests
         var report = match.CommandManager.GetCommandAvailability(unit);
 
         Assert.True(report.Move.CanUse);
-        var expected = new[] { front[1].Ref, front[2].Ref, front[3].Ref, front[4].Ref };
+        // 候选＝前线**全部插入空隙**（有序列表模型：候选是"落位请求"，不是已占槽；
+        // 占用不会移除空隙，只有满员才没有空隙）。
+        var expected = front.GetInsertionGaps().Select(gap => gap.Ref).ToArray();
         Assert.Equal(expected, report.Move.Candidates);
     }
 
@@ -397,8 +401,8 @@ public class CommandSystemTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var unit = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
-        var enemyOnFront = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 3);
-        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
+        var enemyOnFront = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 0);
+        var enemyOnSupport = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(unit);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         var front = match.Battlefield.FrontLine;
@@ -438,8 +442,8 @@ public class CommandSystemTests
         await match.Initialize();
         var playerA = match.Players[0];
         var playerB = match.Players[1];
-        var attacker = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 1);
-        var target = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
+        var attacker = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
+        var target = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(attacker);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 

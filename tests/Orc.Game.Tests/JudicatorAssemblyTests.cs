@@ -153,8 +153,10 @@ public class JudicatorAssemblyTests
             match.Judicators.Resolve(JudicatorNames.CombatRange), _ => new object[] { false });
 
         var attacker = await CommandTestKit.PrepareOnSupportAsync(match, match.Players[0], CommandTestKit.InfantryId, 1);
-        var defender = await CommandTestKit.PrepareOnFrontAsync(match, match.Players[1], CommandTestKit.InfantryId, 1);
-        var targetSlot = defender.GetData<Orc.Game.Cards.UnitStateData>().Line!;
+        var defender = await CommandTestKit.PrepareOnFrontAsync(match, match.Players[1], CommandTestKit.InfantryId, 0);
+        // combat.range 第 2 参＝**目标位置**（BoardPosition：线 + 元素位置序号）——不是线本身、也不是插入点序号。
+        var defenderLine = defender.GetData<Orc.Game.Cards.UnitStateData>().Line!;
+        var targetSlot = new Orc.Game.Board.BoardPosition(defenderLine, defenderLine.IndexOf(defender));
 
         bool RangeAvailable() => (bool)match.Judicators
             .Resolve(JudicatorNames.CombatRange)

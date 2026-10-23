@@ -18,7 +18,7 @@ public class MatchOutcomeTests
     /// <summary>终局构造助手（准备巨炮并置可行动——终局前调用）。</summary>
     private static async Task<UnitCard> PrepareHqStrikerAsync(Match match)
     {
-        var striker = await CommandTestKit.PrepareOnSupportAsync(match, match.Players[0], CommandTestKit.MegaId, 2);
+        var striker = await CommandTestKit.PrepareOnSupportAsync(match, match.Players[0], CommandTestKit.MegaId, 1);
         CommandTestKit.Activate(striker);
         return striker;
     }
@@ -69,7 +69,7 @@ public class MatchOutcomeTests
         Assert.Equal(MatchState.Ended, match.State);
         Assert.Same(playerA, match.Winner);
         Assert.Equal(0, playerB.HqHealth);
-        Assert.Same(playerB.Hq, match.Battlefield.PlayerBSupportLine.GetInsertionGaps().At(0));
+        Assert.Same(playerB.Hq, match.Battlefield.PlayerBSupportLine.Members[0]); // HQ 占位不变（仍在支援线首位）
         Assert.Equal(0, playerA.Points);
         Assert.False(striker.GetData<CommandData>().CanAttack);
         Assert.False(striker.GetData<CommandData>().CanMove);
@@ -134,24 +134,27 @@ public class MatchOutcomeTests
         Assert.Equal(PlayResultStatus.Failed, prePlay.Status);
         Assert.Equal(PlayFailureReason.GameEnded, prePlay.FailureReason);
 
-        var playUnit = await match.PlayManager.PlayUnitAsync(handUnit, match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(3));
+        var playUnit = await match.PlayManager.PlayUnitAsync(handUnit, match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(0));
         Assert.Equal(PlayFailureReason.GameEnded, playUnit.FailureReason);
 
-        var joinUnit = await match.PlayManager.JoinUnitAsync(handUnit, match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(3));
+        var joinUnit = await match.PlayManager.JoinUnitAsync(handUnit, match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(0));
         Assert.Equal(PlayFailureReason.GameEnded, joinUnit.FailureReason);
 
         var playCommand = await match.PlayManager.PlayOrderAsync(commandCard);
         Assert.Equal(PlayFailureReason.GameEnded, playCommand.FailureReason);
 
-        // ④移动/攻击流程的触发器级对外入口：直接驱动＝ValidationRejected（零副作用——槽位/状态不变）。
-        var oldSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1);
+        // ④移动/攻击流程的触发器级对外入口：直接驱动＝ValidationRejected（零副作用——位置/状态不变）。
+        // OldPosition＝已成事实的位置（BoardPosition）；NewPosition＝请求落位（FormationGap）——与 DispatchMoveAsync 同口径。
+        var supportLine = match.Battlefield.PlayerASupportLine;
+        var unitIndex = supportLine.IndexOf(unit);
+        var oldPosition = new BoardPosition(supportLine, unitIndex);
         var newSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
         var moveStream = await match.CommandManager.UnitMoveTrigger.InvokeAsync(
             match.Engine,
             new Dictionary<string, object?>
             {
                 [CommandDataKeys.Unit] = unit.Ref,
-                [CommandDataKeys.OldPosition] = oldSlot.Ref,
+                [CommandDataKeys.OldPosition] = oldPosition.Ref,
                 [CommandDataKeys.NewPosition] = newSlot.Ref,
             });
         Assert.Equal(Orc.Core.ExecutionOutcome.ValidationRejected, moveStream.Outcome);
@@ -165,11 +168,11 @@ public class MatchOutcomeTests
             });
         Assert.Equal(Orc.Core.ExecutionOutcome.ValidationRejected, attackStream.Outcome);
 
-        // 零副作用总验：点数不变、在场单位两 bool 不变、槽位不变、手牌不变、未进入任何交互。
+        // 零副作用总验：点数不变、在场单位两 bool 不变、位置不变、手牌不变、未进入任何交互。
         Assert.Equal(pointsAtEnd, playerA.Points);
         Assert.True(unit.GetData<CommandData>().CanMove);
         Assert.True(unit.GetData<CommandData>().CanAttack);
-        Assert.Same(unit, oldSlot);
+        Assert.Same(unit, supportLine[unitIndex]); // 移动未发生：单位仍在原位置
         Assert.Empty(match.Battlefield.FrontLine.Members); // 移动未发生：前线仍无元素
         Assert.Contains(handUnit, playerA.Hand);
         Assert.Contains(commandCard, playerA.Hand);

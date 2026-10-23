@@ -83,7 +83,7 @@ public class BattleKeywordTests
         Assert.Equal(2, KeywordRules.GetKeywordValue(plain, KeywordIds.Armor));
 
         // 死亡后登记保留（集合读取照常——登记面）。
-        var victim = await CommandTestKit.PrepareOnSupportAsync(match, player, CommandTestKit.InfantryId, 2);
+        var victim = await CommandTestKit.PrepareOnSupportAsync(match, player, CommandTestKit.InfantryId, 1);
         await victim.Keywords.GrantAsync(KeywordIds.Armor, 2);
         await victim.ApplyDefenseDamageAsync(999);
         Assert.True(victim.GetData<UnitStateData>().IsDestroyed);

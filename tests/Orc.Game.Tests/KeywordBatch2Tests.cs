@@ -390,7 +390,7 @@ public class KeywordBatch2Tests
         await match.Initialize();
         var playerA = match.Players[0];
         var supportLine = match.Battlefield.GetSupportLine(playerA);
-        var friend = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 2); // 攻 2
+        var friend = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1); // 攻 2
         var pincer = await CommandTestKit.InstantiateLoadedAsync(match, playerA, PincerUnitId, toHand: true);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         bridge.InteractionScript = TargeterTestKit.AutoCompleteWithFirstAllowed();
@@ -420,7 +420,7 @@ public class KeywordBatch2Tests
         await match.Initialize();
         var playerA = match.Players[0];
         var supportLine = match.Battlefield.GetSupportLine(playerA);
-        var friend = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 2);
+        var friend = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
         var pincer = await CommandTestKit.InstantiateLoadedAsync(match, playerA, PincerUnitId, toHand: true);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         bridge.InteractionScript = (description, responder) => responder.Cancel(description.RequestId);
@@ -432,7 +432,7 @@ public class KeywordBatch2Tests
         Assert.False(match.CommandManager.Pincers.IsPaired(pincer));
         Assert.False(match.CommandManager.Pincers.IsPaired(friend));
         Assert.Equal(2, AttackOf(friend)); // 无加成
-        Assert.Same(pincer, supportLine.GetInsertionGaps().At(1)); // 部署正常完成
+        Assert.Same(pincer, supportLine.Members[1]); // 部署正常完成（HQ 之后一个位置）
         Assert.True(pincer.Keywords.Has(KeywordIds.Pincer)); // 词条登记不动
     }
 
@@ -444,7 +444,7 @@ public class KeywordBatch2Tests
         await match.Initialize();
         var playerA = match.Players[0];
         var supportLine = match.Battlefield.GetSupportLine(playerA);
-        var friend = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 2);
+        var friend = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
         var pincer = await CommandTestKit.InstantiateLoadedAsync(match, playerA, PincerUnitId, toHand: true);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         bridge.InteractionScript = TargeterTestKit.AutoCompleteWithFirstAllowed();
@@ -476,7 +476,7 @@ public class KeywordBatch2Tests
         Assert.Equal(PlayResultStatus.Success, result.Status);
         Assert.Empty(bridge.Begins);
         Assert.False(match.CommandManager.Pincers.IsPaired(pincer));
-        Assert.Same(pincer, supportLine.GetInsertionGaps().At(1));
+        Assert.Contains(pincer, supportLine.Members);
     }
 
     [Fact]
@@ -487,7 +487,7 @@ public class KeywordBatch2Tests
         await match.Initialize();
         var playerA = match.Players[0];
         var supportLine = match.Battlefield.GetSupportLine(playerA);
-        var friend = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 3); // 落槽 4（为后续 second 部署保留槽 3）
+        var friend = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1); // 先铺一个友方（为 first/second 部署保留后续插入点）
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         bridge.InteractionScript = TargeterTestKit.AutoCompleteWithFirstAllowed();
 

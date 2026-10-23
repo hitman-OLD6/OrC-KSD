@@ -193,24 +193,37 @@ internal static class CommandTestKit
     public static Func<object, Task<IReadOnlyList<object?>>> AllRefsScript(Match match)
         => _ => Task.FromResult<IReadOnlyList<object?>>(AllRefsOf(match));
 
-    /// <summary>全引用（槽位引用＋单位引用＋双方 HQ 实体引用）。
-    /// W3-3：HQ 目标以实体引用承载——收集超集须含 HQ 引用（与候选产出面同源；槽位引用不再作为 HQ 目标产出）。</summary>
+    /// <summary>全引用（位置元素＋单位引用＋双方 HQ 实体引用）——**按实体去重**。
+    /// W3-3：HQ 目标以实体引用承载——收集超集须含 HQ 引用（与候选产出面同源；槽位引用不再作为 HQ 目标产出）。
+    /// 有序列表模型下「位置元素」＝线上成员本身（含 HQ），与「在场单位」「双方 HQ」三面枚举的是同一批实体；
+    /// 超集语义是集合、不是多重集，故按实体去重（否则每个单位会出现两次、HQ 亦重复）。</summary>
     public static IReadOnlyList<object?> AllRefsOf(Match match)
     {
         var refs = new List<object?>();
-        foreach (var slot in AllSlotsOf(match))
+        var seen = new HashSet<object>(ReferenceEqualityComparer.Instance);
+
+        foreach (var card in AllSlotsOf(match))
         {
-            refs.Add(slot.Ref);
+            if (seen.Add(card))
+            {
+                refs.Add(card.Ref);
+            }
         }
 
         foreach (var unit in AllUnitsOf(match))
         {
-            refs.Add(unit.Ref);
+            if (seen.Add(unit))
+            {
+                refs.Add(unit.Ref);
+            }
         }
 
         foreach (var player in match.Players)
         {
-            refs.Add(player.Hq.Ref);
+            if (seen.Add(player.Hq))
+            {
+                refs.Add(player.Hq.Ref);
+            }
         }
 
         return refs;

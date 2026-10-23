@@ -1,4 +1,5 @@
 using Orc.Game;
+using Orc.Game.Board;
 using Orc.Game.Cards;
 using Orc.Game.Commanding;
 using Xunit;
@@ -28,16 +29,16 @@ public class CommandLockInTests
 
         var candidates = match.CommandManager.GetCommandAvailability(mover).Move.Candidates;
 
-        // 正面：移动候选＝前线空槽（顺序＝线内索引序；无横移——已占前线槽不含）。
-        Assert.Equal(new[] { front[1].Ref, front[2].Ref, front[3].Ref, front[4].Ref }, candidates);
-        Assert.DoesNotContain(front[0].Ref, candidates);
+        // 正面：移动候选＝前线全部插入空隙（有序列表模型：N 元素 → N+1 个落位请求；无横移——已占位置不会移除落点）。
+        Assert.Equal(front.GetInsertionGaps().Select(gap => gap.Ref), candidates);
+        Assert.All(candidates, reference => Assert.Same(front, Assert.IsType<FormationGap>(reference.Value).Line));
 
-        // 负面（无后撤锁定）：不含任何支援线槽位——己方支援线内部空槽（HQ 槽 / 内部槽）与敌方支援线全部。
-        Assert.DoesNotContain(aSupport[0].Ref, candidates);
-        Assert.DoesNotContain(aSupport[2].Ref, candidates);
-        Assert.DoesNotContain(aSupport[3].Ref, candidates);
-        Assert.DoesNotContain(bSupport[0].Ref, candidates);
-        Assert.DoesNotContain(bSupport[2].Ref, candidates);
+        // 负面（无后撤锁定）：候选不含任何支援线插入点——己方（含 HQ 邻位/内部）与敌方支援线全部。
+        foreach (var line in new[] { aSupport, bSupport })
+        {
+            Assert.DoesNotContain(candidates, reference =>
+                line.GetInsertionGaps().Any(gap => ReferenceEquals(gap, reference.Value)));
+        }
     }
 
     [Fact]
@@ -50,7 +51,7 @@ public class CommandLockInTests
         var playerB = match.Players[1];
         await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0); // 己方占位
         var mover = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
-        await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2); // 敌方支援线（步兵不可达＝不入攻击候选）
+        await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1); // 敌方支援线（步兵不可达＝不入攻击候选）
         CommandTestKit.Activate(mover);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         var front = match.Battlefield.FrontLine;
@@ -58,11 +59,13 @@ public class CommandLockInTests
         var task = match.CommandManager.BeginCommandAsync(mover);
         var (description, responder) = await bridge.WaitForNextBeginAsync();
 
-        // 交互允许集＝移动候选（前线空槽）——永不含支援线内部操作候选（无后撤/横移路径的交互面锁定）。
-        Assert.Equal(new[] { front[1].Ref, front[2].Ref, front[3].Ref, front[4].Ref }, description.AllowedTargets);
-        Assert.DoesNotContain(match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(2).Ref, description.AllowedTargets);
-        Assert.DoesNotContain(match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(3).Ref, description.AllowedTargets);
-        Assert.DoesNotContain(match.Battlefield.PlayerBSupportLine.GetInsertionGaps().At(2).Ref, description.AllowedTargets);
+        // 交互允许集＝移动候选（前线插入空隙）——永不含支援线操作候选（无后撤/横移路径的交互面锁定）。
+        Assert.Equal(front.GetInsertionGaps().Select(gap => gap.Ref), description.AllowedTargets);
+        foreach (var line in new[] { match.Battlefield.PlayerASupportLine, match.Battlefield.PlayerBSupportLine })
+        {
+            Assert.DoesNotContain(description.AllowedTargets, reference =>
+                line.GetInsertionGaps().Any(gap => ReferenceEquals(gap, reference.Value)));
+        }
 
         responder.Cancel(description.RequestId);
         var result = await task;
@@ -85,8 +88,9 @@ public class CommandLockInTests
         Assert.False(report.Move.CanUse);
         Assert.Equal(CommandBlockReason.NoCandidates, report.Move.BlockReason);
         Assert.Empty(report.Move.Candidates);
-        Assert.DoesNotContain(front[1].Ref, report.Move.Candidates);
-        Assert.DoesNotContain(front[2].Ref, report.Move.Candidates);
+        // 无同线移动产物：前线自身的插入点也不得成为候选（有序列表下"格子"无对应物，改断言空隙面）。
+        Assert.DoesNotContain(report.Move.Candidates, reference =>
+            front.GetInsertionGaps().Any(gap => ReferenceEquals(gap, reference.Value)));
     }
 
     [Fact]

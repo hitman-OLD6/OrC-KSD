@@ -98,11 +98,11 @@ public class GuardKeywordTests
         // 打标生效：guard ∈ 对战词条池（wiki『属于对战词条』；具体清单以注册面打标为准）。
         Assert.True(KeywordRegistry.IsBattleKeyword(KeywordIds.Guard));
 
-        // B 支援线：守护者（槽 1＝HQ 左邻）＋步兵（槽 0——与守护者相邻）。
-        var guardian = await CommandTestKit.PrepareOnSupportAsync(match, playerB, GuarderId, 1);
+        // B 支援线：步兵（槽 0）＋守护者（槽 1——紧邻步兵，且与 HQ 相邻）——落位后＝[步兵, 守护者, HQ]。
         var guarded = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 0);
+        var guardian = await CommandTestKit.PrepareOnSupportAsync(match, playerB, GuarderId, 1);
         var infantry = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
-        var artillery = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.ArtilleryId, 4);
+        var artillery = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.ArtilleryId, 1);
         CommandTestKit.Activate(infantry);
         CommandTestKit.Activate(artillery);
 
@@ -136,9 +136,9 @@ public class GuardKeywordTests
         await match.Initialize();
         var playerB = match.Players[1];
 
-        // B 支援线：待授予者（槽 1＝HQ 左邻）＋邻位步兵（槽 0）。
+        // B 支援线：[HQ, 待授予者, 邻位步兵]——授予者与 HQ、邻位步兵均相邻（有序列表：相邻＝位置序号连续）。
         var grantee = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
-        var neighbor = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 0);
+        var neighbor = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
 
         // 初始：非守护者——无守护来源。
         Assert.False(match.CommandManager.IsUnitGuarded(neighbor));

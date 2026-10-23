@@ -239,16 +239,21 @@ internal sealed class CardServiceSceneEffect : ActiveEffect<CardServiceCastView>
                         return;
                     }
 
+                    // 原位置序号（离场前取得：元素移出后右侧元素左移一位，因此「原位」＝按原序号插入）。
+                    var originalOrdinal = slot.IndexOf(source);
+
                     // 组合链（转换＝组合形态；目标定义＝DefinitionId〔直接指定的定义 X〕；顺序＝「先判定/先就绪后替换」——
                     // 失败不损坏原实例状态）：
                     // ① 先就绪（按目标定义创建静态新实例——失败＝原实例保留、不发生任何替换）
                     var newCard = (UnitCard)await service.CreateAsync(DefinitionId, owner, ct);
-                    // ② 离场（槽位释放＋离场失效通知——公共受控入口）
+                    // ② 离场（位置释放＋离场失效通知——公共受控入口）
                     await CommandManager!.LeaveBattlefieldAsync(source, ct);
                     // ③ 销毁（杀＋card.destroyed＋资源清理——配套销毁面）
                     await Engine!.DestroyCard(source);
-                    // ④ 放回原位置（统一放置面——同槽位）
-                    LastResult = await service.PlaceToSupportLineAsync(newCard, owner, slot.GetInsertionGaps().At(0), ct);
+                    // ④ 放回原位置（统一放置面——按原序号取当前插入点）
+                    var gaps = slot.GetInsertionGaps();
+                    var restoreOrdinal = originalOrdinal >= 0 && originalOrdinal < gaps.Count ? originalOrdinal : gaps.Count - 1;
+                    LastResult = await service.PlaceToSupportLineAsync(newCard, owner, gaps[restoreOrdinal], ct);
                     break;
                 }
 

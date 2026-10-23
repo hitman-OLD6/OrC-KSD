@@ -56,7 +56,7 @@ public class EffectRemountAndStrategyTests
         var playerA = match.Players[0];
         var frontLine = match.Battlefield.FrontLine;
 
-        var beneficiary = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 2);
+        var beneficiary = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
         var source = (UnitCard)match.CardLibrary.Instantiate(AuraTestKit.AdjacentAuraUnitId);
         await source.LoadAsync(playerA); // 加载链装载入口：效果经声明构造并装载（托管登记自动）
         var effect = Assert.Single(source.Effects);
@@ -159,12 +159,12 @@ public class EffectRemountAndStrategyTests
 
         // 非该类事件不误触发：另一张卡部署（unit.deployed 被发射）→ 本卡效果过滤、不计数
         var other = await CommandTestKit.InstantiateLoadedAsync(match, playerA, CommandTestKit.InfantryId, toHand: true);
-        var otherDeploy = await match.PlayManager.PlayUnitAsync(other, match.Battlefield.FrontLine.GetInsertionGaps().At(1));
+        var otherDeploy = await match.PlayManager.PlayUnitAsync(other, match.Battlefield.GetSupportLine(playerA).GetInsertionGaps().At(1));
         Assert.Equal(PlayResultStatus.Success, otherDeploy.Status);
         Assert.Equal(0, effect.DeployCount);
 
         // 本卡部署：经真实部署链恰触发一次
-        var deploy = await match.PlayManager.PlayUnitAsync(unit, match.Battlefield.FrontLine.GetInsertionGaps().At(0));
+        var deploy = await match.PlayManager.PlayUnitAsync(unit, match.Battlefield.GetSupportLine(playerA).GetInsertionGaps().At(0));
         Assert.Equal(PlayResultStatus.Success, deploy.Status);
         Assert.Equal(1, effect.DeployCount);
     }
@@ -204,7 +204,7 @@ public class EffectRemountAndStrategyTests
             return Task.CompletedTask;
         });
 
-        var result = await match.PlayManager.PlayUnitAsync(unit, match.Battlefield.FrontLine.GetInsertionGaps().At(0));
+        var result = await match.PlayManager.PlayUnitAsync(unit, match.Battlefield.GetSupportLine(playerA).GetInsertionGaps().At(1));
         Assert.Equal(PlayResultStatus.Success, result.Status);
 
         // card.placed：单位化（组件挂载＋槽位占用）成功之后、完成信号（unit.deployed）之前——每次成功部署恰一次

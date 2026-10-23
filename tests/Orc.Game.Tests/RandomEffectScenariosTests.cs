@@ -65,12 +65,13 @@ public class RandomEffectScenarioTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
 
-        // 友方 2（不应被选）＋敌方 3（候选：枚举序＝敌方支援线[1]→[2]→前线[3] 过滤后序＝[前线3, 支援1, 支援2]）
+        // 友方 2（不应被选，均置于友方支援线）＋敌方 3（候选：枚举序＝敌方前线 → 敌方支援线 1 → 敌方支援线 2）
+        // 前线同一时刻只能有一方单位（敌对占线门禁），故友方不占前线、敌方前线单位先于敌方支援线单位入场。
         var friendly1 = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
-        var friendly2 = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
+        var friendly2 = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 2);
         await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
         await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
-        await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 3);
+        await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 0);
 
         var candidates = RandomSceneKit.CollectAliveUnits(match.Battlefield, playerA, sameSide: false); // 敌对方＝playerA 视角非己方
         var slotsBefore = candidates.ToDictionary(unit => unit, unit => unit.GetData<UnitStateData>().Line);
@@ -176,7 +177,7 @@ public class RandomEffectScenarioTests
         await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
         await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
         await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
-        await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 3);
+        await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 0); // 前线空线：唯一插入点
 
         var candidates = RandomSceneKit.CollectAliveUnits(match.Battlefield, playerA, sameSide: false); // 敌对方＝playerA 视角非己方
         var before = candidates.Select(unit => unit.Modifiers.GetEffectiveValue(CardStatFields.Defense)).ToArray();

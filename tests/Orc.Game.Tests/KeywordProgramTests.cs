@@ -31,7 +31,7 @@ public sealed class KeywordProgramTests
         await CommandTestKit.CancelCommandAsync(m,bridge,u);
         Assert.Equal(points,m.Players[0].Points); Assert.True(u.GetData<CommandData>().CanMove);
         Assert.True((await CommandTestKit.RunCommandAsync(m,bridge,u,support.Ref)).IsSuccess);
-        Assert.Same(support,u.GetData<UnitStateData>().Line);
+        Assert.Same(m.Battlefield.PlayerASupportLine,u.GetData<UnitStateData>().Line);
         Assert.Equal(points-u.Modifiers.GetEffectiveValue(CardStatFields.OperateCost),m.Players[0].Points);
         Assert.False(u.GetData<CommandData>().CanMove); Assert.False(u.GetData<CommandData>().CanAttack);
         Assert.True(u.Keywords.Has(k));
@@ -47,7 +47,7 @@ public sealed class KeywordProgramTests
         var task=m.CommandManager.BeginMoveAsync(u);var request=await bridge.WaitForNextBeginAsync();
         await u.Keywords.RevokeAsync(k);
         request.Responder.Complete(request.Description.RequestId,TargeterTestKit.Selection(TargetSlot.DefaultName,support.Ref));
-        Assert.False((await task).IsSuccess);Assert.Same(m.Battlefield.FrontLine.GetInsertionGaps().At(0),u.GetData<UnitStateData>().Line);
+        Assert.False((await task).IsSuccess);Assert.Same(m.Battlefield.FrontLine,u.GetData<UnitStateData>().Line);
         Assert.Equal(points,m.Players[0].Points);Assert.False(m.CommandManager.GetCommandAvailability(u).Move.CanUse);
     }
     [Fact]
@@ -170,10 +170,10 @@ public sealed class KeywordProgramTests
 
         Assert.True(await m.CommandManager.MoveUnitAsync(u, support));
 
-        Assert.Same(support, u.GetData<UnitStateData>().Line);
+        Assert.Same(m.Battlefield.PlayerASupportLine, u.GetData<UnitStateData>().Line);
         Assert.Equal(points, m.Players[0].Points);
         Assert.True(u.GetData<CommandData>().CanMove);
-        Assert.False(await m.CommandManager.MoveUnitAsync(u, m.Battlefield.FrontLine.GetInsertionGaps().At(1)));
+        Assert.False(await m.CommandManager.MoveUnitAsync(u, m.Battlefield.FrontLine.GetInsertionGaps().At(0)));
     }
 
     [Fact]
@@ -277,8 +277,9 @@ public sealed class KeywordProgramTests
             new(){Op="death.cancel",Target="self"},new(){Op="replace",Target="self",Key=routed}]}]},UnitDef(routed,"溃军",0,1,1));
         await m.PlayManager.PlayUnitAsync(u,m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));
         await EffectRuntime.ResolveFor(u)!.DamageAsync(u,100);
-        var occupant=m.Battlefield.PlayerASupportLine.Members[1] as CardBase;
-        Assert.NotNull(occupant);Assert.True(m.CardLibrary.TryGetRegisteredId(occupant!.Definition,out var id));Assert.Equal(routed,id);
+        var members=m.Battlefield.PlayerASupportLine.Members.OfType<CardBase>().ToList();
+        var routedCard=members.SingleOrDefault(c=>m.CardLibrary.TryGetRegisteredId(c.Definition,out var rid)&&rid==routed);
+        Assert.True(routedCard is not null,$"支援线成员：{string.Join("、",members.Select(c=>c.Definition.Name))}");
     }
     [Fact]
     public async Task HuShiConvertsSurvivingAttackedEnemyIntoRoutedArmy()
@@ -292,8 +293,9 @@ public sealed class KeywordProgramTests
         await EffectRuntime.ResolveFor(enemy)!.BuffAsync(enemy,0,5);
         CommandTestKit.Activate(u);bridge.CollectScript=CommandTestKit.AllRefsScript(m);
         await CommandTestKit.RunCommandAsync(m,bridge,u,enemy.Ref);
-        var occupant=m.Battlefield.FrontLine.Members[0] as CardBase;
-        Assert.NotNull(occupant);Assert.True(m.CardLibrary.TryGetRegisteredId(occupant!.Definition,out var id));Assert.Equal(routed,id);
+        var members=m.Battlefield.FrontLine.Members.OfType<CardBase>().ToList();
+        var routedCard=members.SingleOrDefault(c=>m.CardLibrary.TryGetRegisteredId(c.Definition,out var rid)&&rid==routed);
+        Assert.True(routedCard is not null,$"前线成员：{string.Join("、",members.Select(c=>c.Definition.Name))}");
     }
     [Fact]
     public async Task FuYuanCopiesToHandWithExtraCostWhenLeaving()

@@ -263,7 +263,7 @@ public sealed class SpaceWarKeywordTests : IDisposable
         var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, support.Ref);
 
         Assert.True(result.IsSuccess);
-        Assert.Same(support, unit.GetData<UnitStateData>().Line);
+        Assert.Same(match.Battlefield.PlayerASupportLine, unit.GetData<UnitStateData>().Line);
     }
 
     [Fact]

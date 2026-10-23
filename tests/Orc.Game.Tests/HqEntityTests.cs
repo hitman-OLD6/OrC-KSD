@@ -43,8 +43,8 @@ public class HqEntityTests
 
         // b) Player 持 HQ 引用（双向互持）；布局语义锚点（占位槽引用）就绪
         Assert.Same(playerA, playerA.Hq.Owner);
-        Assert.Same(lineA[0], playerA.Hq.Line);
-        Assert.Same(lineB[0], playerB.Hq.Line);
+        Assert.Same(lineA, playerA.Hq.Line);
+        Assert.Same(lineB, playerB.Hq.Line);
 
         // g) Player.HqHealth 转发读面可用（只读、初值 20＝不依赖入槽的读面口径；实体读面同值）
         Assert.Equal(Player.InitialHqHealth, playerA.HqHealth);
@@ -174,7 +174,7 @@ public class HqEntityTests
         // 不入死亡/销毁链（Q2 语义）：不发 card.died / card.destroyed；不置「已毁」、不清槽位、不注销效果/修饰
         Assert.DoesNotContain(GameUpdates.CardDied, recorder.Types);
         Assert.DoesNotContain(Orc.Core.Updates.CardDestroyed, recorder.Types);
-        Assert.Same(hq, match.Battlefield.PlayerBSupportLine.GetInsertionGaps().At(0)); // 占位保留（居中槽）
+        Assert.Same(hq, match.Battlefield.PlayerBSupportLine.Members[0]); // 占位保留（仍在支援线）
         Assert.Single(hq.Modifiers.All); // 修饰器保留（不因归零清理）
         Assert.IsType<AddModifier>(hq.Modifiers.All[0]);
         Assert.Single(hq.LethalInterventions); // 挂钩保留（挂载物冻结保持）

@@ -91,7 +91,7 @@ public class KeywordEffectBatch2Tests
         ambusher.RemoveEffect(effect);
         Assert.False(effect.IsMounted);
         Assert.True(ambusher.Keywords.Has(KeywordIds.Ambush)); // 词条不动（效果独立卸载）
-        var w2 = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.WeakId, 2);
+        var w2 = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.WeakId, 1);
         CommandTestKit.Activate(w2);
         await AttackAsync(match, bridge, w2, ambusher);
         Assert.Equal(5, DefenseOf(ambusher)); // 受 1（正常互伤——未改写）
@@ -100,7 +100,7 @@ public class KeywordEffectBatch2Tests
         // 复装（同一实例再装载）：注册重建——行为恢复。
         ambusher.AddEffect(effect);
         Assert.True(effect.IsMounted);
-        var w3 = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.WeakId, 3);
+        var w3 = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.WeakId, 1);
         CommandTestKit.Activate(w3);
         await AttackAsync(match, bridge, w3, ambusher);
         Assert.True(w3.GetData<UnitStateData>().IsDestroyed);
@@ -133,7 +133,7 @@ public class KeywordEffectBatch2Tests
         Assert.True(await ambusher.Keywords.GrantAsync(KeywordIds.Ambush));
         var second = Assert.IsType<AmbushRewriteEffect>(FindEffect(ambusher, "伏击·伤害改写"));
         Assert.True(second.IsMounted);
-        var w2 = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.WeakId, 2);
+        var w2 = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.WeakId, 1);
         CommandTestKit.Activate(w2);
         await AttackAsync(match, bridge, w2, ambusher);
         Assert.True(w2.GetData<UnitStateData>().IsDestroyed);
@@ -158,7 +158,7 @@ public class KeywordEffectBatch2Tests
         Assert.Empty(ambusher.Effects);                        // 行为撤销（效果卸载随动）
 
         // 死后不再改写（手动驱动「造成攻击伤害」——模拟对局内结算路径；同既有测试手法）。
-        var probe = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.WeakId, 2);
+        var probe = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.WeakId, 1);
         var resolution = new AttackDamageResolution();
         await match.CommandManager.AttackDamageTrigger.InvokeAsync(
             match.Engine,
@@ -374,7 +374,7 @@ public class KeywordEffectBatch2Tests
         // 重甲：运行期撤销 → 行为停止（坦克攻 3 → 3 全落：5→2）。
         Assert.True(await grantee.Keywords.RevokeAsync(KeywordIds.Armor));
         Assert.Null(FindEffect(grantee, "重甲·减伤"));
-        var tank2 = await PrepareActiveTankAsync(match, 1);
+        var tank2 = await PrepareActiveTankAsync(match, 0);
         await AttackAsync(match, bridge, tank2, grantee);
         Assert.Equal(2, DefenseOf(grantee)); // 3 全落（减伤停止）
 
@@ -382,7 +382,7 @@ public class KeywordEffectBatch2Tests
         Assert.True(await grantee.Keywords.GrantAsync(KeywordIds.Ambush));
         var ambushEffect = Assert.IsType<AmbushRewriteEffect>(FindEffect(grantee, "伏击·伤害改写"));
         Assert.True(ambushEffect.IsMounted);
-        var tank3 = await PrepareActiveTankAsync(match, 2);
+        var tank3 = await PrepareActiveTankAsync(match, 0);
         await AttackAsync(match, bridge, tank3, grantee);
         Assert.True(tank3.GetData<UnitStateData>().IsDestroyed);
         Assert.Equal(2, DefenseOf(grantee)); // 不受伤（改写）
@@ -390,7 +390,7 @@ public class KeywordEffectBatch2Tests
         // 伏击：运行期撤销 → 行为停止（坦克攻 3 → 正常互伤：grantee 受 3 → 死亡）。
         Assert.True(await grantee.Keywords.RevokeAsync(KeywordIds.Ambush));
         Assert.Null(FindEffect(grantee, "伏击·伤害改写"));
-        var tank4 = await PrepareActiveTankAsync(match, 3);
+        var tank4 = await PrepareActiveTankAsync(match, 0);
         await AttackAsync(match, bridge, tank4, grantee);
         Assert.True(grantee.GetData<UnitStateData>().IsDestroyed); // 正常互伤致死（若改写仍在则不受伤——可区分）
         Assert.True(tank4.GetData<UnitStateData>().IsDestroyed);   // 被反击致死（正常结算）

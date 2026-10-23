@@ -30,8 +30,10 @@ public class AuraSystemTests
         var playerA = match.Players[0];
         var frontLine = match.Battlefield.FrontLine;
 
-        // 受益单位（步兵 攻 2）于前线槽 2；记录条目集合基线（零增删判据：全程不变）
-        var beneficiary = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 2);
+        // 受益单位（步兵 攻 2）于前线位置 1；左侧先放一个参照单位（使源可在「右邻↔左邻」换位，
+        // 且移到 0 号位时与受益单位隔着一个单位——位置即元素顺序，无「空槽」概念）。
+        await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
+        var beneficiary = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 1);
         Assert.Equal(2, AttackOf(beneficiary));
         var memberBaseline = beneficiary.Modifiers.All.Count;
 
@@ -60,14 +62,14 @@ public class AuraSystemTests
         await match.Environment.RerunAllCardsAsync();
         Assert.Equal(2, AttackOf(beneficiary));
 
-        // （a）源出现于相邻位（槽 1；加入路径）→ 加成出现（unit.joined → 全域重跑自动随动）
-        var joinResult = await match.PlayManager.JoinUnitAsync(source, frontLine.GetInsertionGaps().At(1));
+        // （a）源出现于相邻位（受益单位右邻，插入点 2；加入路径）→ 加成出现（unit.joined → 全域重跑自动随动）
+        var joinResult = await match.PlayManager.JoinUnitAsync(source, frontLine.GetInsertionGaps().At(2));
         Assert.Equal(PlayResultStatus.Success, joinResult.Status);
         Assert.Equal(4, AttackOf(beneficiary)); // 2 + 2
 
-        // （b1）移动：相邻位 → 另一相邻位（槽 1 → 槽 3）→ 加成持续（防「移动即误撤销」）
+        // （b1）移动：右邻 → 左邻（插入点 1）→ 加成持续（防「移动即误撤销」）
         using var recorder = new UpdateRecorder(match.Engine);
-        await MoveUnitAsync(match, source, frontLine.GetInsertionGaps().At(3));
+        await MoveUnitAsync(match, source, frontLine.GetInsertionGaps().At(1));
         Assert.Equal(4, AttackOf(beneficiary));
         Assert.DoesNotContain( // 无变化不通知：无新发射（缓存比较既有保证）
             recorder.Updates,
@@ -75,11 +77,11 @@ public class AuraSystemTests
                 && u.Payload is not null
                 && ReferenceEquals(u.Payload[GameUpdates.PayloadCard], beneficiary));
 
-        // （b2）移动：离开相邻（槽 3 → 槽 0；间隔槽 1、2）→ 加成消失（防漏撤）
+        // （b2）移动：离开相邻（插入点 0；与受益单位隔着一个参照单位）→ 加成消失（防漏撤）
         await MoveUnitAsync(match, source, frontLine.GetInsertionGaps().At(0));
         Assert.Equal(2, AttackOf(beneficiary));
 
-        // 移回相邻位（槽 0 → 槽 1）→ 加成再现（随动闭环）
+        // 移回相邻位（插入点 1）→ 加成再现（随动闭环）
         await MoveUnitAsync(match, source, frontLine.GetInsertionGaps().At(1));
         Assert.Equal(4, AttackOf(beneficiary));
 
@@ -104,7 +106,7 @@ public class AuraSystemTests
         var playerA = match.Players[0];
         var frontLine = match.Battlefield.FrontLine;
 
-        var beneficiary = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 2);
+        var beneficiary = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
         Assert.Equal(2, AttackOf(beneficiary));
 
         var sourceLeft = (UnitCard)match.CardLibrary.Instantiate(AuraTestKit.AdjacentAuraUnitId);
@@ -112,10 +114,11 @@ public class AuraSystemTests
         var sourceRight = (UnitCard)match.CardLibrary.Instantiate(AuraTestKit.AdjacentAuraUnitId);
         await sourceRight.LoadAsync(playerA);
 
-        // 左源出现 → +2；右源出现 → 再 +2（同字段多命中：各声明独立参与合成、按登记序依次施加）
-        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(sourceLeft, frontLine.GetInsertionGaps().At(1))).Status);
+        // 左源出现于受益单位左侧（插入点 0）→ +2；右源出现于右侧（插入点 2）→ 再 +2
+        // （同字段多命中：各声明独立参与合成、按登记序依次施加）
+        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(sourceLeft, frontLine.GetInsertionGaps().At(0))).Status);
         Assert.Equal(4, AttackOf(beneficiary));
-        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(sourceRight, frontLine.GetInsertionGaps().At(3))).Status);
+        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(sourceRight, frontLine.GetInsertionGaps().At(2))).Status);
         Assert.Equal(6, AttackOf(beneficiary)); // 2 + 2 + 2
 
         // 单源注销（死亡）→ 回落一档；双源全注销 → 回落原值
@@ -147,8 +150,8 @@ public class AuraSystemTests
             source));
         Assert.Equal(2, AttackOf(unit)); // 支援线：条件不成立——产出原值
 
-        // 移动至前线 → 条件成立（+1）
-        await MoveUnitAsync(match, unit, frontLine.GetInsertionGaps().At(2));
+        // 移动至前线 → 条件成立（+1）（前线上此时只有本单位：唯一插入点）
+        await MoveUnitAsync(match, unit, frontLine.GetInsertionGaps().At(0));
         Assert.Equal(3, AttackOf(unit));
 
         // 离开前线（机制级构造——本批无后撤真实路径）→ 条件失效产出原值（加成消失）
@@ -178,20 +181,23 @@ public class AuraSystemTests
         Assert.Equal(2, AttackOf(first));
         Assert.Equal(2, AttackOf(second));
 
-        // 源：完整装载链路径（声明注册）→ 加入支援线槽 3（尚未在前线——条件不成立）
+        // 源：完整装载链路径（声明注册）→ 加入支援线末位（尚未在前线——条件不成立）
         var source = (UnitCard)match.CardLibrary.Instantiate(AuraTestKit.FrontLineAuraUnitId);
         await source.LoadAsync(playerA);
         Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(source, supportLine.GetInsertionGaps().At(3))).Status);
         Assert.Equal(2, AttackOf(first)); // 源不在前线：不生效
         Assert.Equal(2, AttackOf(second));
 
-        // 源推进至前线 → 全体 +1
+        // 前线留一个参照单位：源可在前线两个位置间换位（「换槽仍持续」需要位置真的变）
+        await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
+
+        // 源推进至前线（插入点 1）→ 全体 +1
         await MoveUnitAsync(match, source, frontLine.GetInsertionGaps().At(1));
         Assert.Equal(3, AttackOf(first));
         Assert.Equal(3, AttackOf(second));
 
-        // 源仍在前线（换槽）→ 持续
-        await MoveUnitAsync(match, source, frontLine.GetInsertionGaps().At(4));
+        // 源仍在前线（换到 0 号位）→ 持续
+        await MoveUnitAsync(match, source, frontLine.GetInsertionGaps().At(0));
         Assert.Equal(3, AttackOf(first));
         Assert.Equal(3, AttackOf(second));
 
@@ -201,7 +207,7 @@ public class AuraSystemTests
         Assert.Equal(2, AttackOf(second));
 
         // 复位：源回前线 → 再生效；源死亡 → 全体消失（推荐并测）
-        await MoveUnitAsync(match, source, frontLine.GetInsertionGaps().At(2));
+        await MoveUnitAsync(match, source, frontLine.GetInsertionGaps().At(1));
         Assert.Equal(3, AttackOf(first));
         await KillAsync(source);
         Assert.Equal(2, AttackOf(first));
@@ -221,7 +227,8 @@ public class AuraSystemTests
         var supportLine = match.Battlefield.GetSupportLine(playerA);
         var frontLine = match.Battlefield.FrontLine;
 
-        // 计数单位（步兵 攻 2）于支援线槽 1：邻位槽 0＝HQ（「相邻单位」计数不含 HQ——非单位）、槽 2 空 → 攻 2
+        // 计数单位（步兵 攻 2）于支援线 HQ 之后（插入点 1）：相邻元素只有 HQ（「相邻单位」计数不含 HQ）、
+        // 另一侧是线尾（无元素）→ 攻 2
         var counting = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
         var source = new object();
         await counting.Modifiers.AddModifierAsync(new ConditionalModifier(
@@ -231,22 +238,25 @@ public class AuraSystemTests
             source));
         Assert.Equal(2, AttackOf(counting));
 
-        // 移至前线槽 2（无相邻单位）→ 原值
-        await MoveUnitAsync(match, counting, frontLine.GetInsertionGaps().At(2));
+        // 移至前线（空线唯一插入点）→ 无相邻单位 → 原值
+        await MoveUnitAsync(match, counting, frontLine.GetInsertionGaps().At(0));
         Assert.Equal(2, AttackOf(counting));
 
-        // 递进（至少两级）：n=1 → +2；n=2 → +4（n1 为敌方单位——「不分敌我」计数）
-        var n1 = await CommandTestKit.PrepareUnitAsync(match, playerB, CommandTestKit.InfantryId, frontLine.GetInsertionGaps().At(1));
+        // 递进（至少两级）：n=1 → +2；n=2 → +4
+        // 先放友方邻位（加入路径，正常入场）；敌方邻位受「前线敌对门禁」限制不能经加入路径，
+        // 故按本文件既有口径用机制级构造（直接落位 + 位置变更发射）——计数的「不分敌我」语义不变。
+        var n2 = await CommandTestKit.PrepareUnitAsync(match, playerA, CommandTestKit.InfantryId, frontLine.GetInsertionGaps().At(0));
         Assert.Equal(4, AttackOf(counting));
-        var n2 = await CommandTestKit.PrepareUnitAsync(match, playerA, CommandTestKit.InfantryId, frontLine.GetInsertionGaps().At(3));
+        var n1 = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
+        await MoveUnitAsync(match, n1, frontLine.GetInsertionGaps().At(2));
         Assert.Equal(6, AttackOf(counting));
 
         // 回落（死亡）：相邻单位死亡 → 回落一档
         await KillAsync(n1);
         Assert.Equal(4, AttackOf(counting));
 
-        // 回落（离开）：相邻单位移走 → 回落原值
-        await MoveUnitAsync(match, n2, frontLine.GetInsertionGaps().At(4));
+        // 回落（离开）：相邻单位移走（离前线回支援线末位）→ 回落原值
+        await MoveUnitAsync(match, n2, supportLine.GetInsertionGaps().At(1));
         Assert.Equal(2, AttackOf(counting));
     }
 
@@ -269,7 +279,7 @@ public class AuraSystemTests
         Assert.False(match.Environment.AreAdjacent(notOnField, notOnField));
 
         // 在场单位：查询纯只读（不触发重跑、不发任何更新、不改状态）
-        var unit = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 2);
+        var unit = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
         using var recorder = new UpdateRecorder(match.Engine);
         Assert.True(match.Environment.IsOnFrontLine(unit));
         Assert.Same(match.Battlefield.FrontLine, match.Environment.GetLineOf(unit));
@@ -277,16 +287,17 @@ public class AuraSystemTests
         Assert.Empty(recorder.Updates); // 查询零副作用
         Assert.Equal(2, AttackOf(unit)); // 状态不变
 
-        // 隔槽不相邻（槽 2 与槽 4 间隔空槽 3）
-        var far = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 4);
+        // 隔一个单位不相邻（0 号位与 2 号位之间有一个参照单位）
+        await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 1);
+        var far = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 2);
         Assert.False(match.Environment.AreAdjacent(unit, far));
 
-        // 关系 vs 计数分离：HQ 参与相邻关系（槽 1 邻槽 0），但「相邻单位」计数不含 HQ（非单位——槽 0 不计数、槽 2 空）
+        // 关系 vs 计数分离：HQ 参与相邻关系（支援线 HQ 之后的插入点 1），但「相邻单位」计数不含 HQ（非单位——HQ 侧不计数、线尾无元素）
         var besideHq = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
         Assert.True(match.Environment.AreAdjacent(besideHq, playerA.Hq));
         Assert.Empty(match.Environment.GetAdjacentUnits(besideHq));
 
-        // 跨线不算（前线槽 4 与支援线槽 2）
+        // 跨线不算（前线 2 号位与支援线 2 号位）
         var supportUnit = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 2);
         Assert.False(match.Environment.AreAdjacent(far, supportUnit));
     }
@@ -301,7 +312,7 @@ public class AuraSystemTests
         var playerA = match.Players[0];
         var frontLine = match.Battlefield.FrontLine;
 
-        var beneficiary = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 2);
+        var beneficiary = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
         var source = (UnitCard)match.CardLibrary.Instantiate(AuraTestKit.AdjacentAuraUnitId);
         await source.LoadAsync(playerA);
         Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(source, frontLine.GetInsertionGaps().At(1))).Status);
@@ -327,7 +338,7 @@ public class AuraSystemTests
         var playerA = match.Players[0];
         var frontLine = match.Battlefield.FrontLine;
 
-        var beneficiary = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 2);
+        var beneficiary = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
         var source = (UnitCard)match.CardLibrary.Instantiate(AuraTestKit.AdjacentAuraUnitId);
         await source.LoadAsync(playerA);
 
@@ -358,8 +369,8 @@ public class AuraSystemTests
         var playerA = match.Players[0];
         var frontLine = match.Battlefield.FrontLine;
 
-        // 受益单位（步兵 行动费 1）与源（相邻）
-        var beneficiary = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 2);
+        // 受益单位（步兵 行动费 1）与源（相邻：源插入到受益单位右侧）
+        var beneficiary = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
         var source = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 1);
         Assert.Equal(1, beneficiary.Modifiers.GetEffectiveValue(CardStatFields.OperateCost));
 
@@ -393,7 +404,7 @@ public class AuraSystemTests
         var frontLine = match.Battlefield.FrontLine;
 
         // 观察者：条件依赖「相邻单位攻击有效值」（他卡数值）
-        var watcher = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 2);
+        var watcher = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
         var neighbor = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 1);
         await watcher.Modifiers.AddModifierAsync(new ConditionalModifier(
             CardStatFields.Attack,

@@ -1,5 +1,6 @@
 using Orc.Cards;
 using Orc.Core;
+using Orc.Game.Board;
 using Orc.Game.Cards;
 using Orc.Game.Commanding;
 using Orc.Game.Targeting;
@@ -51,7 +52,7 @@ public class TriggerCardTests
         var playerB = match.Players[1];
         var attacker = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
         var target = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
-        var effectHost = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 2);
+        var effectHost = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(attacker);
 
         var attackLog = ProbeAttack(match.CommandManager);
@@ -83,7 +84,7 @@ public class TriggerCardTests
         var playerB = match.Players[1];
         var attacker = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
         var target = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
-        var effectHost = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 2);
+        var effectHost = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
 
         var damageLog = ProbeDamage(match.CommandManager);
 
@@ -120,7 +121,7 @@ public class TriggerCardTests
         // 主动指挥移动：非效果引发——移动链路触发者空
         Assert.Equal(CommandResultStatus.Success, result.Status);
         Assert.Null(Assert.Single(moveLog));
-        Assert.Same(mover, frontSlot);
+        Assert.Same(mover, match.Battlefield.FrontLine.Members[0]);
     }
 
     [Fact]
@@ -133,7 +134,8 @@ public class TriggerCardTests
         var effectHost = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 2);
         CommandTestKit.Activate(mover);
         var moveLog = ProbeMove(match.CommandManager);
-        var oldSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1);
+        var oldPosition = new BoardPosition(
+            match.Battlefield.PlayerASupportLine, match.Battlefield.PlayerASupportLine.IndexOf(mover));
         var newSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
 
         // 效果引发移动：显式携带触发者（构造调用方式）——真实执行、填充正确
@@ -142,14 +144,14 @@ public class TriggerCardTests
             new Dictionary<string, object?>
             {
                 [CommandDataKeys.Unit] = mover.Ref,
-                [CommandDataKeys.OldPosition] = oldSlot.Ref,
+                [CommandDataKeys.OldPosition] = oldPosition.Ref,
                 [CommandDataKeys.NewPosition] = newSlot.Ref,
                 [CommandDataKeys.TriggerCard] = effectHost,
             });
 
         Assert.Equal(ExecutionOutcome.Normal, stream.Outcome);
         Assert.Same(effectHost, Assert.Single(moveLog));
-        Assert.Same(mover, newSlot);
+        Assert.Same(mover, match.Battlefield.FrontLine.Members[0]);
     }
 
     [Fact]
@@ -180,7 +182,7 @@ public class TriggerCardTests
         Assert.Equal(CommandResultStatus.Success, result.Status);
         Assert.Same(effectHost, Assert.Single(commandLog));
         Assert.Same(effectHost, Assert.Single(moveLog));
-        Assert.Same(mover, frontSlot);
+        Assert.Same(mover, match.Battlefield.FrontLine.Members[0]);
     }
 
     [Fact]

@@ -96,7 +96,7 @@ public class OperateCostRecheckTests
         Assert.Equal(CommandResultStatus.Failed, revalidated.Status);
         Assert.Equal(CommandFailureReason.ExecutionRejected, revalidated.FailureReason);
         // 零副作用：未移动、未扣费、两 bool 未变
-        Assert.Same(match.Battlefield.GetSupportLine(player).GetInsertionGaps().At(1), unit.GetData<UnitStateData>().Line);
+        Assert.Same(match.Battlefield.GetSupportLine(player), unit.GetData<UnitStateData>().Line); // 仍在原支援线（位置未变）
         Assert.Equal(2, player.Points);
         Assert.True(unit.GetData<CommandData>().CanMove);
 

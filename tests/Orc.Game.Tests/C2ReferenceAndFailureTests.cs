@@ -205,18 +205,20 @@ public class C2ReferenceAndFailureTests
         var playerA = match.Players[0];
 
         var occupied = match.Battlefield.GetSupportLine(playerA).GetInsertionGaps().At(1);
-        await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1); // 占位
+        await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1); // 该插入点已被这一次插入消耗（快照过期）
 
         using var recorder = new UpdateRecorder(match.Engine);
         recorder.Clear();
         var handBefore = playerA.Hand.Count;
 
-        // 复合调用：创建成功 → 放置失败（槽被占）→ 服务侧自动回收（「不产生半放置态」服务侧内建）
+        // 复合调用：创建成功 → 放置失败（目标插入点已过期）→ 服务侧自动回收（「不产生半放置态」服务侧内建）。
+        // 有序列表模型下"位置已被占用"不再是支援线放置的可达失败原因（插入空隙永不"被占"，只会在阵线变化后失效），
+        // 故本用例的可达失败形态是 PositionStale——待验命题（放置期失败 ⇒ 实例回收）不变。
         var result = await match.CardService.CreateAndPlaceToSupportLineAsync(
             CommandTestKit.InfantryId, playerA, occupied);
 
         Assert.Equal(CardPlaceStatus.Rejected, result.Status);
-        Assert.Equal(CardPlaceFailureReason.TargetSlotOccupied, result.FailureReason);
+        Assert.Equal(CardPlaceFailureReason.PositionStale, result.FailureReason);
 
         // 回收可观察：关联实例已销毁（Life.IsAlive＝false）；无未归属残留（不在任何容器）
         var recycled = result.Card;

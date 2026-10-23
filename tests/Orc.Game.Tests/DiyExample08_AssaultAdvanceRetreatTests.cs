@@ -60,7 +60,8 @@ public class DiyExample08_AssaultAdvanceRetreatTests
         Assert.Equal(AssaultOutcome.Retreated, outcome);
         var position = unit.GetData<UnitStateData>().Line;
         Assert.NotNull(position);
-        Assert.Contains(match.Battlefield.GetSupportLine(playerA).Members, slot => ReferenceEquals(slot, position));
+        Assert.Same(match.Battlefield.GetSupportLine(playerA), position); // 撤退到我方支援线
+        Assert.Contains(match.Battlefield.GetSupportLine(playerA).Members, slot => ReferenceEquals(slot, unit));
         Assert.Equal(hqBefore, playerB.Hq.Health); // 撤退分支不造成总部伤害
 
         // 反击已发生：我方防御 5 → 3（战斗不是单向伤害）。

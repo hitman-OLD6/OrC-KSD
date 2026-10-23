@@ -23,7 +23,7 @@ public class CommandUpdateTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var attacker = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0);
-        var target = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2);
+        var target = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1);
         CommandTestKit.Activate(attacker);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         using var recorder = new UpdateRecorder(match.Engine);
@@ -141,7 +141,7 @@ public class CommandUpdateTests
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         using var recorder = new UpdateRecorder(match.Engine);
 
-        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps().At(3).Ref);
+        var result = await CommandTestKit.RunCommandAsync(match, bridge, unit, match.Battlefield.FrontLine.GetInsertionGaps().At(0).Ref);
 
         // 移动纯净性：unit.position.changed ＋ 收尾扣行动费的 point.changed（E1-25 后续）；不发 card.died / card.played / turn 类。
         Assert.Equal(CommandResultStatus.Success, result.Status);

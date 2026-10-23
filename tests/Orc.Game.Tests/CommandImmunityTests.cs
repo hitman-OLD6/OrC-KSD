@@ -49,7 +49,7 @@ public class CommandImmunityTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var artillery = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.ArtilleryId, 1); // 攻 2 / 防 2（炮兵）
-        var infantry = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 2); // 攻 2 / 防 5
+        var infantry = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1); // 攻 2 / 防 5
         CommandTestKit.Activate(artillery);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
@@ -72,7 +72,7 @@ public class CommandImmunityTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var bomber = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.BomberId, 1); // 攻 4 / 防 2（轰炸机）
-        var fighter = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.FighterId, 2); // 攻 3 / 防 2（战斗机）
+        var fighter = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.FighterId, 1); // 攻 3 / 防 2（战斗机）
         CommandTestKit.Activate(bomber);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 
@@ -137,7 +137,7 @@ public class CommandImmunityTests
         var playerA = match.Players[0];
         var playerB = match.Players[1];
         var attacker = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.InfantryId, 0); // 攻 2 / 防 5
-        var artillery = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.ArtilleryId, 2); // 攻 2 / 防 2（炮兵）
+        var artillery = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.ArtilleryId, 1); // 攻 2 / 防 2（炮兵）
         CommandTestKit.Activate(attacker);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
 

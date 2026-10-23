@@ -79,9 +79,10 @@ public class TriggerRegistryTests
         await match.Initialize();
 
         // S15：动作目录按八个动作的两端触发器装配（加入手牌 2 / 抽牌 3 / 伤害 4 / 死亡 2 /
-        // 攻击 2 / 移动 2 / 加入战场 3 / 指令 2＝20 项），全部登记为底层；指挥触发器不属动作、不再登记。
+        // 攻击 2 / 移动 2 / 加入战场 4〔部署／加入前线／加入支援阵线 3 个触发端＋1 处理端〕/ 指令 2＝21 项），
+        // 全部登记为底层；指挥触发器不属动作、不再登记。
         var lowLevel = match.TriggerRegistry.GetByLayer(TriggerLayer.LowLevel);
-        Assert.Equal(20, lowLevel.Count);
+        Assert.Equal(21, lowLevel.Count);
         Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.AddToHandAction.Trigger));
         Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.AddToHandAction.Handle));
         Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.DrawAction.Top));
@@ -100,19 +101,20 @@ public class TriggerRegistryTests
         Assert.Contains(lowLevel, entry => moveEnds.Any(end => end.Role == "触发端" && ReferenceEquals(entry.Trigger, end.Trigger)));
         Assert.Contains(lowLevel, entry => moveEnds.Any(end => end.Role == "处理端" && ReferenceEquals(entry.Trigger, end.Trigger)));
         Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.JoinBattlefieldAction.Deploy));
+        Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.JoinBattlefieldAction.JoinFrontline));
         Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.JoinBattlefieldAction.JoinSupportLine));
         Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.JoinBattlefieldAction.Handle));
         Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.Engine.OrderFlow.Trigger));
         Assert.Contains(lowLevel, entry => ReferenceEquals(entry.Trigger, match.Engine.OrderFlow.FinalizeTrigger));
         Assert.DoesNotContain(lowLevel, entry => ReferenceEquals(entry.Trigger, match.CommandManager.CommandTrigger));
 
-        // 「底层触发器＝8 个动作的 20 个端」不是硬编码清单碰巧相等：与动作目录逐条展开完全一致
+        // 「底层触发器＝8 个动作的 21 个端」不是硬编码清单碰巧相等：与动作目录逐条展开完全一致
         // （8 条 entry × 各自两端；目录是装配真源，注册表只是按目录登记）。
         var expectedEnds = match.CommandManager.Actions.Entries
             .SelectMany(entry => entry.Ends)
             .Select(end => end.Trigger)
             .ToArray();
-        Assert.Equal(20, expectedEnds.Length);
+        Assert.Equal(21, expectedEnds.Length);
         Assert.Equal(expectedEnds, lowLevel.Select(entry => entry.Trigger));
 
         Assert.Empty(match.TriggerRegistry.GetByLayer(TriggerLayer.External));

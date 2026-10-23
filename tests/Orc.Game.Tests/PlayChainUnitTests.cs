@@ -47,9 +47,14 @@ public class PlayChainUnitTests
         var player = match.Players[0];
         var unit = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(match, player); // 花费 1（点数足够）
         var line = match.Battlefield.PlayerASupportLine;
-        for (var i = 0; i < line.Size; i++)
+
+        // 占满支援线（容量＝5 元素：HQ ＋ 4 个单位）——满员＝无插入点（位置模型里「无空位」就是这条）。
+        while (!line.IsFull)
         {
-            // 占满由列表容量表达（见下方填充）
+            var filler = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId);
+            Assert.Equal(
+                PlayResultStatus.Success,
+                (await match.PlayManager.JoinUnitAsync(filler, line.GetInsertionGaps().At(1))).Status);
         }
 
         using var recorder = new UpdateRecorder(match.Engine);
@@ -86,14 +91,14 @@ public class PlayChainUnitTests
         Assert.Equal(1, description.Slots[0].Max);
 
         // 确认（选中左侧阵型空隙）→ 自动衔接打出链。
-        var target = line.GetInsertionGaps().At(1);
         Assert.True(responder.Complete(description.RequestId, TargeterTestKit.Selection(TargetSlot.DefaultName, line.GetInsertionGaps().At(0).Ref)));
         var result = await task;
 
         Assert.Equal(PlayResultStatus.Success, result.Status);
-        // 部署链：单位化（组件挂载：位置＝槽位、已毁＝false、类型空列表、三实时值＝对战组件值）＋槽位占用。
+        // 部署链：单位化（组件挂载：位置＝阵线、已毁＝false、类型空列表、三实时值＝对战组件值）＋落位。
         var state = unit.GetData<UnitStateData>();
-        Assert.Same(target, state.Line);
+        Assert.Same(line, state.Line); // 落在选中空隙所在的阵线（空隙身份随快照失效，按线＋序号核对）
+        Assert.Equal(0, line.IndexOf(unit));
         Assert.False(state.IsDestroyed);
         Assert.Empty(state.UnitTypes);
         Assert.Equal(1, state.OperateCost);
@@ -102,7 +107,7 @@ public class PlayChainUnitTests
         var command = unit.GetData<CommandData>();
         Assert.False(command.CanMove);
         Assert.False(command.CanAttack);
-        Assert.Same(unit, target);
+        Assert.Same(unit, line[0]);
         // 收尾：仅部署扣费（恰一次）＋离手。
         Assert.Equal(0, player.Points);
         Assert.DoesNotContain(unit, player.Hand);
@@ -146,14 +151,22 @@ public class PlayChainUnitTests
         await match.Initialize();
         var player = match.Players[0];
         var unit = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(match, player);
-        var occupied = match.Battlefield.FrontLine.GetInsertionGaps().At(2);
+        var front = match.Battlefield.FrontLine;
+
+        // 新位置模型下插入点没有「被占用」形态：占掉该位置＝阵线快照变化 ⇒ 先前取得的空隙失效；
+        // 直接驱动时目标不可用＝拒绝（原语义），失败分类按入口既有契约（部署门户＝FormationGapUnavailable）。
+        var occupied = front.GetInsertionGaps().At(0);
+        var occupant = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId);
+        Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(occupant, occupied)).Status);
+        Assert.False(occupied.IsCurrent);
+
         using var recorder = new UpdateRecorder(match.Engine);
 
         var result = await match.PlayManager.PlayUnitAsync(unit, occupied);
 
-        // 防御性前置（直接驱动）：目标槽位非空＝拒绝、零副作用。
+        // 防御性前置（直接驱动）：目标不可用＝拒绝、零副作用。
         Assert.Equal(PlayResultStatus.Failed, result.Status);
-        Assert.Equal(PlayFailureReason.TargetSlotOccupied, result.FailureReason);
+        Assert.Equal(PlayFailureReason.FormationGapUnavailable, result.FailureReason);
         Assert.Empty(recorder.Updates);
         Assert.Contains(unit, player.Hand);
         Assert.False(unit.TryGetData<UnitStateData>(out _));
@@ -173,7 +186,9 @@ public class PlayChainUnitTests
         Assert.Equal(PlayResultStatus.Success, first.Status);
 
         using var recorder = new UpdateRecorder(match.Engine);
-        var again = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps().At(3)); // 目标槽＝槽 3（避开 HQ 占位槽）
+        // 放回手牌：让「手牌门禁」通过，才能直接驱动到「已单位化」这条拒绝（否则先被 CardNotInHand 拦下）。
+        player.Hand.Add(unit);
+        var again = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps().At(0)); // 目标＝当前有效插入点（重复单位化先于落位判定）
 
         // 已单位化（重复部署被拒绝）：目标槽未动、无新更新。
         Assert.Equal(PlayResultStatus.Failed, again.Status);
@@ -196,7 +211,7 @@ public class PlayChainUnitTests
         Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.PlayUnitAsync(first, line.GetInsertionGaps().At(1))).Status);
 
         using var recorder = new UpdateRecorder(match.Engine);
-        var result = await match.PlayManager.PlayUnitAsync(second, line.GetInsertionGaps().At(3)); // 目标槽＝槽 3（避开 HQ 占位槽）
+        var result = await match.PlayManager.PlayUnitAsync(second, line.GetInsertionGaps().At(0)); // 目标＝当前有效插入点
 
         // 复验失败（打出段；原因与预打出阶段拒绝在阶段上可区分）：仅本次取消语义＋留痕；
         // 零副作用——不部署、不扣费、不发更新、不离手。

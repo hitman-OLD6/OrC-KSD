@@ -34,9 +34,11 @@ public class JudicatorCombatCounterAmbushTests
         var weak = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.WeakId, 1); // 步兵；攻 1 / 防 2
         var shocked = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 0); // 冲击步兵（批 5；运行时授予）
         var mixAir = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.MixAirId, 0); // 炮兵＋轰炸机；攻 2 / 防 5
-        var enemyInfantry = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 1); // 攻 2 / 防 5
-        var enemyFighter = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.FighterId, 2); // 攻 3 / 防 2
-        var enemyBomber = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.BomberId, 3); // 攻 4 / 防 2
+        // 敌方单位落**敌方支援线**：前线被敌方存活单位占据时「加入前线」被产品门禁拒绝（静默未入场），
+        // 旧布置把双方都放前线，导致这些单位实际从未单位化——条款①/③读不到类型而误判（属布置错，非产品错）。
+        var enemyInfantry = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1); // 攻 2 / 防 5
+        var enemyFighter = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.FighterId, 2); // 攻 3 / 防 2
+        var enemyBomber = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.BomberId, 3); // 攻 4 / 防 2
 
         // 默认名恒可解析（固定内置注册段——无条件可用）。
         var entry = match.Judicators.Resolve(JudicatorNames.CombatCounterEligibility);
@@ -182,13 +184,14 @@ public class JudicatorCombatCounterAmbushTests
         var art1 = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.ArtilleryId, 1); // 攻 2 / 防 2
         var art2 = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.ArtilleryId, 2);
         var art3 = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.ArtilleryId, 1);
-        var art4 = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.ArtilleryId, 0);
-        var art5 = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.ArtilleryId, 3);
-        var infTarget1 = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 1); // 攻 2 / 防 5
-        var infTarget2 = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1); // 攻 2 / 防 5
-        var infTarget3 = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1); // 攻 2 / 防 5
-        var ambusher1 = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.AmbushId, 2); // 攻 5 / 防 6（伏击）
-        var ambusher2 = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.AmbushId, 1); // 攻 5 / 防 6（伏击）
+        var art5 = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.ArtilleryId, 1); // 支援线第 4 个单位（HQ＋4＝满）
+        var art4 = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.ArtilleryId, 0); // 前线（唯一前线单位）
+        // 敌方单位全部落**敌方支援线**：前线有敌方存活单位时「加入前线」被产品门禁拒绝（旧布置让它们静默未入场，
+        // 导致攻击指令无合法目标而被取消）。infTarget3 待 art4 阵亡、前线清空后再上前线（容量约束；断言不变）。
+        var infTarget1 = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 1); // 攻 2 / 防 5
+        var ambusher1 = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.AmbushId, 2); // 攻 5 / 防 6（伏击）
+        var infTarget2 = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.InfantryId, 3); // 攻 2 / 防 5
+        var ambusher2 = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.AmbushId, 4); // 攻 5 / 防 6（伏击）
         foreach (var unit in new[] { art1, art2, art3, art4, art5 })
         {
             CommandTestKit.Activate(unit);
@@ -238,6 +241,8 @@ public class JudicatorCombatCounterAmbushTests
         Assert.True(match.Judicators.UnregisterWrapper(moding!));
 
         // 回退（默认互伤区）：豁免恢复——炮兵不受反击。
+        // 该目标此时才上前线：前线已在 art4 阵亡后清空（有敌方存活单位时「加入前线」会被门禁拒绝）。
+        var infTarget3 = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 0); // 攻 2 / 防 5
         var restored = await CommandTestKit.RunCommandAsync(match, bridge, art5, infTarget3.Ref);
         Assert.Equal(CommandResultStatus.Success, restored.Status);
         Assert.Equal(2, art5.GetData<UnitStateData>().Defense);

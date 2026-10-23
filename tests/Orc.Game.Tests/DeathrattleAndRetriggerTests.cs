@@ -86,7 +86,7 @@ public class DeathrattleAndRetriggerTests
         var playerB = match.Players[1];
 
         var victim = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.WeakId, 1); // 攻 1 / 防 2
-        var victimSlot = match.Battlefield.GetSupportLine(playerB).GetInsertionGaps().At(1);
+        var victimLine = match.Battlefield.GetSupportLine(playerB);
 
         // 前置：同卡其它词条（行为态可查证据）＋一项修饰（修饰仍生效证据）＋一项并存效果（效果仍装载证据）。
         Assert.True(await victim.Keywords.GrantAsync(KeywordIds.Forecast));
@@ -108,7 +108,7 @@ public class DeathrattleAndRetriggerTests
                 ModifierEffective = unit.Modifiers.GetEffectiveValue(CardStatFields.Attack) == 5, // 1 基准 + 4 修饰
                 ContentEffectMounted = unit.Effects.Contains(probe!) && probe!.IsMounted,
                 StrayEffectMounted = unit.Effects.Contains(stray) && stray.IsMounted,
-                LineReadable = ReferenceEquals(state.Line, victimSlot),
+                LineReadable = ReferenceEquals(state.Line, victimLine),
                 SlotFreed = !match.Battlefield.GetSupportLine(playerB).Contains(victim),
                 Destroyed = state.IsDestroyed,
                 EngineSame = ReferenceEquals(context.Engine, match.Engine),
@@ -123,7 +123,7 @@ public class DeathrattleAndRetriggerTests
         Assert.True(probe.IsMounted);
 
         // 战斗致死（统一死亡流程）。
-        var killer = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.BeastId, 1); // 攻 6 / 防 7
+        var killer = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.BeastId, 0); // 攻 6 / 防 7
         CommandTestKit.Activate(killer);
         bridge.CollectScript = CommandTestKit.AllRefsScript(match);
         using var recorder = new UpdateRecorder(match.Engine);
@@ -294,6 +294,7 @@ public class DeathrattleAndRetriggerTests
         var slot = match.Battlefield.GetSupportLine(player).GetInsertionGaps().At(1);
         var joined = await match.PlayManager.JoinUnitAsync(unit, slot);
         Assert.Equal(PlayResultStatus.Success, joined.Status);
+        var supportLine = match.Battlefield.GetSupportLine(player);
         order.Clear();
         views.Clear();
 
@@ -305,7 +306,9 @@ public class DeathrattleAndRetriggerTests
         Assert.All(views, view =>
         {
             Assert.Same(unit, view.Card);
-            Assert.Same(slot, view.Position);
+            // 重放上下文的位置＝当前快照下"该单位所在位置"的插入点（按序铺位后取位，不是入场时那个已失效的空隙实例）
+            Assert.Same(supportLine, view.Position!.Line);
+            Assert.Equal(supportLine.IndexOf(unit), view.Position.Ordinal);
         });
 
         // 非幂等：同一卡同链类型重复请求＝各执行一次（「再触发是动作而非状态确保」）。
@@ -353,7 +356,7 @@ public class DeathrattleAndRetriggerTests
         await match.Initialize();
         var playerA = match.Players[0];
 
-        var played = await CommandTestKit.InstantiateLoadedAsync(match, playerA, ReplayUnitId);
+        var played = await CommandTestKit.InstantiateLoadedAsync(match, playerA, ReplayUnitId, toHand: true);
         var order = new List<string>();
         played.AddEffect(new DeployLogicProbeEffect(played, "甲", _ => { order.Add("甲"); return Task.CompletedTask; }));
         played.AddEffect(new DeployLogicProbeEffect(played, "乙", _ => { order.Add("乙"); return Task.CompletedTask; }));

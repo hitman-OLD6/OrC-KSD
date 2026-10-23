@@ -166,7 +166,7 @@ public sealed class BulwarkKeywordTests : IDisposable
 
         var front = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
         Assert.True((await CommandTestKit.RunCommandAsync(match, bridge, unit, front.Ref)).IsSuccess);
-        Assert.Same(front, unit.GetData<UnitStateData>().Line);
+        Assert.Same(match.Battlefield.FrontLine, unit.GetData<UnitStateData>().Line);
         Assert.False(unit.Keywords.Has(Repair), "抢修：位于前线即失去");
     }
 

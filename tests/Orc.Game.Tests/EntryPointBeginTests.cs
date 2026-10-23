@@ -40,11 +40,11 @@ public class EntryPointBeginTests
         Assert.Same(mover, slot.Parameter);
 
         Assert.True(responder.Complete(
-            description.RequestId, TargeterTestKit.Selection(SelectorNames.FieldUnit, front[0].Ref)));
+            description.RequestId, TargeterTestKit.Selection(SelectorNames.FieldUnit, front.GetInsertionGaps().At(0).Ref)));
         var result = await task;
 
         Assert.Equal(CommandResultStatus.Success, result.Status);
-        Assert.Same(front[0], mover.GetData<UnitStateData>().Line);
+        Assert.Same(front, mover.GetData<UnitStateData>().Line); // 已落地位置＝前线（位置元素由 Members 承载）
         Assert.DoesNotContain(mover, match.Battlefield.PlayerASupportLine.Members);
         Assert.False(mover.GetData<CommandData>().CanMove);      // 收尾清位
         Assert.Equal(pointsBefore - 1, playerA.Points);          // 收尾扣费（行动费 1）
@@ -68,7 +68,7 @@ public class EntryPointBeginTests
         var result = await task;
 
         Assert.Equal(CommandResultStatus.Cancelled, result.Status);
-        Assert.Same(match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1), mover.GetData<UnitStateData>().Line);
+        Assert.Same(match.Battlefield.PlayerASupportLine, mover.GetData<UnitStateData>().Line); // 仍在原支援线（位置未变）
         Assert.True(mover.GetData<CommandData>().CanMove);       // 未消耗行动
         Assert.Equal(pointsBefore, playerA.Points);              // 未扣费
     }

@@ -117,7 +117,9 @@ public class JudicatorValidationTests
         var moveTrigger = match.CommandManager.UnitMoveTrigger;
         var attackTrigger = match.CommandManager.UnitAttackTrigger;
         var empty = Array.Empty<Ref<Entity>>();
-        var oldSlot = match.Battlefield.GetSupportLine(player).GetInsertionGaps().At(1);
+        // 载荷口径：OldPosition＝已成事实的位置（BoardPosition：线 + 元素位置序号）、NewPosition＝请求落位（FormationGap）。
+        var supportLine = match.Battlefield.GetSupportLine(player);
+        var oldSlot = new Orc.Game.Board.BoardPosition(supportLine, supportLine.IndexOf(unit));
         var newSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
 
         // 基线：移动合法输入通过（默认复验逻辑真实求值）；空输入双侧拒绝。
@@ -200,7 +202,9 @@ public class JudicatorValidationTests
             match.Players,
             () => match.CurrentPlayer);
 
-        var oldSlot = match.Battlefield.GetSupportLine(player).GetInsertionGaps().At(1);
+        // 载荷口径同前：OldPosition＝BoardPosition、NewPosition＝前线插入空隙。
+        var supportLine = match.Battlefield.GetSupportLine(player);
+        var oldSlot = new Orc.Game.Board.BoardPosition(supportLine, supportLine.IndexOf(unit));
         var newSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
         Assert.True(commandManager.UnitMoveTrigger.Validate(new[] { unit.Ref, oldSlot.Ref, newSlot.Ref })); // 默认复验逻辑在跑（合法场景通过）
 

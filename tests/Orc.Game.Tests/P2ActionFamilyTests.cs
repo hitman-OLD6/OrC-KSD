@@ -28,15 +28,16 @@ public class P2ActionFamilyTests
         var unit = await CommandTestKit.PrepareOnFrontAsync(match, player, CommandTestKit.InfantryId, 0);
         CommandTestKit.Activate(unit);
 
-        var support = match.Battlefield.GetSupportLine(player).GetInsertionGaps().At(0);
+        var supportLine = match.Battlefield.GetSupportLine(player);
+        var support = supportLine.GetInsertionGaps().At(0);
         var points = player.Points;
         using var recorder = new UpdateRecorder(match.Engine);
 
         Assert.True(await match.CommandManager.MoveUnitAsync(unit, support));
 
-        // 动作状态：落地（唯一落地口）。
-        Assert.Same(support, unit.GetData<UnitStateData>().Line);
-        Assert.Same(unit, support);
+        // 动作状态：落地（唯一落地口）——落在请求的阵线、占请求的序号（空隙身份随快照失效）。
+        Assert.Same(supportLine, unit.GetData<UnitStateData>().Line);
+        Assert.Same(unit, supportLine[0]);
         // 行动状态：零消耗（S6 有意变更：效果移动免费）。
         Assert.Equal(points, player.Points);
         Assert.True(unit.GetData<CommandData>().CanMove);

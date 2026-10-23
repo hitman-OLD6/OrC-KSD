@@ -73,13 +73,13 @@ public class TurnPhaseEffectTests
         var playerA = match.Players[0];
         var unit = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
         var originalSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1);
-        var displacedSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(3);
+        var displacedSlot = match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(0);
 
-        // 模拟「被效果临时移位」：单位从原槽移到另一空槽（真实对象、真实槽位变化）。
+        // 模拟「被效果临时移位」：单位从原槽移到另一空槽（真实对象、真实位置变化）。
         originalSlot.Line?.TryRemove(unit);
         displacedSlot.Line.TryInsertAt(displacedSlot.Ordinal, unit);
         unit.GetData<UnitStateData>().Line = displacedSlot.Line;
-        Assert.Same(unit, displacedSlot);
+        Assert.Equal(displacedSlot.Ordinal, displacedSlot.Line.IndexOf(unit));
 
         // 注册「下个己方回合开始」监听：到点执行「位置恢复」动作（模拟）＋执行后自清理。
         var executions = 0;
@@ -104,15 +104,14 @@ public class TurnPhaseEffectTests
         // 负控（硬性）：敌方回合不触发——单位仍在移位处。
         await match.EndTurn(); // → 回合 2（B）
         Assert.Equal(0, executions);
-        Assert.Same(unit, displacedSlot);
+        Assert.Equal(displacedSlot.Ordinal, displacedSlot.Line.IndexOf(unit));
         Assert.NotEqual(originalSlot.Ordinal, originalSlot.Line!.IndexOf(unit));
 
         // 到点：己方回合开始 → 恢复执行一次（真实位置副作用）。
         await match.EndTurn(); // → 回合 3（A）
         Assert.Equal(1, executions);
-        Assert.Same(unit, originalSlot);
         Assert.Equal(originalSlot.Ordinal, originalSlot.Line!.IndexOf(unit));
-        Assert.Same(originalSlot, unit.GetData<UnitStateData>().Line);
+        Assert.Same(originalSlot.Line, unit.GetData<UnitStateData>().Line);
 
         // 自清理：再移位后，后续己方回合不再触发（单位保持移位处——未被第二次恢复）。
         await match.EndTurn(); // → 回合 4（B）
@@ -121,7 +120,7 @@ public class TurnPhaseEffectTests
         unit.GetData<UnitStateData>().Line = displacedSlot.Line;
         await match.EndTurn(); // → 回合 5（A）
         Assert.Equal(1, executions);
-        Assert.Same(unit, displacedSlot); // 未被恢复——handler 已自清理
+        Assert.Equal(displacedSlot.Ordinal, displacedSlot.Line.IndexOf(unit)); // 未被恢复——handler 已自清理
         Assert.NotEqual(originalSlot.Ordinal, originalSlot.Line!.IndexOf(unit));
     }
 

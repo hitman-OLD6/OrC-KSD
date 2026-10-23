@@ -78,9 +78,10 @@ public class MatchHistoryReadTests
         var playerB = match.Players[1];
 
         // 友/敌混合的连续消灭：A 两个、B 一个（脆皮 防 2——经伤害门户致死＝防御归零统一死亡衔接）
+        // 敌方单位不能经加入路径进入有我方单位的前线（敌对占线门禁），故敌方死者落在其自家支援线。
         var aWeak1 = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.WeakId, 0);
         var aWeak2 = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.WeakId, 1);
-        var bWeak = await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.WeakId, 2);
+        var bWeak = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.WeakId, 1);
 
         await aWeak1.ApplyDefenseDamageAsync(2); // ① A 死 1（友方——较早）
         await aWeak2.ApplyDefenseDamageAsync(2); // ② A 死 2（友方——最近友方）
@@ -141,7 +142,9 @@ public class MatchHistoryReadTests
         var service = match.CardService;
         Assert.True(service.TryResolveDefinitionId(diedCard, out var definitionId));
 
-        var target = match.Battlefield.GetSupportLine(playerA).GetInsertionGaps().At(1); // 转换目标位置（原位置——已被死亡链释放为空槽）
+        var target = match.Battlefield.GetSupportLine(playerA).GetInsertionGaps().At(1); // 转换目标位置（原位置——死亡链已把元素移出：HQ 之后）
+        var targetLine = target.Line;
+        var targetOrdinal = target.Ordinal;
         var result = await service.CreateAndPlaceToSupportLineAsync(definitionId!, playerA, target);
 
         // 组合断言：新实例按定义就位、位置正确
@@ -149,8 +152,8 @@ public class MatchHistoryReadTests
         var rebuilt = result.Card!;
         Assert.Same(diedCard.Definition, rebuilt.Definition); // 按定义重建
         Assert.True(rebuilt.TryGetData<UnitStateData>(out var rebuiltState));
-        Assert.Same(target, rebuiltState.Line);
-        Assert.Same(rebuilt, target);
+        Assert.Same(targetLine, rebuiltState.Line); // 落回同一阵线
+        Assert.Equal(targetOrdinal, targetLine.IndexOf(rebuilt)); // 落在原位置序号（空隙身份随快照失效，故按线＋序号核对）
     }
 
     // ---------- ③4 边界核验（信号契约 18 条不变；读取来源＝事件流） ----------
