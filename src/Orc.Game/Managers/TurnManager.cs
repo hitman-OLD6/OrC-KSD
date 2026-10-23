@@ -111,7 +111,12 @@ public sealed class TurnManager
         ActionStateRefresher?.Invoke(current);
         if (ShouldDrawForTurn(TurnNumber))
         {
-            await _playerManager.DrawCard(current, ct);
+            // 卡组抽空＝本回合不抽（疲劳规则属后续批次）。集合契约规定"空卡组 Draw 抛错"，
+            // 若照搬到这里，长局会在回合开始处直接崩掉整局——对局层必须挡住。
+            if (current.Deck.Count > 0)
+            {
+                await _playerManager.DrawCard(current, ct);
+            }
         }
 
         await EmitTurnAsync(GameUpdates.TurnStartAfter, current, TurnNumber, ct);

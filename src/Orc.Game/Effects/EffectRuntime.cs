@@ -797,12 +797,14 @@ public sealed partial class EffectRuntime
 
         if (_judicators() is not { } judicators)
         {
+            Console.WriteLine("[target-select] 空集：判定器注册表未装配（_judicators() == null）");
             return Array.Empty<Card>();
         }
 
         var targeterManager = OwnerOf(viewer)?.TargeterManager;
         if (targeterManager is null)
         {
+            Console.WriteLine($"[target-select] 空集：玩家 TargeterManager 未装配（viewer={viewer.Name}）");
             return Array.Empty<Card>();
         }
 
@@ -811,11 +813,14 @@ public sealed partial class EffectRuntime
         var candidates = rule.Candidates();
         if (candidates.Count == 0)
         {
+            Console.WriteLine($"[target-select] 空集：候选为 0（selector={selector} viewer={viewer.Name}）");
             return Array.Empty<Card>();
         }
 
         // 单次请求内用名单快照复核（避免逐候选重算）；候选本身也是快照（D15）。
         var validator = rule.Snapshot();
+        Console.WriteLine($"[target-select] 发起选靶：candidates={candidates.Count} " +
+                          $"selector={selector} viewer={viewer.Name}");
         Ref<Entity>? selected = null;
         var result = await targeterManager.RunAsync(async flow =>
         {
