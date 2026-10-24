@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json.Nodes;
 
 namespace Orc.Protocol;
@@ -38,9 +38,13 @@ public sealed class NdjsonReader : IAsyncDisposable
     private bool _firstLine = true;
     private bool _eof;
 
-    public NdjsonReader(Stream stream, bool leaveOpen = true)
+    private readonly int _maxLineLength;
+
+    public NdjsonReader(Stream stream, bool leaveOpen = true, int maxLineLength = Ndjson.MaxLineLength)
     {
         ArgumentNullException.ThrowIfNull(stream);
+        if(maxLineLength<1)throw new ArgumentOutOfRangeException(nameof(maxLineLength));
+        _maxLineLength=maxLineLength;
         _stream = stream;
         _leaveOpen = leaveOpen;
     }
@@ -98,9 +102,9 @@ public sealed class NdjsonReader : IAsyncDisposable
             return;
         }
 
-        if (_line.Length + count > Ndjson.MaxLineLength)
+        if (_line.Length + count > _maxLineLength)
         {
-            throw new InvalidDataException($"单帧长度超过上限 {Ndjson.MaxLineLength} 字节。");
+            throw new InvalidDataException($"单帧长度超过上限 {_maxLineLength} 字节。");
         }
 
         _line.Write(buffer, offset, count);

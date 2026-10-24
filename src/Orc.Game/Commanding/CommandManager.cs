@@ -1203,7 +1203,9 @@ public sealed class CommandManager
         }
 
         // 指向：指挥攻击成功发起后，对目标各触发一次（复验拒绝/取消不触发；效果发起的攻击不走本路径）。
-        if (targetRef.Value is Card targeted)
+        // Attack-after effects may replace and destroy the original target. The attack has
+        // already applied; a stale target must not abort payment and action finalization.
+        if (targetRef.IsAlive && targetRef.Value is Card targeted)
         {
             await TargetingRules.NotifyAsync(
                 _engine, targeted, unit, TargetingRules.KindCommand, triggerCard, ct);
