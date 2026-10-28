@@ -3,9 +3,23 @@
 > **本章解决什么**：讲清「判定怎么被改写」：判定器的强类型/统一签名两面、按名注册、全局层→玩家层两层管道，以及 wrapper 的 before/after/replace 与动作缝。读完你能安全地改写一条规则而不破坏其它卡。
 > **前置**：00（五段模型）、02（触发器、注册者与来源）。
 > **读完你能做什么**：①注册一个新判定器或包装既有判定器；②按场景选择 before/after/replace/动作缝；③判断改写失败（签名不符、目标错、域错）时的表现。
-> **对应代码路径**：`Orc.Core.Judicator` / `Judicator<TDelegate>`、`Orc.Core.JudicatorRegistry`、`Orc.Core.ServiceRegistry`（`RegisterBeforeWrapper`/`RegisterAfterWrapper`/`RegisterReplaceWrapper`）、`Orc.Core.Wrapper`（强类型工厂）、`Orc.Game.Judicators.*`、`Orc.Core.Trigger`（触发器包装器/动作缝）。
-> **本章自检**：能画出 `w2→w1→core→w1→w2`；能说出两层管道的四段顺序；能说出三种 wrapper 的差异与签名校验后果。
+> **对应代码路径（2026-10-28 核对）**：`Orc.Core.Judicator` / `Judicator<TDelegate>`、`Orc.Core.JudicatorRegistry`、`Orc.Core.ServiceRegistry`（`RegisterBeforeWrapper`/`RegisterAfterWrapper`/`RegisterReplaceWrapper`）、`Orc.Core.WrapperFactory`、`Orc.Game.Judicators.*`、`Orc.Core.Model.Mounting`（`WrapDeclaration`/`WrapRegistry`）。
+> **本章自检**：能画出 `w2→w1→core→w1→w2`（判定器侧）；能说出两层管道的四段顺序；能说出三种 wrapper 的差异与签名校验后果。
 
+> **⚠ 部分失效（2026-10-28 核对）**：**判定器侧全部有效**（`Judicator`、`JudicatorRegistry`、`ServiceRegistry`、
+> `Wrapper` 及其三段 wrapper 都还在）。失效的是**触发器侧**——`Trigger<TView>` 已删除，因此：
+>
+> | 节 | 状态 |
+> | --- | --- |
+> | §1–§3 判定器定义／注册／两层管道 | ✅ 有效 |
+> | §4 wrapper 三类 | ✅ 判定器侧的 `ServiceRegistry.Register*Wrapper` 有效 |
+> | §4.2 触发器包装器（`trigger.RegisterBeforeWrapper`）| ❌ 失效：`Trigger` 已删 |
+> | §5 `w2→w1→core→w1→w2` | ⚠️ 判定器侧仍成立；**成员侧的 `before` 已改为 FIFO**（旧为 LIFO），见 00 章 §3② |
+> | §6 动作缝（seams） | ❌ 失效：缝概念整体退役，需要中间插入＝拆成员 |
+> | §7 `wrappers[]` 预制体声明 | ⚠️ 旧 schema 字段已不可表达；v4 改用 `wraps[]` ＋ `phase` |
+>
+> 成员/信号侧的改写现由 **`wraps[]`**（`WrapDeclaration` ＋ `WrapRegistry`）承担，
+> 判定器侧包装仍走 `judge-wraps`（`WrapTarget.ForJudicator`）。术语映射见 [09 章](./09-新编排模型与术语迁移.md)。
 ## 状态
 
 - 章节状态：**草稿**
@@ -106,6 +120,9 @@ registry.RegisterAfterWrapper(handle, Wrapper.After<Ref<Entity>, int, bool>((car
 
 ### 4.2 触发器包装器（同一套三段，不同签名）
 
+> ❌ **本节失效（2026-10-28）**：`Trigger<TView>.RegisterBeforeWrapper` 已随 `Trigger` 删除。成员侧的改写改用 `wraps[]` 声明（`phase`），
+> 且 `before` 的顺序由旧 LIFO 改为 **FIFO**。下面代码仅作历史存档。
+
 触发器不区分全局/玩家域，但三段语义一致：
 
 ```csharp
@@ -160,6 +177,10 @@ after:  玩家 FIFO → 全局 FIFO
 
 ## 6. 动作缝（seams）
 
+> ❌ **本节整体失效（2026-10-28）**：`seams` 概念随 `Trigger` 一起退役，新模型里**没有动作缝**。
+> 需要"在某个时点插入"＝**拆成员**（把那个时点做成一个独立的可挂载成员），或改用 `wraps` 的 `before`/`after` 相位。
+> 下面内容仅作历史存档。
+
 动作缝把「同一 handler 内的某个时点」开放给 before 包装器，而不改变主流程：
 
 ```csharp
@@ -191,6 +212,11 @@ private static async Task CoreHandler(MyView view, Context ctx, CancellationToke
 | 缝名为空白 | `ArgumentException` |
 
 ## 7. `wrappers[]` 预制体声明（数据侧）
+
+> ⚠️ **本节 schema 字段已过时（2026-10-28）**：旧预制体的 `wrappers[]`（`phase` + `target` 事件 id + `seam`）仍可由旧装载器读入并迁移，
+> 但 v4 组件资产把 `seam` 列为**旧字段**（读到即拒绝装载），改写改用 `wraps[]`：
+> `{ "handler": "<成员地址>", "target": "engine#<成员>", "phase": "before|after|replace" }`；判定器侧用 `judge-wraps[]`。
+> 下面示例保留为旧格式参考。
 
 预制体可以在**主触发器**的事件上声明包装器：
 

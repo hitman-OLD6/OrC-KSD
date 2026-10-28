@@ -66,7 +66,7 @@
 - **D3.7 `watch` 不写 `session.json`**：只读 `--instance` 或记录里的 port，其退出不得影响任何记录。
 - **D3.8 关闭是唯一出口**：`quit`、Ctrl-D、未捕获异常、终局选择"退出"都走同一 shutdown 函数（kill 或保留 → 更新记录 → 关闭 socket）。若 `manager.kill` 失败，仍按"实例是否还存在"决定记录去留——不因 kill 报错就留下指向死实例的记录。
 - **D4 `--launch-manager` 拉起的是 `serve` 进程本身，不经 bat；就绪判据＝`manager.ping` 成功**（不是就绪行、也不是进程存活）。
-- **D4.1 启动契约**：`dotnet <repo>/src/Orc.Manager/bin/Debug/net8.0/Orc.Manager.dll serve --port <port>`，`cwd`＝仓库根（管理器按相对路径找实例目录、把 `.orc-manager/` 落在这里）。端口默认 `51999`；`--manager <host:port>` 显式覆盖（**同时决定连谁与拉谁**）。**不支持 `--port 0`**——端口要写进 `session.json`、也要让别的 agent 的 MCP 对得上，随机端口只会制造不可复现的地址。
+- **D4.1 启动契约**：`dotnet <repo>/artifacts/slot/bin/Orc.Manager/debug/Orc.Manager.dll serve --port <port>`，`cwd`＝仓库根（管理器按相对路径找实例目录、把 `.orc-manager/` 落在这里）。端口默认 `51999`；`--manager <host:port>` 显式覆盖（**同时决定连谁与拉谁**）。**不支持 `--port 0`**——端口要写进 `session.json`、也要让别的 agent 的 MCP 对得上，随机端口只会制造不可复现的地址。
 - **D4.2 进程形态＝detached**（Windows `DETACHED_PROCESS`，POSIX `start_new_session=True`），stdout/stderr 追加重定向到 `.orc-manager/logs/manager-<port>.log`。这样 CLI 被 Ctrl-C／被杀／终端关闭都不连带管理器，也避免"CLI 退出后管道关闭、管理器写 stdout 报错"。**不解析 `{"ready":true,…}` 就绪行**（它只证明端口在听，且重定向后读不到）。
 - **D4.3 就绪判定**：每 200ms `manager.ping` 一次，上限 20s；成功 ⇒ 可用；超时或进程已退 ⇒ 失败并把日志尾部 30 行贴给用户。
 - **D4.4 管理器绝不 kill**（它可能托管别人的实例）：只在日志记一行「管理器由本次会话拉起，继续常驻：<port>」。
@@ -227,7 +227,7 @@
 ### S2: 管理器面（探活 / 拉起 / spawn / admin / kill）
 - Status: Todo（D4 已裁决，可执行）
 - Target: `tools/orc/manager.py`（连接、ping 轮询、preflight、detached 拉起、日志截断、`session.json` 读写）
-- Approach: 按 D4.1–D4.9：统一顺序「ping → 复用／（`--launch-manager` 则拉起等 ping，否则报错退出）」；拉起＝detached `dotnet <repo>/src/Orc.Manager/bin/Debug/net8.0/Orc.Manager.dll serve --port <port>`（`cwd`＝仓库根、stdout/stderr → `.orc-manager/logs/manager-<port>.log`），就绪只认 `manager.ping`（200ms/次，上限 20s）；preflight 仅三项（dotnet／Manager.dll／Server.dll 同目录）；**绝不 kill 管理器**。`spawn` 携带 `instanceId:"cli-<uuid8>"`、`label:"cli:<uuid8>"`，并显式传 `mode:"play"`、`deckRules:"none"`（管理器缺省是 strict）。
+- Approach: 按 D4.1–D4.9：统一顺序「ping → 复用／（`--launch-manager` 则拉起等 ping，否则报错退出）」；拉起＝detached `dotnet <repo>/artifacts/slot/bin/Orc.Manager/debug/Orc.Manager.dll serve --port <port>`（`cwd`＝仓库根、stdout/stderr → `.orc-manager/logs/manager-<port>.log`），就绪只认 `manager.ping`（200ms/次，上限 20s）；preflight 仅三项（dotnet／Manager.dll／Server.dll 同目录）；**绝不 kill 管理器**。`spawn` 携带 `instanceId:"cli-<uuid8>"`、`label:"cli:<uuid8>"`，并显式传 `mode:"play"`、`deckRules:"none"`（管理器缺省是 strict）。
 - Acceptance:
   - [ ] `manager.spawn` 的 `mode` 恒为 `play`，`deckRules` 恒为 `none`（R4/R9）。
   - [ ] `session.attach` 的 `roles` 只含 `controller` 与 `viewer`（R4）。

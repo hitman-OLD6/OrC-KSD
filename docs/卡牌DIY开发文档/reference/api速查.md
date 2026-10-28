@@ -47,14 +47,21 @@
 
 ### 1.1 伤害三层的注册口（R11）
 
-| 触发器 | 访问路径 | band 枚举 | 典型改写 |
+> ⚠️ **两列已过时（2026-10-28 核对）**：`DamagePipeline` 及其四端**仍然存在**（"访问路径"列有效），但
+> **`ActionTriggerBands`／`ActionHandleBands` 已删除**——"band 枚举"列与"数据侧注入"的显示名都已失效。
+> 现行改写方式：`wraps[]` 声明 `{ "target": "engine#<成员>", "phase": "before|after|replace" }`，
+> 成员地址见 `Orc.Game.Model.EngineProcesses.InjectTargets`（把 `伤害处理触发器` 映射到 `engine#damage-apply` 的就是这张表）。
+> 下表保留为旧 band 语义的对照。
+
+| 触发器 | 访问路径 | band 枚举（已删） | 典型改写 |
 | --- | --- | --- | --- |
 | 对战伤害端 | `match.CommandManager.DamagePipeline.CombatDamage` | `ActionTriggerBands.Initiate` | 重甲（只减对战） |
 | 效果伤害端 | `match.CommandManager.DamagePipeline.EffectDamage` | `ActionTriggerBands.Initiate` | 「受到效果伤害 +1」 |
 | 战斗伤害端 | `match.CommandManager.DamagePipeline.BattleDamage` | `ActionTriggerBands.Initiate` | 「战斗伤害翻倍」 |
 | 处理端 | `match.CommandManager.DamagePipeline.Apply` | `ActionHandleBands.Rewrite` / `Apply` | 免疫（`IsZeroed = true`）、通用减伤（`Amount - N`） |
 
-**数据侧注入**（预制体 `injects`，撤销随效果托管）——对局级具名触发器名：
+**数据侧注入**（预制体 `injects`，撤销随效果托管）——⚠️ 下表"名字"是**旧 schema 的显示名寻址**，v4 已整体退役；
+新写法用成员地址（`engine#damage-apply` 等）。下表保留作旧格式对照，旧预制体仍可装载（经翻译）：
 
 | 名字 | 目标触发器 | 视图 |
 | --- | --- | --- |

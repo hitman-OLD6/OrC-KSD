@@ -13,16 +13,16 @@ _Avoid_: 玩家、MOD 作者、内容作者
 _Avoid_: 配置侧、无代码方案、纯 JSON 方案
 
 **代码侧**：
-以 C# 类型（`Effect` 子类、`Judicator` 子类、判定器/触发器 wrapper、装配期注册）承载行为的创作路径。
-_Avoid_: 原生侧、引擎侧、硬编码
+以 C# 声明（`PrefabDefinition` ＋ `MemberEdges.For<TView>`、`Judicator` 子类、`wraps`／`judge-wraps` 声明、装配期注册）承载行为的创作路径。
+_Avoid_: 原生侧、引擎侧、硬编码、`Effect` 子类（该类型已删除）
 
-**装载链**：
-卡牌放置时把效果挂上事件总线的固定顺序：挂 disposing → 挂主触发器 → `OnMount` → 装载完成动作。
-_Avoid_: 初始化流程、注册流程
+**装配（原「装载链」）**：
+宿主加载/入场时把一个组件实例挂上引擎的固定顺序：构造组件实体 → 判定 `active-when` → `Bind` 建立声明边／包装边／框架注销边 → 此后才响应信号。
+_Avoid_: 装载链（旧模型用语）、初始化流程、注册流程
 
 **触发点（信号）**：
-总线上的一个更新字符串（如 `unit.deployed`、`card.discarded`），是效果被调用的唯一入口；「哪个信号」等于「何时生效」。
-_Avoid_: 事件名、hook 名（hook 专指触发器构造期声明的挂载目标）
+引擎发射的一个具名信号（如 `unit.deployed`、`card.discarded`），是成员被执行的唯一入口；「哪个信号」等于「何时生效」。组件用 `mounts[].target = "engine#<信号>"` 挂上去。
+_Avoid_: 事件名、hook 名（hook 是旧 schema 的字段名 `hooks`，v4 已由 `mounts` 取代）、总线（`Bus` 已删除）
 
 **动作面**：
 handler 内可调用的受控状态变更入口集合（`EffectRuntime` 的方法 + 词条程序操作）。
@@ -49,7 +49,7 @@ _Avoid_: 伤害类型、伤害通道
 _Avoid_: 伤害结算、伤害入口
 
 **预制效果**：
-以 `EffectSnapshot`（三层：事件预制体 / 触发器预制体 / 效果预制体）承载、可注册复用或内联到卡上的效果制品。
+两种形态并存：(1) **v4 组件资产**（`*.component.json`，schemaVersion 4）——运行期统一形态，成员 ＋ `mounts` ＋ `wraps` ＋ `judge-wraps`；(2) **旧 `EffectSnapshot`**（三层：事件／触发器／效果预制体，schemaVersion 3）——仍可写可装载，但经 `LegacySnapshotComponentBinder` 转成前者后执行。
 _Avoid_: 效果模板（模板效果专指 `*.tpl.json` 供解析器使用）、效果库
 
 **能力边界**：
@@ -71,6 +71,6 @@ _Avoid_: 格式规范、写作规范、样式指南
 ## Sample Dialogue
 
 > DIY 作者：「每有一个敌方轰炸机，本单位 +1 攻击」我打算监听 `card.stat.changed` 自己加。
-> 领域专家：那是**光环**——持续态的正解。你在 `OnMount` 登记光环声明，受益方每次链重跑时**现收集**，敌方轰炸机进场/离场自动随动；自己监听再加会重复计数，而且离场不会退回。
+> 领域专家：那是**光环**——持续态的正解。你在组件装配时声明光环（`DeclareAuraAsync`），受益方每次链重跑时**现收集**，敌方轰炸机进场/离场自动随动；自己监听再加会重复计数，而且离场不会退回。
 > DIY 作者：那「部署时打 1 点伤害」呢？
 > 领域专家：那是**触发点**上的**动作面**调用——挂 `unit.deployed`，在 handler 里走 `EffectRuntime.DamageAsync`，不需要光环。

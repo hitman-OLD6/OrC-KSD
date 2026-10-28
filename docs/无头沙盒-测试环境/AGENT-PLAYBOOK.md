@@ -23,7 +23,7 @@ netstat -ano | grep ":51888.*LISTEN"
 实际启动命令（已核对，2026-10-21 15:09）：
 
 ```bash
-dotnet src/Orc.Server/bin/Debug/net8.0/Orc.Server.dll \
+dotnet artifacts/slot/bin/Orc.Server/debug/Orc.Server.dll \
   --headless --mode play --packs samples/card-pack-demo \
   --seat0 ai --seat1 agent --port 51888 \
   --run-dir ./outputs/agent-match/mcp-run \
@@ -34,7 +34,7 @@ dotnet src/Orc.Server/bin/Debug/net8.0/Orc.Server.dll \
 
 ```bash
 cd D:/OrC-KSD
-dotnet src/Orc.Server/bin/Debug/net8.0/Orc.Server.dll \
+dotnet artifacts/slot/bin/Orc.Server/debug/Orc.Server.dll \
   --headless --mode play --packs samples/card-pack-demo \
   --seat0 ai --seat1 agent --port 51888 \
   --run-dir D:/OrC-KSD/outputs/agent-match/mcp-run \

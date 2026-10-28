@@ -43,7 +43,7 @@ start-manager.bat --config-mcp
 "orc-manager": {
   "command": "dotnet",
   "args": [
-    "D:/OrC-KSD/src/Orc.Manager/bin/Debug/net8.0/Orc.Manager.dll",
+    "D:/OrC-KSD/artifacts/slot/bin/Orc.Manager/debug/Orc.Manager.dll",
     "mcp",
     "--connect",
     "127.0.0.1:51999"

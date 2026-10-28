@@ -3,9 +3,29 @@
 > **本章解决什么**：把「什么时候被调用」讲透——触发器声明（kind/band/hooks/保留槽）、执行排序、注册者与来源三规则、csx handler 签名、异常隔离。读完你能自己判断「这个 handler 会不会跑、跑的时候 `TriggerCard` 是谁」。
 > **前置**：00（两面概念）、01（装载链与执行帧）。
 > **读完你能做什么**：①按需求选对 kind/hooks/band；②给每个注册项找对注册者（卡/效果/透传）；③写出可编译的 csx handler 并正确读 `view.Source` 与 `view.TriggerCard`。
-> **对应代码路径**：`Orc.Core.Trigger<TView>`（`Register`/`RegisterDisposal`/`InvokeAsync`/`RunEventsAsync`/`Events`）、`Orc.Core.TriggerEventInfo`、`Orc.Core.TriggerPayloadKeys`、`Orc.Cards.CardEventView`、`Orc.Game.Triggers.CardTriggerView`、`Orc.Cards.PrefabManager.ResolveHandler`。
-> **本章自检**：能说出 `Registrant` 的三级回退；能解释 band 排序键；能举出「卡覆盖 / 非卡透传 / 最后者胜」三个例子；能说出 handler 抛异常后会发生什么。
+> **对应代码路径（2026-10-28 核对）**：`Orc.Core.Model.OrchestrationEntity`（`RunEdgesAsync`/`RegisterMember`/`AttachMemberEdge`）、`Orc.Core.Model.MemberEdges`（`For<TView>`）、`Orc.Core.Model.Members`（`MemberDefinition`/`OwnedEdge`/`OwnEdgePosition`/`MemberVisibility`）、`Orc.Core.LogicEngine`（`SubscribeMember`/`AttachMemberEdge`）、`Orc.Core.Context`、`Orc.Cards.CardEventView`、`Orc.Game.Triggers.CardTriggerView`。
+> **本章自检**：能说出旧触发器概念在新模型里各对应什么；能判断一个 handler 会挂在哪个成员的哪条边上、执行时 `TriggerCard` 是谁。
 
+> ## ⚠ 本章描述的对象已删除：`Trigger<TView>`（整章作术语对照读）
+>
+> 本章讲的是 `Orc.Core.Trigger<TView>`——**该类型已从代码库删除**（git 状态 `D`），连同 `Bus`、`TriggerEventInfo`、
+> `PrefabManager.ResolveHandler`、`band`/`seam`/保留槽一起退役。本章**不再描述可执行机制**，只保留作**旧→新对照**。
+>
+> | 本章的旧概念 | 新模型对应物 | 在哪 |
+> | --- | --- | --- |
+> | `Trigger<TView>`（一个固定视图类型的注册表 ＋ 挂载单元）| **成员**（`MemberDefinition`）：名字 ＋ 视图声明 ＋ 可见性 ＋ 位次 | `RunEdgesAsync` |
+> | `hooks: ["unit.deployed"]`（字符串订阅）| `mounts[].target = "engine#unit.deployed"`（成员地址）| `OrchestrationRuntime.Bind` |
+> | `Register(name, handler, band, priority)` | **自有边** `OwnedEdge` ＋ 成员位次 `OwnEdgePosition` | `MemberEdges.For<TView>` |
+> | `band` 方案 / `EventEntry.SortKey = band×1000＋priority` | 位次 `first`（流程型）/ `last`（管道型）＋ 包装相位 `before`/`after`/`replace` | `OrchestrationEntity` 类注释 R1i |
+> | `seams` 动作缝 | **无**——需要中间插入＝拆成员 | — |
+> | `RegisterDisposal` 保留槽 | **框架注销边**（自动挂、恒最后、作者不能写）| `ComponentDisposalPolicy` |
+> | `kind: passive/active` | **无此分类**——改由 `MemberVisibility` 位标志（`hostable`/`mountable`/`callable`）| — |
+> | 注册者三级回退 → `SourceCard` | 边归属（`owner`）＋ `view.TriggerCard`／`view.Source` | — |
+>
+> **仍然有效、可以照用**：§4 的 `Source` / `TriggerCard` 三规则与读法（名字和语义未变）、§3 的排序直觉
+> （"谁先跑"→ 现由位次＋相位决定）、§5 csx handler 的签名与 `view` 字段读法。
+>
+> 旧→新完整术语映射见 [09-新编排模型与术语迁移](./09-新编排模型与术语迁移.md)。
 ## 状态
 
 - 章节状态：**草稿**

@@ -3,9 +3,12 @@
 > **本章解决什么**：讲清「选谁」：选择器怎么声明、候选从哪来、交互怎么跑、三态结果怎么处理。读完你能在 handler 内安全地发起一次选靶，并保证取消零副作用。
 > **前置**：00（五段模型）、02（handler 与上下文）。
 > **读完你能做什么**：①按场景选对选择器模板；②用 `ReferenceSetParameter` 交候选/数量/域校验；③正确处理 Ok/Cancelled/Failed 与重试。
-> **对应代码路径**：`Orc.Game.Targeting.Selector` / `Selector<TResult>` / `ReferenceSetParameter` / `SelectorTemplates` / `ITargeterFlow` / `TargeterManager` / `SelectorResult<T>` / `TargeterResult`；`EffectRuntime.BeginTargetSelectionAsync`。
+> **对应代码路径**：`Orc.Game.Targeting.Selector` / `Selector<TResult>` / `ReferenceSetParameter` / `SelectorTemplates` / `ITargeterFlow` / `TargeterManager` / `SelectorResult<T>` / `TargeterResult`；`EffectRuntime.SelectAsync`（唯一选择入口）。
 > **本章自检**：能说出「候选由后端给出」的具体含义；能区分 `SelectorStatus` 与 `TargeterStatus`；能解释取消为什么不产生副作用。
 
+> **术语提醒（2026-10-28 核对）**：本章的 targeter 机制**仍然有效**（`TargeterManager`、`Selector`、`EffectRuntime.SelectAsync` 都在）。
+> 唯一要留意的是**示例外层**：若把示例放进预制体，`hooks`／`injects`／`band`／`seam` 这些字段名已属**旧 schema**，
+> v4 组件资产读到即拒绝装载。旧→新映射见 [09-新编排模型与术语迁移](./09-新编排模型与术语迁移.md)。
 ## 状态
 
 - 章节状态：**草稿**
@@ -183,29 +186,37 @@ private static async Task<Card?> PickEnemyFrontUnitAsync(Card host, Cancellation
 }
 ```
 
-**数据侧替代**（不需要自定义候选时）：
+**数据侧统一入口**（`EffectRuntime.SelectAsync`，**唯一选择入口**）：
 
 ```csharp
-// 无头选靶：后端按选择器描述直接求值，不发起前端交互
-var targets = await runtime.SelectAsync(host, new EffectSelector("one", "enemy", "frontline"));
-// targets 已按 sel/side/zone/type/keyword 过滤；空集＝无事发生
+// ① 确定性（all / self）：候选集即答案，不发起前端交互
+var all = await runtime.SelectAsync(host, new EffectSelector("all", "enemy", "frontline"));
+
+// ② 外部裁定（one / any / choose）：必须经提交通道（前端）
+var picked = await runtime.SelectAsync(host, new EffectSelector("one", "enemy", "frontline"));
+// 内部经 TargetCandidateEligibility 判定器给候选 + TargeterManager 发起请求；
+// 无前端桥接＝明确失败（引擎不代选，R2），不是"取首个"。
 ```
 
-**交互式一步到位**（候选由候选判定器统一收敛）：
-
-```csharp
-var picked = await runtime.BeginTargetSelectionAsync(
-    host,
-    new EffectSelector("one", "enemy", "frontline"));
-// 内部经 TargetCandidateEligibility 判定器给候选 + TargeterManager 发起请求；取消/失败＝空集
-```
+> **S9 之后的口径（R2／A-6）**：三分类由 `sel` 决定，**取样语义与裁定语义分开**：
+>
+> | `sel` | 归谁 | 是否产生 targeter | 无前端时 |
+> | --- | --- | --- | --- |
+> | `all`／`self` | 判定器（候选集即答案） | 否 | 正常工作 |
+> | `random` | 引擎随机服务（种子可复现） | 否 | 生产对局**明确报错**（需 `MatchOptions.AllowRandomTargeting`，R2c） |
+> | `one`／`any`／`choose` | **前端**（提交通道） | 是 | **明确失败**（引擎永不代选） |
+>
+> `BeginTargetSelectionAsync` 已删除（零调用的死代码）；交互式选靶一律走 `SelectAsync`。
+> 选靶请求的"待决请求 id／提交结果"沿用既有协议形态（`sessionId` + `picks` 提交），
+> 卡效果发起的请求标注 `action = effect`。
 
 ## 7. 边界
 
 | 边界 | 说明 | 替代 |
 | --- | --- | --- |
-| 候选来源固定 | 交互式候选由调用方提供或候选判定器收敛；无自定义 provider 注册面 | 无头 `SelectAsync`；或代码侧自行 `RunAsync` 传候选 |
-| 数据侧无法发起交互 | csx 可调 `BeginTargetSelectionAsync`，但候选/域判定受限 | 需要复杂候选→代码侧 |
+| 候选来源固定 | 交互式候选由调用方提供或候选判定器收敛；无自定义 provider 注册面 | `SelectAsync`（确定性）或代码侧自行 `RunAsync` 传候选 |
+| 数据侧发起交互受限 | csx 可调 `SelectAsync(sel=one/any)`，但候选/域判定受限（候选由候选判定器统一收敛） | 需要复杂候选→代码侧自行 `RunAsync` |
+| 生产禁用随机 | `sel=random` 在生产对局报错（R2c） | 改确定性选择；测试/沙盒显式开启 |
 | 取消语义 | 一等状态；调用方必须自己保证「取消＝零副作用」 | 在任何动作面前先判 `IsCancelled` |
 | 重试上限 | 由 targeter 会话控制；超限＝`RetryLimitExceeded` | 循环里保留终止条件 |
 

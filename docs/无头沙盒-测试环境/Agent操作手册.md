@@ -70,7 +70,7 @@ python sandbox-server-ctl.py restart
 ### 2.2 它到底跑的是什么
 
 ```text
-dotnet src\Orc.Server\bin\Debug\net8.0\Orc.Server.dll
+dotnet artifacts\slot\bin\Orc.Server\debug\Orc.Server.dll
   --headless --mode sandbox --allow-debug-writes
   --packs samples\card-pack-demo
   --seat0 ai --seat1 agent

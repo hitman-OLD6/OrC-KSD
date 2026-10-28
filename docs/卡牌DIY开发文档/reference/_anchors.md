@@ -2,7 +2,22 @@
 
 > **内部资产**：供正文写作取证用，不进入 `README.md` 的全量索引（见 `implementation.md` S8）。
 > 定位只用「符号名 + 文件」，行号仅作提示；代码演进后以 `grep -n "<符号名>" src` 复核，定位失配即按 S20「符号存在性检查」处理。
-> 基线：2026-10-19（Part A R9 已落地）。核对口径：`dotnet build OrcEngine.sln`（0 error；`BuiltInPlugin.cs:143,149` 两个既有 `CS8604`）＋ `dotnet test OrcEngine.sln`（1635 passed / 0 failed）。
+
+> ## ⚠ 基线已部分失效（2026-10-28 重新核对）
+>
+> 原基线 `2026-10-19`（`1635 passed / 0 failed`）已在 **v4 编排实体化**后作废。以下表格**指向已删除的文件**，
+> 保留仅供历史对照，**不得再作为取证依据**：
+>
+> | 表 | 状态 |
+> | --- | --- |
+> | §2 触发器与 band | ⛔ **整表失效**：`src/Orc/Core/Trigger.cs`、`Bus.cs`、`Band.cs`、`TriggerMetadata.cs`、`TriggerEvent.cs` 已删 |
+> | §3 handler 与装载链 | ⛔ **整表失效**：`src/Orc/Cards/Effect.cs`、`DynamicEffect.cs`、`PrefabManager.cs` 已删；`Card.cs` 只剩 100 行薄容器 |
+> | §6 wrapper·动作缝（触发器部分）| ⛔ `Trigger<TView>.Register*Wrapper`、`Context.SeamAsync` 已删；判定器侧 `Wrapper` 仍有效 |
+> | §9 预制体·`PrefabManager` | ⛔ 已删；`PrefabJson.Deserialize` 仍在 |
+> | §1 信号、§4 判定器、§5 targeter、§7 动作面、§8 词条、§10 来源两面、R10/R11 | ✅ 未逐条复核，但对应文件仍在 |
+>
+> **v4 现行锚点见下方 §11**；真实链路以 `src/Orc/Core/Model/` 为准。
+
 > 层归属：**内核**＝`src/Orc`；**游戏层**＝`src/Orc.Game`。
 
 ## 0. 取证口径说明
@@ -301,3 +316,45 @@
 
 定义处（不是调用）：`UnitCard.cs:584`、`Hq.cs:157`。`Orc.UI` / `Orc.Mcp` / `Orc.Ai` / `samples` 为 0 调用；
 `Orc.Plugins.BuiltIn` 为 0 调用（虽为友元）。测试程序集经友元保留既有 85 处调用。
+
+## 11. v4 现行锚点（2026-10-28 取证，取代 §2／§3）
+
+> 定位以符号名为准；所有文件均在 `src/Orc/Core/Model/`（除非另注）。这一节是**当前唯一可信的效果机制锚点**。
+
+| 机制面 | 事实点 | 符号名 | 定位 |
+| --- | --- | --- | --- |
+| 实体 | 四类实体共用的运行期形态（卡/HQ/组件/引擎） | `OrchestrationEntity` | Core/Model/OrchestrationEntity.cs |
+| 实体 | 成员边集合执行（位次＋相位＋停止） | `OrchestrationEntity.RunEdgesAsync` | Core/Model/OrchestrationEntity.cs |
+| 实体 | `ctx.Stop()` 的作用域（只停当前成员） | `MemberExecutionScope` / `PropagatesStop` | Core/Model/OrchestrationEntity.cs |
+| 实体 | 执行结果诊断（Executed/Stopped/ValidationRejected/Reason） | `MemberExecutionResult` | Core/Model/OrchestrationEntity.cs |
+| 实体 | 运行期追加可寻址成员（R1e） | `OrchestrationEntity.RegisterMember` | Core/Model/OrchestrationEntity.cs |
+| 实体 | 给既有成员追加一条自有边（实体级覆盖层） | `OrchestrationEntity.AttachMemberEdge` | Core/Model/OrchestrationEntity.cs |
+| 装配 | 组件实例装配态（构造→装配→销毁） | `ComponentAttachment` | Core/Model/ComponentAssembly.cs |
+| 装配 | 装配/卸载（逐句柄撤销） | `OrchestrationRuntime.Bind` | Core/Model/OrchestrationRuntime.cs |
+| 预制体 | 预制体声明（OOP 的类：`Extends` 全继承） | `PrefabDefinition` | Core/Model/Prefabs.cs |
+| 预制体 | 展开后的类型（成员表/私有字段/挂载/包装） | `PrefabType` | Core/Model/Prefabs.cs |
+| 预制体 | 继承链展开器（环检测、深度 64、覆写合并） | `PrefabCatalog.Build` / `Resolve` | Core/Model/Prefabs.cs |
+| 预制体 | 继承链（根→叶子，审查/溯源用） | `PrefabType.Chain` | Core/Model/Prefabs.cs |
+| 成员 | 成员定义（名字＋视图＋可见性＋位次） | `MemberDefinition` | Core/Model/Members.cs |
+| 成员 | 多态：整段覆写、无 super | `MemberDefinition.Override` | Core/Model/Members.cs |
+| 成员 | 自有边（核心逻辑＝一条边，无独立 core 概念） | `OwnedEdge` | Core/Model/Members.cs |
+| 成员 | 自有边位次：`First`（流程型）/`Last`（管道型） | `OwnEdgePosition` | Core/Model/Members.cs |
+| 成员 | 封装：`Hostable`/`Mountable`/`Callable`（子类只能收紧） | `MemberVisibility` | Core/Model/Members.cs |
+| 成员 | 私有字段（`owner.<Name>`，不进数据面，子类不得重声明） | `PrivateFieldDefinition` | Core/Model/Members.cs |
+| 成员 | 强类型处理器→自有边的工厂 | `MemberEdges.For<TView>` | Core/Model/MemberEdges.cs |
+| 边 | 包装声明（`phase`＝before/after/replace） | `WrapDeclaration` / `WrapRegistry` | Core/Model/Mounting.cs |
+| 资产 | 组件资产 schema（`schemaVersion = 4`，旧字段名拒绝装载） | `AssetSchema` / `AssetSchema.Read` | Core/Model/AssetSchema.cs |
+| 资产 | 组件资产模型 | `ComponentAsset` | Core/Model/AssetModel.cs |
+| 资产 | 资产→预制体（**不传 `extends`**：资产层无继承） | `ComponentAsset.ToPrefabDefinition` | Core/Model/AssetModel.cs |
+| 资产 | 卡包原子装载门（包级报告/可选包跳过） | `AssetPackLoader` | Core/Model/AssetPackLoader.cs |
+| 兼容 | 旧 `EffectSnapshot` → v4 组件（翻译执行路径） | `LegacySnapshotComponentBinder.Register` | Orc.Game/Cards/LegacySnapshotComponentBinder.cs |
+| 引擎 | 信号订阅（挂一条自有边，无预制体） | `LogicEngine.SubscribeMember` | Core/LogicEngine.cs |
+| 引擎 | 给既有成员挂边（返回可撤销句柄） | `LogicEngine.AttachMemberEdge` | Core/LogicEngine.cs |
+| 卡 | 薄容器（数据组件键＝类型，每类型恰一份） | `Card.AddData` / `GetData` | Cards/Card.cs |
+| 卡 | 放置/销毁处理器（两条订阅式边） | `CardLoadoutProcessor` | Cards/CardLifecycle.cs |
+| 内核预制体 | 内核基础引擎预制体（4 信号） | `KernelSignals.PrefabId`（`"engine"`） | Core/Model/KernelSignals.cs |
+| 游戏预制体 | `engine.game`（`extends: engine`，+35 信号 +9 流程成员） | `GameEnginePrefabs.Create` | Orc.Game/Model/GameEnginePrefabs.cs |
+| 游戏预制体 | 目录装配（内核＋卡牌类型＋游戏层） | `GameEnginePrefabs.CreateCatalog` | Orc.Game/Model/GameEnginePrefabs.cs |
+| 卡牌预制体 | `base` ← `unit`/`order`/`counter`/`hq` | `CardProcesses.Definitions` | Orc.Game/Model/CardProcesses.cs |
+| 流程成员 | 流程成员名表（`damage-apply`／`unit-attack`／`combat.damage`…） | `EngineProcesses.MemberNames` | Orc.Game/Model/EngineProcesses.cs |
+| 流程成员 | **旧显示名 → 新成员地址**的官方映射（写迁移/查表用这张） | `EngineProcesses.InjectTargets` / `Retained` | Orc.Game/Model/EngineProcesses.cs |
