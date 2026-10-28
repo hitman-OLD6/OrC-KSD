@@ -1,4 +1,4 @@
-using System.Net.Sockets;
+﻿using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Orc.Protocol;
@@ -79,7 +79,7 @@ public sealed class OrcClient : IAsyncDisposable
         _tcp = tcp;
         _options = options;
         var stream = tcp.GetStream();
-        _reader = new NdjsonReader(stream);
+        _reader = new NdjsonReader(stream, maxLineLength: 4 << 20);
         _writer = new NdjsonWriter(stream);
         Volatile.Write(ref _lastInbound, Environment.TickCount64);
         _readLoop = Task.Run(() => ReadLoopAsync(_shutdown.Token), CancellationToken.None);

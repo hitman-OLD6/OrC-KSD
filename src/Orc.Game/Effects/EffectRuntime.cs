@@ -892,6 +892,7 @@ public sealed partial class EffectRuntime
         var candidates = rule.Candidates();
         if (candidates.Count == 0)
         {
+            Console.WriteLine($"[target-select] 空集：候选为 0（selector={selector} viewer={viewer.Name}）");
             return Array.Empty<Card>();
         }
 
@@ -901,6 +902,8 @@ public sealed partial class EffectRuntime
 
         // 单次请求内用名单快照复核（避免逐候选重算）；候选本身也是快照（D15）。
         var validator = rule.Snapshot();
+        Console.WriteLine($"[target-select] 发起选靶：candidates={candidates.Count} " +
+                          $"selector={selector} viewer={viewer.Name}");
         Ref<Entity>? selected = null;
         var result = await targeterManager.RunAsync(async flow =>
         {

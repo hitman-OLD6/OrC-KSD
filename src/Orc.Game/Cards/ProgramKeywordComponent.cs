@@ -1,4 +1,4 @@
-using Orc.Cards;
+﻿using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Board;
 using Orc.Game.Commanding;
@@ -48,7 +48,9 @@ public sealed class ProgramKeywordComponent : KeywordComponent
         "target.cost"=>target is CardBase cost?cost.Modifiers.GetEffectiveValue(CardStatFields.DeployCost):0,
         "target.opCost"=>target is UnitCard operation?OperateCosts.Effective(operation):0,
         _ when expression.StartsWith("event.",StringComparison.Ordinal)=>actor is null?throw new InvalidOperationException("当前没有事件单位"):NumberFor("target."+expression[6..],actor),
-        _ when expression.StartsWith("data.",StringComparison.Ordinal)=>_host.TryGetData<KeywordProgramData>(out var data)&&data.Values.TryGetValue(expression[5..],out var recorded)?recorded:throw new InvalidOperationException("卡牌缺少实例记录："+expression[5..]),
+        // Generated instances carry captured values; standalone cards use their declared
+        // keyword parameter (or program default). A recorded zero remains a real value.
+        _ when expression.StartsWith("data.",StringComparison.Ordinal)=>_host.TryGetData<KeywordProgramData>(out var data)&&data.Values.TryGetValue(expression[5..],out var recorded)?recorded:Value??_program.DefaultValue,
         _ when expression.StartsWith("state.",StringComparison.Ordinal)=>_state[expression[6..]],_=>int.Parse(expression,System.Globalization.CultureInfo.InvariantCulture)};
     private bool Matches(KeywordCondition[] conditions,Card? actor=null,Card? target=null)=>conditions.All(c=>c.Op switch
     {"eq"=>NumberFor(c.Left,target??_host,actor)==NumberFor(c.Right,target??_host,actor),"ne"=>NumberFor(c.Left,target??_host,actor)!=NumberFor(c.Right,target??_host,actor),"gt"=>NumberFor(c.Left,target??_host,actor)>NumberFor(c.Right,target??_host,actor),"gte"=>NumberFor(c.Left,target??_host,actor)>=NumberFor(c.Right,target??_host,actor),"lt"=>NumberFor(c.Left,target??_host,actor)<NumberFor(c.Right,target??_host,actor),"lte"=>NumberFor(c.Left,target??_host,actor)<=NumberFor(c.Right,target??_host,actor),_=>false});

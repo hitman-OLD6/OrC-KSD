@@ -1,4 +1,4 @@
-using System.Net.Sockets;
+﻿using System.Net.Sockets;
 using System.Text;
 using System.Text.Json.Nodes;
 using Orc.Protocol;
@@ -60,7 +60,7 @@ public class NdjsonFramingTests
             await raw.ConnectAsync("127.0.0.1", host.Port);
             var stream = raw.GetStream();
 
-            var junk = new byte[2 * 1024 * 1024];
+            var junk = new byte[5 * 1024 * 1024];
             Array.Fill(junk, (byte)'a');
             await stream.WriteAsync(junk);
 

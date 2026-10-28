@@ -1264,6 +1264,8 @@ public sealed class CommandManager
         // 指向：指挥攻击成功发起后，对目标各触发一次（复验拒绝/取消不触发；效果发起的攻击不走本路径）。
         // 目标引用可能**已随本次攻击失效**（攻击后 handler 把目标转换/移出战场——如"虎视"转溃军）：
         // 指向通知只对仍在场的卡有意义，失效引用不可解引用（Ref.Value 会抛 StaleReferenceException）。
+        // Attack-after effects may replace and destroy the original target. The attack has
+        // already applied; a stale target must not abort payment and action finalization.
         if (targetRef.IsAlive && targetRef.Value is Card targeted)
         {
             await TargetingRules.NotifyAsync(

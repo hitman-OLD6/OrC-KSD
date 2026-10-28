@@ -10,6 +10,40 @@ namespace Orc.Game.Tests;
 
 public sealed class KeywordProgramTests
 {
+    [Theory]
+    [InlineData(null, 7)]
+    [InlineData(3, 3)]
+    public async Task MissingInstanceRecordUsesTheDeclaredParameterButRecordedZeroIsPreserved(int? value, int expected)
+    {
+        var (_, unit, _) = await Create(new() { DefaultValue = 7 }, value);
+        var component = Assert.Single(KeywordProgramRuntime.Components(unit));
+        Assert.Equal(expected, component.Number("data.damage"));
+        var data = new KeywordProgramData(); data.Values["other"] = 99; unit.AddData(data);
+        Assert.Equal(expected, component.Number("data.damage"));
+        data.Values["damage"] = 0; Assert.Equal(0, component.Number("data.damage"));
+        data.Values["damage"] = 5; Assert.Equal(5, component.Number("data.damage"));
+    }
+
+    [Fact]
+    public async Task CommandAttackThatReplacesItsTargetStillPaysAndConsumesTheAttack()
+    {
+        const string routed = "program-replacement-finalization";
+        var bridge = new MockTargeterBridge();
+        var (m, unit, _, _) = await CreateWithExtra(new()
+        {
+            Handlers = [new() { Event = "unit.attack.after", Actions = [new() { Op = "replace", Target = "attack.target", Key = routed }] }]
+        }, UnitDef(routed, "replacement", 0, 1, 1), bridge);
+        Assert.Equal(PlayResultStatus.Success, (await m.PlayManager.JoinUnitAsync(unit, m.Battlefield.FrontLine.GetInsertionGaps().First())).Status);
+        var enemy = await CommandTestKit.PrepareOnSupportAsync(m, m.Players[1], CommandTestKit.InfantryId, 0);
+        CommandTestKit.Activate(unit); bridge.CollectScript = CommandTestKit.AllRefsScript(m);
+        var points = m.Players[0].Points;
+        Assert.True((await CommandTestKit.RunCommandAsync(m, bridge, unit, enemy.Ref)).IsSuccess);
+        Assert.False(enemy.Life.IsAlive); Assert.DoesNotContain(enemy, m.Battlefield.PlayerBSupportLine.Members);
+        Assert.Equal("replacement", Assert.Single(m.Battlefield.PlayerBSupportLine.Members.OfType<UnitCard>()).Name);
+        Assert.Equal(points - unit.Modifiers.GetEffectiveValue(CardStatFields.OperateCost), m.Players[0].Points);
+        Assert.False(unit.GetData<CommandData>().CanAttack);
+    }
+
     private static readonly List<string> Registered=[];
     private static async Task<(Match Match,UnitCard Unit,string Keyword)> Create(KeywordProgram program,int? value=null,MockTargeterBridge? bridge=null)
     {

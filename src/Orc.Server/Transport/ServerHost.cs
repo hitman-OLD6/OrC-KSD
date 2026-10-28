@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Net;
 using System.Net.Sockets;
@@ -55,7 +55,7 @@ public enum SessionState
 /// <c>Pending</c>/<c>Connected</c>/调试面不收对局数据。
 /// </para>
 /// </summary>
-public sealed class ServerHost : IAsyncDisposable
+public sealed partial class ServerHost : IAsyncDisposable
 {
     private readonly ServerOptions _options;
     private readonly SerialWorkQueue _queue;
@@ -285,7 +285,7 @@ public sealed class ServerHost : IAsyncDisposable
         try
         {
             var stream = client.GetStream();
-            await using var reader = new NdjsonReader(stream);
+            await using var reader = new NdjsonReader(stream, maxLineLength: 4 << 20);
             await using var writer = new NdjsonWriter(stream);
 
             session = new ClientSession(sessionId, client, writer, ct);
@@ -396,6 +396,7 @@ public sealed class ServerHost : IAsyncDisposable
             ProtocolMethods.SessionDetach => HandleDetach(request, session),
             ProtocolMethods.ToolsList => HandleToolsList(request, session),
             ProtocolMethods.ToolsCall => await HandleToolsCallAsync(request, session, ct).ConfigureAwait(false),
+            "cosmetics.get" or "cosmetics.set" or "cosmetics.asset" or "cosmetics.image" or "cosmetics.emote" => HandleCosmetics(request, session),
             _ => RpcResponse.Failure(request.Id, RpcErrorCodes.MethodNotFound, $"未知方法 '{request.Method}'。"),
         };
     }
@@ -427,7 +428,7 @@ public sealed class ServerHost : IAsyncDisposable
         {
             ProtocolVersion = ProtocolInfo.ProtocolVersion,
             SchemaVersion = Service.Options.ContractSchemaVersion,
-            Capabilities = ["push", "targeting", "session", "admin-channel"],
+            Capabilities = ["push", "targeting", "session", "admin-channel", "cosmetics-v1"],
             ConnectionId = session.Id,
             Label = session.Label,
             RoomId = Room.RoomId,
