@@ -32,6 +32,18 @@ public class AssetEditorTests : IDisposable
         Directory.CreateDirectory(_packsRoot);
         CopyDirectory(Path.Combine(FindRepoRoot(), "samples", "card-pack-demo"), _packageRoot);
 
+        // 编辑器的写入面目前仍是旧格式（`AssetEditorSession` 只写 `*.prefab.json`），本文件的多条用例断言的
+        // 是**编辑器对旧格式资产的行为**（提交 bump／版本一致／列举计数）。因此测试**自持**一份最简旧格式资产：
+        // 数据在 `tests/Orc.Packages.Tests/Fixtures/`，不再依赖样例包（样例包的旧格式目录已随 v4-only 退场，
+        // 测试数据本就不该寄生在产品数据上——夹具漂移过一次，见 PROGRESS §24）。
+        var fixtures = Path.Combine(FindRepoRoot(), "tests", "Orc.Packages.Tests", "Fixtures");
+        var targetEffects = Path.Combine(_packageRoot, "effects");
+        Directory.CreateDirectory(targetEffects);
+        foreach (var file in Directory.EnumerateFiles(fixtures, "demo.rally.prefab.json*"))
+        {
+            File.Copy(file, Path.Combine(targetEffects, Path.GetFileName(file)), overwrite: true);
+        }
+
         _editor = new AssetEditor(
             _registry,
             new EditableRootPolicy(_root),

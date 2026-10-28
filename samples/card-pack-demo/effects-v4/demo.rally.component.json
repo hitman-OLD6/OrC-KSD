@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 4,
+  "asset": {
+    "kind": "component",
+    "id": "demo.rally",
+    "requires-host": "any",
+    "active-when": "loaded",
+    "one-shot": false,
+    "private-fields": [],
+    "members": [
+      {
+        "name": "onUnitDeployed",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Card",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Effect",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Unit",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Player",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Killer",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Source",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "TriggerCard",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            }
+          ]
+        },
+        "handler": {
+          "id": "demo.rally#onUnitDeployed",
+          "entry": "HandleAsync",
+          "script": "// 演示·集结号（效果库效果）：unit.deployed → Host==载荷单位 → 从卡组抽 1 张牌。\nFunc<dynamic, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n    if (view.Unit is not Orc.Cards.Card deployed)\n    {\n        return; // 非卡牌载荷：不处理\n    }\n\n    if (!object.ReferenceEquals(deployed, view.Host))\n    {\n        return; // 非本单位部署：不处理（Host==载荷过滤）\n    }\n\n    var runtime = Orc.Game.Effects.EffectRuntime.ResolveFor(deployed);\n    if (runtime is null)\n    {\n        return; // 无效果运行时：跳过（脱局场景）\n    }\n\n    await runtime.DrawAsync(deployed, 1, ct); // 抽 1 张牌（走玩家管理器——含满手爆牌裁决）\n};\n"
+        }
+      }
+    ],
+    "mounts": [
+      {
+        "target": "engine#unit.deployed",
+        "member": "onUnitDeployed"
+      }
+    ],
+    "wraps": []
+  }
+}

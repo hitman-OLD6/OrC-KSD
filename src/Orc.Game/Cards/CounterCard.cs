@@ -1,7 +1,10 @@
 using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Managers;
+using Orc.Game.Model;
 using Orc.Game.Players;
+using Orc.Game.Triggers;
 using Orc.Game.Triggers;
 
 namespace Orc.Game.Cards;
@@ -25,7 +28,7 @@ internal enum CounterUseRejection
 /// </para>
 /// <para>
 /// 效果 handler 集经 <see cref="AddEffectHandler"/> 装配（签名保持不变）；激活时包装为
-/// <c>OrderFlowView</c> handler 注册到 <c>OrderFlow.Trigger</c> 的 <see cref="OrderFlowBands.Counter"/> 段
+/// <c>OrderFlowView</c> handler 挂到 <c>engine#order.cast</c> 的反制检查位（优先级 0，先于宣告点与结算）
 /// （按激活序＝注册序执行），取消时注销。包装器构造 <see cref="CardTriggerView"/>（Card＝反制卡、Player＝归属、
 /// Source＝指令卡、Target＝施放目标、Argument＝数值）后调用原 handler。
 /// </para>
@@ -46,7 +49,10 @@ internal enum CounterUseRejection
 public class CounterCard : CardBase
 {
     private readonly List<CounterEffectHandler> _effectHandlers = new();
-    private readonly List<TriggerRegistration> _activeRegistrations = new();
+    private readonly List<(string Name, IDisposable Guard)> _activeRegistrations = new();
+
+    /// <summary>v4 组件内容成员是否已折叠为反制 handler（幂等标记；组件在 LoadAsync 期才装配，故首次使用时折叠）。</summary>
+    private bool _componentHandlersRegistered;
 
     /// <summary>激活实扣额（W3-2 G5）：激活时写入、取消时按此退还、取消后清空——「扣点与退点同额」跨调用守恒（与期间修饰漂移解耦）。</summary>
     private int? _chargedCost;
@@ -76,17 +82,21 @@ public class CounterCard : CardBase
         // 激活状态组件（E 区：「反制＝激活状态组件」；2B 挂载落实——初始未激活）。
         AddData(new CounterActivationData());
 
-        UseCounterTrigger = new CounterUseTrigger(this, validationJudicatorResolver);
-        // R9：内置链 handler 归因于本卡（registrant: this）——链内发信号以本卡为 Source。
-        UseCounterTrigger.Register("使用反制", HandleUseCounterAsync, registrant: this);
+        // S8（批次 3）：成员表由类型预制体 `card.counter` 声明；批次 7（§27）起本类只持成员地址。
+        var members = BindMembers(engine, HostKind.Counter, validationJudicatorResolver);
+        UseCounterTrigger = members.AddressOf(CardProcesses.UseCounter);
+
+        // 守卫边（反制使用检查：仅己方回合／未激活时的指挥点）＋ 默认链（状态翻转），接入序＝执行序。
+        CardPlayGuards.AttachCounterUseGuard(this, validationJudicatorResolver);
+        AttachMemberEdge(CardProcesses.UseCounter, MemberEdges.For<CardTriggerView>(HandleUseCounterAsync));
 
         // R2 末条：卡销毁清理（激活中被销毁——注销 Counter 段 handler、置未激活、清实扣额、不退费）。
         // R1.3 加性：同一订阅同时承载「己方回合开始自动解除」分支（每卡至多一条订阅，不新增第二条）。
         _destroyedSubscription = engine.Subscribe(HandleUpdateAsync);
     }
 
-    /// <summary>使用反制的触发器（唯一；单入口状态翻转：未激活⇒激活流程、已激活⇒取消流程）。</summary>
-    public Trigger<CardTriggerView> UseCounterTrigger { get; }
+    /// <summary>使用反制的成员地址（<c>host#use-counter</c>；单入口状态翻转：未激活⇒激活流程、已激活⇒取消流程）。</summary>
+    public MemberAddress UseCounterTrigger { get; }
 
     /// <summary>
     /// 已注册的效果 handler 名称（登记序；激活期间＝登记集、未激活/已消耗＝空）——
@@ -122,6 +132,80 @@ public class CounterCard : CardBase
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(handler);
         _effectHandlers.Add(new CounterEffectHandler(name, handler, registrant));
+    }
+
+    /// <summary>
+    /// **v4 收口**：把本卡已装配组件上的「主动内容成员」折叠为反制 handler（幂等；激活前调用一次）。
+    /// <para>
+    /// 背景：旧实现由 <c>EffectSystem</c> 从反制的 <c>active</c> 触发器事件折叠出 handler（一次性装配）。
+    /// <c>Effect</c> 家族删除后该装配段一并消失，迁移产物的 <c>kind</c> 又不进新模型——于是「反制效果」这条能力
+    /// 在新模型里没有接缝。本方法补上接缝：组件成员本身就是效果 handler（迁移器把一 event 转成一成员）。
+    /// </para>
+    /// <para>
+    /// 纳入判据（**只认主动成员**）：已装配组件 × 资产声明的成员（<see cref="PrefabLayer.Asset"/>，排除框架注销成员）
+    /// × **未被任何挂载声明引用**（带挂载＝已挂在引擎信号上的被动订阅，再当反制作一次＝重复执行）。
+    /// 登记序＝组件装配序 → 组件内成员声明序（与旧「效果登记序」同位）。
+    /// </para>
+    /// </summary>
+    private void RegisterComponentEffectHandlers()
+    {
+        if (_componentHandlersRegistered || ModelEntity is not { } entity)
+        {
+            return;
+        }
+
+        _componentHandlersRegistered = true;
+
+        foreach (var attachment in entity.Runtime.ComponentsOf(entity))
+        {
+            if (!attachment.IsAssembled)
+            {
+                continue; // 未装配（placed 相位尚未到达）：无边可跑
+            }
+
+            var mounted = new HashSet<string>(
+                attachment.Type.Mounts.Select(static mount => mount.Member), StringComparer.Ordinal);
+            var component = attachment.Component;
+
+            foreach (var member in component.Members)
+            {
+                if (member.Layer != PrefabLayer.Asset || mounted.Contains(member.Name))
+                {
+                    continue;
+                }
+
+                var memberName = member.Name;
+                AddEffectHandler(
+                    memberName,
+                    (view, ctx, ct) => RunComponentMemberAsync(component, memberName, view, ctx, ct));
+            }
+        }
+    }
+
+    /// <summary>
+    /// 以一个组件成员的执行承载反制检查：把适配视图写进**调用方的同一份数据面**（组件的视图声明是
+    /// <see cref="CardTriggerView"/> 形状，字段名同源）后调用该成员，并把「成员作用域内停止」翻译成
+    /// **外层（<c>engine#order.cast</c>）停止**。
+    /// <para>
+    /// 为什么必须翻译：<c>ctx.Stop()</c> 的范围＝当前成员（R2a 不外溢），而反制要停的是外层施放。
+    /// <c>ctx.Interrupt()</c> 走执行帧、天然上溢，不需要翻译。
+    /// </para>
+    /// </summary>
+    private static async Task RunComponentMemberAsync(
+        OrchestrationEntity component, string memberName, CardTriggerView view, Context ctx, CancellationToken ct)
+    {
+        ctx.Set(nameof(CardTriggerView.Card), view.Card);
+        ctx.Set(nameof(CardTriggerView.Player), view.Player);
+        ctx.Set(nameof(CardTriggerView.Source), view.Source);
+        ctx.Set(nameof(CardTriggerView.Target), view.Target);
+        ctx.Set(nameof(CardTriggerView.Argument), view.Argument);
+        ctx.Set(nameof(CardTriggerView.TriggerCard), view.TriggerCard);
+
+        var execution = await component.InvokeAsync(memberName, ctx, ct).ConfigureAwait(false);
+        if (execution.Stopped)
+        {
+            ctx.Stop(); // 组件成员停＝反制命中：停外层施放成员（结果＋消耗由包装器判定）
+        }
     }
 
     /// <summary>
@@ -174,11 +258,14 @@ public class CounterCard : CardBase
             card._chargedCost = cost;
             activation.IsActive = true;
 
+            // v4 收口：先把已装配组件上的主动成员折叠成本卡的 handler（幂等），再统一注册。
+            card.RegisterComponentEffectHandlers();
+
             // S14：注册目标是**内核 OrderFlow 的 Counter 段**（经适配视图）——反制因此有真实位点。
             foreach (var effect in card._effectHandlers)
             {
-                card._activeRegistrations.Add(card.Engine.OrderFlow.Trigger.Register(
-                    effect.Name, card.CreateCounterHandler(effect), OrderFlowBands.Counter, registrant: effect.Registrant));
+                card._activeRegistrations.Add((effect.Name, card.Engine.OrderFlow.AttachCounterGuard(
+                    effect.Name, card, MemberEdges.For(card.CreateCounterHandler(effect)))));
             }
 
             // E1-53：**反制触发**信号（激活分支、恰一次；取消分支不发——退点撤销不属"触发"）。
@@ -197,7 +284,7 @@ public class CounterCard : CardBase
             activation.IsActive = false;
             foreach (var registration in card._activeRegistrations)
             {
-                card.Engine.OrderFlow.Trigger.Unregister(registration);
+                registration.Guard.Dispose();
             }
 
             card._activeRegistrations.Clear();
@@ -315,7 +402,7 @@ public class CounterCard : CardBase
         // 注销 + 未激活 + 清实扣额（不退费——不调 ChangePointsAsync）。
         foreach (var registration in _activeRegistrations)
         {
-            Engine.OrderFlow.Trigger.Unregister(registration);
+            registration.Guard.Dispose();
         }
 
         _activeRegistrations.Clear();
@@ -351,7 +438,7 @@ public class CounterCard : CardBase
 
         foreach (var registration in _activeRegistrations)
         {
-            Engine.OrderFlow.Trigger.Unregister(registration);
+            registration.Guard.Dispose();
         }
 
         _activeRegistrations.Clear();
@@ -411,7 +498,7 @@ public class CounterCard : CardBase
 
         foreach (var registration in _activeRegistrations)
         {
-            Engine.OrderFlow.Trigger.Unregister(registration);
+            registration.Guard.Dispose();
         }
 
         _activeRegistrations.Clear();

@@ -2,6 +2,7 @@
 using Orc.Core;
 using Orc.Game.Actions;
 using Orc.Game.Cards;
+using Orc.Game.Cards.Loading;
 using Orc.Game.Collections;
 using Orc.Game.Players;
 
@@ -126,6 +127,15 @@ public sealed class PlayerManager
     /// <summary>双玩家（[0]＝玩家A/第一位玩家、[1]＝玩家B；顺序＝创建序）。</summary>
     public IReadOnlyList<Player> Players => _players;
 
+    /// <summary>
+    /// 卡级装载失败出口（装配方注入；null＝无报告面——失败只留引擎日志）。
+    /// <para>
+    /// 粒度＝**一次装载批量一次**：卡组加载会逐张判定，逐张回调会让报告被反复重建
+    /// （同一批的修订被算成多次）；故 <see cref="LoadDecksAsync"/> 收尾时把本次全部失败一次性交出去。
+    /// </para>
+    /// </summary>
+    internal Action<IReadOnlyList<CardComponentFailureData>>? ComponentFailureSink { get; set; }
+
     /// <summary>初始化动作：创建双玩家（资源初始：槽 0 / 点数 0；卡组＝传入名单；手牌空；HQ 随创建〔W3-3〕）。只允许一次。</summary>
     /// <exception cref="InvalidOperationException">双玩家已创建（重复创建被拒绝）。</exception>
     internal void CreatePlayers(CardList deckForPlayerA, CardList deckForPlayerB)
@@ -152,21 +162,69 @@ public sealed class PlayerManager
     /// 元数据装配〔W1-1〕＋词条装载＋广播 card.load，载荷 {Card, Player}）。
     /// 加载顺序＝玩家索引升序 × 洗牌后卡组顺序（同种子＋同参 → 逐位稳定）；加载不改计数（仅装配）。
     /// 失败直接上抛（未注册 id / 加载模板异常＝初始化 fail-fast）。
+    /// <para>
+    /// **例外（§33）**：卡牌装载模板自己判定的加载失败（<see cref="CardLoadFailedException"/>）＝**单卡裁决**——
+    /// 失败原因在收尾时**一次性**交给报告面（<see cref="ComponentFailureSink"/>；卡牌加载报告把它标成 invalid），
+    /// 该卡**不产生**（卡组条目摘除、实例销毁），其余卡照常装载；
+    /// 一张坏卡不阻断整局（否则症状与原因隔两层：整局不开、却说不出哪张卡坏了）。
+    /// </para>
     /// </summary>
     /// <exception cref="InvalidOperationException">双玩家尚未创建。</exception>
     /// <exception cref="KeyNotFoundException">卡组含未注册 id（实例化失败）。</exception>
     internal async Task LoadDecksAsync(CancellationToken ct = default)
     {
+        var failures = new List<CardComponentFailureData>();
         foreach (var player in _players)
         {
             var deck = player.Deck;
-            for (var i = 0; i < deck.Count; i++)
+            for (var i = 0; i < deck.Count;)
             {
-                var card = _library.Instantiate(deck[i]);
+                var cardId = deck[i];
+                var card = _library.Instantiate(cardId);
                 deck.AttachInstanceAt(i, card);
-                await card.LoadAsync(player, ct);
+                try
+                {
+                    await card.LoadAsync(player, ct);
+                }
+                catch (CardLoadFailedException ex)
+                {
+                    RecordCardLoadFailure(cardId, ex, failures);
+                    deck.RemoveInstance(card); // 该卡位不产生卡（条目摘除——不留未装配实例的悬空位）
+                    card.Destroy();
+                    continue; // 条目已摘除：同一索引即下一张卡（索引不推进）
+                }
+
+                i++;
             }
         }
+
+        if (failures.Count > 0)
+        {
+            ComponentFailureSink?.Invoke(failures); // 整批一次（报告面只重建一次）
+        }
+    }
+
+    /// <summary>
+    /// 卡级装载失败留痕（§33）：组装报告面的失败条目（卡库键 ＋ 资产 id ＋ 原因枚举）
+    /// ＋ 引擎总流一条可关联日志（报告是判据，日志是同一次失败的追踪锚点）。
+    /// </summary>
+    private void RecordCardLoadFailure(
+        string cardId, CardLoadFailedException ex, List<CardComponentFailureData> failures)
+    {
+        failures.Add(new CardComponentFailureData(
+            cardId,
+            // 游戏层不持有资产 GUID（那是装载链的定版产物）：按卡库键命中报告卡位，再由报告侧反查条目。
+            AssetGuid: null,
+            Issues: new[]
+            {
+                CardFieldIssue.Invalid(ex.AssetId, "component", null, ex.Reason),
+            }));
+
+        _engine.RootStream.WriteLog(
+            "卡牌加载",
+            $"卡牌 '{cardId}'（{ex.CardName}）加载失败——该卡不产生（详见卡牌加载报告对应卡位）：{ex.Message}",
+            LogLevel.Error,
+            new[] { "card", "load", "error", cardId });
     }
 
     // ---------- 对局级卡牌 ID 水位线（W1-1 G12 加性面） ----------

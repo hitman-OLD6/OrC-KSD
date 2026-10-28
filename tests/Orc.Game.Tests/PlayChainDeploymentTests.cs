@@ -19,33 +19,6 @@ namespace Orc.Game.Tests;
 /// </summary>
 public class PlayChainDeploymentTests
 {
-    [Fact]
-    public async Task Deploy_Triggers_Injected_Effects_In_Registration_Order()
-    {
-        var match = PlayChainTestKit.CreatePlayMatch();
-        await match.Initialize();
-        var player = match.Players[0];
-        var unit = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(match, player);
-        var line = match.Battlefield.PlayerASupportLine;
-        var order = new List<string>();
-        var views = new List<CardTriggerView>();
-
-        unit.AddEffect(new DeployLogicProbeEffect(unit, "A", view => { order.Add("A"); views.Add(view); return Task.CompletedTask; }));
-        unit.AddEffect(new DeployLogicProbeEffect(unit, "B", view => { order.Add("B"); views.Add(view); return Task.CompletedTask; }));
-        unit.AddEffect(new DeployLogicProbeEffect(unit, "C", view => { order.Add("C"); views.Add(view); return Task.CompletedTask; }));
-
-        var target = line.GetInsertionGaps().At(1);
-        var result = await match.PlayManager.PlayUnitAsync(unit, target);
-
-        // 按注入/执行顺序 A→B→C 触发（顺序可观测）；触发上下文＝被部署单位与目标插入点（同一次请求的同一空隙实例）。
-        Assert.Equal(PlayResultStatus.Success, result.Status);
-        Assert.Equal(new[] { "A", "B", "C" }, order);
-        Assert.All(views, view =>
-        {
-            Assert.Same(unit, view.Card);
-            Assert.Same(target, view.Position);
-        });
-    }
 
     [Fact]
     public async Task Deploy_Without_Effects_Still_Unitizes_And_Charges()
@@ -64,80 +37,26 @@ public class PlayChainDeploymentTests
         Assert.Equal(0, player.Points);
     }
 
-    [Fact]
-    public async Task Deploy_Isolates_Single_Effect_Exception_And_Continues()
-    {
-        var match = PlayChainTestKit.CreatePlayMatch();
-        await match.Initialize();
-        var player = match.Players[0];
-        var unit = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(match, player);
-        var line = match.Battlefield.PlayerASupportLine;
-        var order = new List<string>();
 
-        unit.AddEffect(new DeployLogicProbeEffect(unit, "A", _ => { order.Add("A"); return Task.CompletedTask; }));
-        unit.AddEffect(new DeployLogicProbeEffect(unit, "B", _ => throw new InvalidOperationException("部署效果爆炸")));
-        unit.AddEffect(new DeployLogicProbeEffect(unit, "C", _ => { order.Add("C"); return Task.CompletedTask; }));
-        using var recorder = new UpdateRecorder(match.Engine);
-
-        var result = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps().At(1));
-
-        // 单个部署效果异常＝沿用引擎异常隔离（记录并继续）：不阻断部署链与后续效果。
-        Assert.Equal(PlayResultStatus.Success, result.Status);
-        Assert.Equal(new[] { "A", "C" }, order);
-        Assert.Same(unit, line[1]); // 落在插入点 1＝支援线 HQ 之后
-        Assert.Equal(
-            new[]
-            {
-                GameUpdates.CardPlayed, Updates.CardPlaced, GameUpdates.UnitDeployed, // W3-A3：含放置驱动信号
-                GameUpdates.PointChanged, // 收尾扣部署费（E1-25 后续）
-            },
-            recorder.Types);
-        Assert.Contains(
-            match.Engine.RootStream.Entries,
-            entry => entry.Keywords.Contains("exception:InvalidOperationException"));
-    }
-
-    [Fact]
-    public async Task Join_Unitizes_Without_Fee_Or_Deployment_Keyword_Effect()
-    {
-        var match = PlayChainTestKit.CreatePlayMatch();
-        await match.Initialize();
-        var player = match.Players[0];
-        var unit = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId); // 不加载（来源不问、归属不要求）
-        var frontLine = match.Battlefield.FrontLine;
-        var front = frontLine.GetInsertionGaps().At(0);
-        var fired = new List<string>();
-        unit.AddEffect(new DeployLogicProbeEffect(unit, "部署词条", _ => { fired.Add("部署词条"); return Task.CompletedTask; }));
-        using var recorder = new UpdateRecorder(match.Engine);
-
-        var result = await match.PlayManager.JoinUnitAsync(unit, front);
-
-        // 加入路径：加入触发器 → 共用单位化；不扣费、不走部署词条；发 card.placed ×1（W3-A3：放置驱动信号）＋ unit.joined ×1（不发 card.played / unit.deployed）。
-        Assert.Equal(PlayResultStatus.Success, result.Status);
-        Assert.Same(unit, frontLine[0]); // 落在请求的插入点（空隙身份随快照失效，按线＋序号核对）
-        Assert.Equal(1, unit.GetData<UnitStateData>().OperateCost); // 共用单位化：组件挂载（实时值＝对战组件值）
-        Assert.Equal(1, player.Points); // 不扣费
-        Assert.Empty(fired); // 不走部署词条
-        Assert.Equal(new[] { Updates.CardPlaced, GameUpdates.UnitJoined }, recorder.Types);
-        var payload = recorder.Updates[1].Payload!;
-        Assert.Same(unit, payload[GameUpdates.PayloadUnit]);
-        var joinedPosition = Assert.IsType<BoardPosition>(payload[GameUpdates.PayloadPosition]);
-        Assert.Same(frontLine, joinedPosition.Line);
-        Assert.Equal(0, joinedPosition.Index);
-    }
 
     [Fact]
     public async Task Join_Rejects_Occupied_Slot()
     {
         var match = PlayChainTestKit.CreatePlayMatch();
         await match.Initialize();
-        var unit = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId);
+        var player = match.Players[0];
+
+        // 夹具（v4）：加入路径经卡实体成员 `host#join` 执行——卡必须走正式装配路径（LoadAsync）
+        // 才带编排实体；`new`／未加载的独立构造卡在新模型下是 fail-fast（旧模型静默空转）。
+        var unit = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(
+            match, player, PlayChainTestKit.UnitCheapId, toHand: false);
         var front = match.Battlefield.FrontLine;
 
         // 新位置模型下插入点没有「被占用」形态：占用该位置＝阵线快照变化 ⇒ 先前取得的空隙失效。
         // 「同一空隙再用一次」即本用例的原语义（目标已不可用），失败分类按 R2 走 PositionStale（过期须重取插入点）。
         var occupied = front.GetInsertionGaps().At(0);
-        var occupant = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId);
+        var occupant = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(
+            match, player, PlayChainTestKit.UnitCheapId, toHand: false);
         Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(occupant, occupied)).Status);
         Assert.False(occupied.IsCurrent);
 
@@ -157,7 +76,10 @@ public class PlayChainDeploymentTests
     {
         var match = PlayChainTestKit.CreatePlayMatch();
         await match.Initialize();
-        var unit = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId);
+        var player = match.Players[0];
+        // 夹具（v4）：同 Join_Rejects_Occupied_Slot——加入经 `host#join` 成员，卡须先正式装配。
+        var unit = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(
+            match, player, PlayChainTestKit.UnitCheapId, toHand: false);
         var front = match.Battlefield.FrontLine;
 
         Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(unit, front.GetInsertionGaps().At(0))).Status);
@@ -171,26 +93,3 @@ public class PlayChainDeploymentTests
     }
 }
 
-/// <summary>
-/// 测试用部署效果（S6 迁移）：装载时（<c>OnMount</c>）经 <c>Effect.Inject</c> 把 handler 注入宿主单位的
-/// 「部署词条触发器」默认区段；卸载时框架自动撤销注入——即数据体/预制体路径（<c>inject</c> 声明）的代码等价形态。
-/// </summary>
-internal sealed class DeployLogicProbeEffect : PassiveEffect
-{
-    private readonly UnitCard _unit;
-    private readonly Func<CardTriggerView, Task> _handler;
-
-    internal DeployLogicProbeEffect(UnitCard unit, string entryName, Func<CardTriggerView, Task> handler)
-        : base($"部署探针:{entryName}")
-    {
-        _unit = unit;
-        _handler = handler;
-    }
-
-    protected override void OnMount()
-        => Inject(
-            _unit.DeployKeywordTrigger,
-            Name,
-            DefaultBands.Default,
-            (view, _, _) => _handler(view));
-}

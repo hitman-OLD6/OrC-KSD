@@ -33,7 +33,7 @@ public enum WrapperTarget
 
 /// <summary>
 /// 插件注册上下文（受控面）：csx 注册入口经其完成受控注册——**复用转发**既有注册面
-/// （<c>AssetServiceRegistry.Register</c> / <c>JudicatorRegistry.Register</c> / <c>PrefabManager.RegisterHandler</c>），
+/// （<c>AssetServiceRegistry.Register</c> / <c>JudicatorRegistry.Register</c> / <c>SnapshotStore.RegisterHandler</c>），
 /// 不造第二注册面。具体实现由宿主层（Orc.Packages）提供。
 /// </summary>
 public interface IPluginRegistrationContext
@@ -53,7 +53,7 @@ public interface IPluginRegistrationContext
     /// </summary>
     JudicatorRegistration RegisterJudicator(string name, Judicator judicator);
 
-    /// <summary>注册效果 handler / 行为引用（转发到 <c>PrefabManager.RegisterHandler</c>）。</summary>
+    /// <summary>注册效果 handler / 行为引用（转发到 <c>SnapshotStore.RegisterHandler</c>）。</summary>
     void RegisterHandler(string key, Delegate handler);
 
     /// <summary>声明本条目对某插件资产名的依赖（条目级依赖；承载"效果声明其依赖的插件的资产名"）。</summary>

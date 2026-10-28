@@ -26,24 +26,6 @@
       "kind": "card",
       "id": "pack/orc.space-war/space-war.sponge-infantry",
       "version": "1.0.0"
-    },
-    {
-      "guid": "5bb7fdfe-87ac-ebe2-35a1-778048024f0d",
-      "kind": "effect",
-      "id": "pack/orc.space-war/keyword.magnetic-reaction",
-      "version": "1.0.0"
-    },
-    {
-      "guid": "6574705e-2a68-13c6-1f46-91fac5aeecd5",
-      "kind": "effect",
-      "id": "pack/orc.space-war/keyword.magnetic-shield",
-      "version": "1.0.0"
-    },
-    {
-      "guid": "046e23d8-a6ea-c686-b8f7-5abd20e31500",
-      "kind": "effect",
-      "id": "pack/orc.space-war/keyword.sponge-armor",
-      "version": "1.0.0"
     }
   ]
 }

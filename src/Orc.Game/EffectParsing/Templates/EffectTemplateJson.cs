@@ -146,7 +146,7 @@ public static class EffectTemplateJson
     {
         Id = trigger.Id,
         StableKey = trigger.StableKey,
-        Kind = trigger.Kind == TriggerKind.Passive ? "passive" : "active",
+        Kind = trigger.IsPassive ? "passive" : "active",
         ViewType = trigger.ViewTypeName,
         Hooks = trigger.Hooks.ToList(),
         Events = trigger.Events.Select(ToDto).ToList(),
@@ -181,14 +181,12 @@ public static class EffectTemplateJson
 
     private static EffectTemplateTrigger FromDto(TriggerDto dto)
     {
-        var kind = string.Equals(dto.Kind, "passive", StringComparison.OrdinalIgnoreCase)
-            ? TriggerKind.Passive
-            : TriggerKind.Active;
+        var isPassive = string.Equals(dto.Kind, "passive", StringComparison.OrdinalIgnoreCase);
 
         return new EffectTemplateTrigger(
             dto.Id ?? string.Empty,
             dto.StableKey ?? string.Empty,
-            kind,
+            isPassive,
             dto.Hooks,
             (dto.Events ?? new List<EventDto>()).Select(FromDto),
             string.IsNullOrWhiteSpace(dto.ViewType) ? "Orc.Cards.CardEventView" : dto.ViewType!);

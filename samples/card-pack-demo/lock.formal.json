@@ -32,12 +32,6 @@
       "kind": "card",
       "id": "pack/demo/demo.vanguard",
       "version": "1.0.0"
-    },
-    {
-      "guid": "8e483519-d746-de5f-66cf-bbfd609e5cbc",
-      "kind": "effect",
-      "id": "pack/demo/demo.rally",
-      "version": "1.0.0"
     }
   ]
 }

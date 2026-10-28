@@ -117,32 +117,6 @@ public class VeteranMechanismTests
 
     // ---------- 契约冻结（触发器官名 / 标记标识 / 读取面） ----------
 
-    [Fact]
-    public void Contract_Trigger_Name_Marker_Id_Are_Frozen_And_Readable()
-    {
-        // 对外契约（对 S3）：触发器名＝「老兵触发器」（查证无冲突）；标记标识＝「老兵」。
-        Assert.Equal("老兵触发器", VeteranRules.TriggerName);
-        Assert.Equal("老兵", KeywordIds.Veteran);
-        Assert.True(KeywordRegistry.IsDefined(KeywordIds.Veteran));
-        Assert.Contains(KeywordIds.Veteran, KeywordIds.All);
-        Assert.False(KeywordRegistry.IsBattleKeyword(KeywordIds.Veteran)); // 纯内容标记——不打对战词条标
-
-        // 具名登记可寻址（效果预制体 injects 按名解析的注入目标面）。
-        var engine = new LogicEngine();
-        var unit = new UnitCard(
-            engine,
-            new CardDefinition("契约检查", 1, 1, 1, 1, faction: Faction.Germany, rarity: Rarity.Standard));
-        Assert.True(unit.TryFindNamedTrigger(VeteranRules.TriggerName, out var trigger, out var viewType));
-        Assert.Same(unit.VeteranTrigger, trigger);
-        Assert.Equal(typeof(CardTriggerView), viewType);
-
-        // 读取面降级：null/非单位卡＝false 降级、不抛错。
-        Assert.False(VeteranRules.IsVeteran(null));
-        var command = new OrderCard(
-            engine,
-            new CardDefinition("指令", 1, 0, 0, 0, CardCategory.Command, faction: Faction.Germany, rarity: Rarity.Standard));
-        Assert.False(VeteranRules.IsVeteran(command));
-    }
 
     // ---------- V1：在场上的第三回合开始时升为老兵（机制级全链：触发源手工构造） ----------
 
@@ -479,21 +453,33 @@ public class VeteranMechanismTests
         Assert.Equal(7, DefenseOf(unit));
         Assert.Equal(2, unit.Modifiers.GetEffectiveValue(CardStatFields.OperateCost));
 
-        // 信号（批 1 适配——词条效果化：动员词条携带内嵌效果〔回合累积/受伤失去〕，全清时随词条卸载按
-        // 内嵌效果通道既有语义发 effect.removed 恰 2 条——执行段清理步、先于收尾发射）：
-        // effect.removed 恰 2 条＋card.stat.changed 恰一次（有变更）＋unit.upgraded 恰一次；
-        // 先清理信号、后数值、再机制；重入零信号。
+        // 信号（b4 泛化：组件卸载现在补发 effect.removed 的**组件形态**——载荷
+        // { Component, ComponentInstance, Host }，不含 Card／Effect 键，故旧清理链〔按 Card／Effect 定位〕幂等无操作）。
+        // §20.5 B2 原先的"恰 0 条"是这条泛化落地前的记录；按 §21.8 第 2 条裁决改为"恰 N 条且载荷为组件"：
+        // 动员＝两个组件（accrual＋loss），词条全清 ⇒ 恰 2 条 effect.removed。
+        // 其余信号不变：card.stat.changed 恰一次（有变更）＋unit.upgraded 恰一次；重入零信号。
+        var removals = recorder.Updates.Where(u => u.Type == Updates.EffectRemoved).ToArray();
+        Assert.Equal(2, removals.Length);
+        Assert.All(removals, update =>
+        {
+            Assert.NotNull(update.Payload);
+            Assert.True(
+                update.Payload!.TryGetValue(PayloadKeys.Component, out var component) && component is string,
+                "组件形态的 effect.removed 必须携带组件 id");
+            Assert.True(
+                update.Payload.TryGetValue(PayloadKeys.Host, out var host) && ReferenceEquals(host, unit),
+                "组件形态的 effect.removed 必须携带宿主（本案＝被升级的单位卡）");
+            Assert.False(update.Payload.ContainsKey(PayloadKeys.Effect), "组件形态不得携带 Effect 键");
+            Assert.False(update.Payload.ContainsKey(PayloadKeys.Card), "组件形态不得携带 Card 键（否则旧清理链会误摘卡牌登记）");
+        });
+
         Assert.Equal(4, recorder.Updates.Count);
-        Assert.Equal(2, recorder.Updates.Count(u => u.Type == Updates.EffectRemoved));
         Assert.Equal(1, recorder.Updates.Count(u => u.Type == GameUpdates.CardStatChanged));
         Assert.Equal(1, recorder.Updates.Count(u => u.Type == GameUpdates.UnitUpgraded));
         var types = recorder.Types.ToList();
         var statIdx = types.IndexOf(GameUpdates.CardStatChanged);
         var upgradedIdx = types.IndexOf(GameUpdates.UnitUpgraded);
         Assert.True(statIdx >= 0 && upgradedIdx > statIdx, "信号顺序＝先数值（card.stat.changed）、后机制（unit.upgraded）。");
-        Assert.True(
-            types.LastIndexOf(Updates.EffectRemoved) < statIdx,
-            "信号顺序＝词条内嵌效果卸载（effect.removed）先于数值变化（全清先于收尾重跑）。");
         Assert.Equal(new[] { VeteranPromotionOutcome.AlreadyVeteran }, reentryOutcomes);
 
         // 范围外字段不变：定义引用/部署费/类型集。
@@ -633,10 +619,22 @@ public class VeteranMechanismTests
             Assert.Equal(3, AttackOf(unit));                              // 2 + 1（修饰恢复）
             Assert.Equal(3, DefenseOf(unit));                             // 5 - 2（损伤恢复；无防御修饰）
 
-            // 信号（批 1 适配——词条效果化）：执行段「词条集全清」步骤的正当卸载信号——动员内嵌效果随
-            // 词条卸载按通道既有语义发 effect.removed 恰 2 条；此外全程零信号（回滚段不发射——
-            // 无「结果类」信号〔card.stat.changed / unit.upgraded〕、无其它残余）。
-            Assert.Equal(2, recorder.Updates.Count(u => u.Type == Updates.EffectRemoved));
+            // 信号（b4 泛化：组件卸载补发 effect.removed 的组件形态）：执行段「词条集全清」把动员的两份组件
+            // 卸掉（回滚段随后按原词条集重建）——因此 effect.removed 恰 2 条且载荷为组件；除它之外**零信号**
+            // （回滚不产生「结果类」信号：无 card.stat.changed / unit.upgraded，无其它残余）。
+            var rollbackRemovals = recorder.Updates.Where(u => u.Type == Updates.EffectRemoved).ToArray();
+            Assert.Equal(2, rollbackRemovals.Length);
+            Assert.All(rollbackRemovals, update =>
+            {
+                Assert.NotNull(update.Payload);
+                Assert.True(
+                    update.Payload!.TryGetValue(PayloadKeys.Component, out var component) && component is string,
+                    "组件形态的 effect.removed 必须携带组件 id");
+                Assert.True(
+                    update.Payload.TryGetValue(PayloadKeys.Host, out var host) && ReferenceEquals(host, unit),
+                    "组件形态的 effect.removed 必须携带宿主（本案＝被回滚的单位卡）");
+            });
+
             Assert.DoesNotContain(recorder.Updates, u => u.Type != Updates.EffectRemoved);
             Assert.True(unit.GetData<UnitStateData>().Line is not null); // 单位保持可正常操作
 

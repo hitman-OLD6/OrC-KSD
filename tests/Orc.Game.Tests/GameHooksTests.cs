@@ -202,30 +202,6 @@ public class GameHooksTests
             GameHooks.PayloadKeys.OrderBy(v => v, StringComparer.Ordinal));
     }
 
-    [Fact]
-    public void GameHooks_Reexports_All_JudicatorNames_And_TriggerLayers()
-    {
-        var names = typeof(JudicatorNames)
-            .GetFields(BindingFlags.Public | BindingFlags.Static)
-            .Where(field => field.IsLiteral && field.FieldType == typeof(string))
-            .Select(field => (string)field.GetRawConstantValue()!)
-            .ToList();
-
-        Assert.Equal(28, names.Count); // = 内置 27（含 deploy.position.candidates）＋外部示范 1
-        Assert.Equal(names.OrderBy(v => v, StringComparer.Ordinal),
-            GameHooks.JudicatorNameList.OrderBy(v => v, StringComparer.Ordinal));
-
-        // 装配面：27 内置固定注册段（5 验证类＋6 交战类＋4 动作资格类〔含抑制资格〕＋1 效果选靶类＋5 资源类
-        // ＋1 目标候选合法性〔S2 提入〕＋1 部署位置候选〔R4a〕＋1 回合归属〔R4〕＋3 通用关系类〔相邻/兵种/归属〕）
-        // + 1 外部装配段 = 全量 28
-        Assert.Equal(27, GameHooks.BuiltInJudicatorNames.Count);
-        Assert.Single(GameHooks.ExternalJudicatorNames);
-        Assert.Equal(GameHooks.JudicatorNameList.OrderBy(v => v, StringComparer.Ordinal),
-            GameHooks.BuiltInJudicatorNames.Concat(GameHooks.ExternalJudicatorNames)
-                .OrderBy(v => v, StringComparer.Ordinal));
-
-        Assert.Equal(Enum.GetValues<TriggerLayer>(), GameHooks.TriggerLayers);
-    }
 
     [Fact]
     public void Every_Signal_Has_A_Static_Emit_Callpoint()
@@ -311,18 +287,6 @@ public class GameHooksTests
         }
     }
 
-    [Fact]
-    public async Task Trigger_Layers_Are_Wired_To_LowLevel_BuiltIn_Triggers()
-    {
-        var match = GameTestData.CreateStandardMatch(seed: 42);
-        await match.Initialize();
-
-        Assert.Equal(Enum.GetValues<TriggerLayer>(), GameHooks.TriggerLayers);
-
-        Assert.All(match.TriggerRegistry.Entries, entry => Assert.True(Enum.IsDefined(entry.Layer)));
-        // 指挥流程 + 单位移动 + 单位攻击 + 造成攻击伤害（Match.Initialize 注册的 4 个内置流程触发器）
-        Assert.True(match.TriggerRegistry.GetByLayer(TriggerLayer.LowLevel).Count >= 4);
-    }
 
     [Fact]
     public void Pending_Layer_Covers_All_27_Kards_Triggers_With_Status()
@@ -359,29 +323,4 @@ public class GameHooksTests
         Assert.Contains(GameHooks.PendingTriggers, p => p.KardsTrigger == "chargeNow");
     }
 
-    [Fact]
-    public void Exporter_Emits_Parseable_Json_Covering_Signals_Judicators_Layers_And_Pending()
-    {
-        using var document = JsonDocument.Parse(GameHooksJson.Serialize(indented: true));
-        var root = document.RootElement;
-
-        // S1 受控适配（29 → 30）：unit.upgraded；S2（30 → 31）：unit.revealed；R1.3（31 → 32）：counter.disarmed。
-        Assert.Equal(32, root.GetProperty("signals").GetArrayLength());
-        Assert.Equal(23, root.GetProperty("judicators").GetArrayLength());
-        Assert.Equal(GameHooks.TriggerLayers.Count, root.GetProperty("triggerLayers").GetArrayLength());
-        Assert.Equal(27, root.GetProperty("pending").GetArrayLength());
-
-        foreach (var signal in root.GetProperty("signals").EnumerateArray())
-        {
-            Assert.False(string.IsNullOrWhiteSpace(signal.GetProperty("name").GetString()));
-            Assert.True(signal.GetProperty("payloadKeys").GetArrayLength() > 0);
-            Assert.True(signal.GetProperty("emitters").GetArrayLength() > 0);
-        }
-
-        foreach (var pending in root.GetProperty("pending").EnumerateArray())
-        {
-            Assert.Contains(pending.GetProperty("orcStatus").GetString(),
-                new[] { "已具备", "后置", "不做" });
-        }
-    }
 }

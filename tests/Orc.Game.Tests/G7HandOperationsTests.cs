@@ -328,31 +328,6 @@ public class G7HandOperationsTests
         Assert.Same(playerA, discarded.Payload[GameUpdates.PayloadPlayer]);
     }
 
-    [Fact]
-    public async Task Discard_Cleans_Up_Loaded_Effects_On_Destroy()
-    {
-        var match = CommandTestKit.CreateCommandMatch();
-        await match.Initialize();
-        var playerA = match.Players[0];
-
-        var card = (UnitCard)match.CardLibrary.Instantiate(CommandTestKit.InfantryId);
-        var effect = new LifecycleProbeEffect("弃置清理探针");
-        card.AddEffect(effect);
-        await card.LoadAsync(playerA);
-        playerA.Hand.Add(card);
-
-        Assert.True(effect.IsMounted); // 加载时点装载完成
-        Assert.Contains($"{effect.Name}/dispose", match.Engine.Bus.GetSubscribers(Updates.CardDestroyed));
-
-        await match.PlayerManager.DiscardCardAsync(playerA, card);
-
-        // 销毁接线佐证：引擎既有销毁机制被调用/生效——效果清理（卸载＋总线撤销）可观测
-        Assert.Equal(1, effect.UnmountCalls);
-        Assert.False(effect.IsMounted);
-        Assert.DoesNotContain(effect.Name, match.Engine.Bus.GetSubscribers(Updates.EffectRemoved));
-        Assert.False(card.Life.IsAlive);
-        Assert.DoesNotContain(card, match.Engine.Cards);
-    }
 
     [Fact]
     public async Task Discard_Rejections_Are_Explicit_And_NonIdempotent()

@@ -87,29 +87,28 @@ public class LifetimeRefTests
     }
 
     [Fact]
-    public async Task Trigger_Isolates_StaleReferenceException_From_Events()
+    public async Task Member_Execution_Does_Not_Isolate_StaleReference()
     {
         var entity = new Entity("E");
         var engine = new LogicEngine();
-        var trigger = new Trigger<SampleView>(name: "失效联动", events: new[]
+        var edge = Orc.Core.Model.MemberEdges.For<SampleView>((view, ctx, ct) =>
         {
-            new TriggerEvent<SampleView>("读引用", (view, ctx, ct) =>
-            {
-                _ = view.Target; // 读取失效引用 → 当刻抛（StaleReferenceException）
-                return Task.CompletedTask;
-            }),
+            _ = view.Target; // 读取失效引用 → 当刻抛（StaleReferenceException）
+            return Task.CompletedTask;
         });
+        var member = KernelTestKit.Member("失效联动", edge);
 
         entity.Destroy();
 
-        // S2 语义（受控变更）：失效异常被隔离——记录并继续，执行正常返回流
-        var stream = await trigger.InvokeAsync(engine, new Dictionary<string, object?>
-        {
-            ["Target"] = entity.Ref,
-            ["Source"] = entity.Ref,
-            ["Amount"] = 1,
-        });
-
-        Assert.Contains(stream.Entries, e => e.Keywords.Contains("exception:StaleReferenceException"));
+        // §27.1：成员执行面不再隔离业务异常——失效引用原样上抛。
+        await Assert.ThrowsAsync<StaleReferenceException>(() => KernelTestKit.RunAsync(
+            engine,
+            member,
+            new Dictionary<string, object?>
+            {
+                ["Target"] = entity.Ref,
+                ["Source"] = entity.Ref,
+                ["Amount"] = 1,
+            }));
     }
 }

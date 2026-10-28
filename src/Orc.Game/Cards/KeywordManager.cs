@@ -122,29 +122,6 @@ public sealed class KeywordManager
     }
 
     /// <summary>
-    /// 授予（携带内容载荷形态；A4 加性——「获得亡计」的承载）：与标识授予（<see cref="GrantAsync(string, int?)"/>）同一机制——
-    /// 存在性置位 → 运行逻辑装载＋内嵌效果装载 → OnGrant；幂等/回滚/终态语义一致（内容生命周期随词条组件生灭：
-    /// 授予＝内容装载；移除/死亡注销＝内容卸载；授予失败回滚＝无残留）。
-    /// 内容载荷在组件创建后、装载遍历前经组件「内容装载点」（<see cref="KeywordComponent.AttachContent"/>）注入
-    /// （内容型词条覆写吸收；非内容型词条＝忽略——内容不进入承载）；空内容（null）＝合法
-    /// （空内容授予——结算时无操作、静默跳过）。参值位不随本形态携带（内容型词条的参值位无语义）。
-    /// </summary>
-    /// <exception cref="ArgumentException">keyword 为 null/空白。</exception>
-    /// <exception cref="InvalidOperationException">对已死亡卡授予（终态拒绝）；或标识未注册/组件构造失败（fail-fast）。</exception>
-    public Task<bool> GrantWithContentAsync(string keyword, Effect? content)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(keyword);
-        if (IsDead())
-        {
-            throw new InvalidOperationException(
-                $"卡牌 '{_card.Name}' 已死亡（终态）：词条授予被拒绝（查询面保持可用）。");
-        }
-
-        var context = LoadContextProvider?.Invoke();
-        return Task.FromResult(GrantCore(keyword, value: null, context, content));
-    }
-
-    /// <summary>
     /// 移除（完整卸载；可等待完成）：①OnRevoke（行为面先撤）→ ②运行逻辑注销＋内嵌效果卸载 → ③存在性清除（参值不可读）。
     /// 幂等（不存在＝无操作、返回 false、不报错）；对已死亡卡＝拒绝（明确异常）。
     /// </summary>
@@ -263,7 +240,7 @@ public sealed class KeywordManager
     /// 批 4 加性：成功后经词条变更观察者通知恰一次（真实授予完成点——对局侧随动，如守护维护重算；
     /// 幂等/回滚＝零通知；无上下文＝跳过、不抛错）。
     /// </summary>
-    internal bool GrantCore(string keyword, int? value, KeywordLoadContext? context, Effect? content = null)
+    internal bool GrantCore(string keyword, int? value, KeywordLoadContext? context)
     {
         if (_components.ContainsKey(keyword))
         {
@@ -274,30 +251,21 @@ public sealed class KeywordManager
         var component = context?.Keywords is { } keywordSnapshot
             ? keywordSnapshot.Create(_card, keyword, value)
             : KeywordRegistry.Create(_card, keyword, value); // 构造失败＝fail-fast（未置位、无状态变更）
-        component.AttachContent(content); // A4：内容载荷注入（内容型词条吸收；默认忽略）——失败＝fail-fast（未置位、无状态变更）
         _components.Add(keyword, component);
         _active.Add(component); // ① 存在性置位（数据面可见）
 
-        var attached = new List<Effect>();
         try
         {
             component.Mount(_card, context); // ② 运行逻辑装载（如伏击注册改写；缺上下文＝组件内防御跳过）
 
-            // ② 词条效果库实例化（批 4 数据化·装载期实例化点）：数据壳效果（context.Engine 可用时）实例化并
-            // 接入内嵌效果通道——随词条生灭（下方统一遍历装载）；独立构造（无上下文）＝不实例化/跳过
-            // （功能不可用、加载不失败）；库键缺失/实例化失败＝fail-fast（授予整体回滚、零残留）。
-            AttachKeywordEffectPrefabs(component, context);
-
-            foreach (var effect in component.EmbeddedEffects)
-            {
-                AttachEmbeddedEffect(component, effect, attached); // ② 内嵌效果装载（完整装载链语义）
-            }
+            // ② 词条效果装载：绑定 id 在编排目录里解析 → 装配到宿主实体的组件（执行面＝组件成员边）。
+            AttachKeywordEffects(component, context);
 
             component.OnGrant(); // ③ 授予回调（最后）
         }
         catch (Exception)
         {
-            RollbackGrant(component, attached);
+            RollbackGrant(component);
             throw;
         }
 
@@ -330,11 +298,7 @@ public sealed class KeywordManager
             WriteError("词条移除", "运行逻辑注销异常（隔离：继续完成卸载）", ex);
         }
 
-        var effects = component.EmbeddedEffects;
-        for (var i = effects.Count - 1; i >= 0; i--)
-        {
-            _card.RemoveEffect(effects[i]); // ② 内嵌效果卸载（逆序；统一卸载链含托管清理——无残留）
-        }
+        component.DisposeAttachedComponents(); // ② v4 组件挂载态卸载（逐句柄撤销；幂等）
 
         _components.Remove(keyword); // ③ 存在性清除
         _active.Remove(component);
@@ -370,11 +334,7 @@ public sealed class KeywordManager
                 WriteError("词条死亡注销", "运行逻辑注销异常（隔离：继续完成注销）", ex);
             }
 
-            var effects = component.EmbeddedEffects;
-            for (var j = effects.Count - 1; j >= 0; j--)
-            {
-                _card.RemoveEffect(effects[j]); // 内嵌效果卸载（无残留）
-            }
+            component.DisposeAttachedComponents(); // v4 组件挂载态卸载（死亡注销＝行为撤销；幂等）
         }
 
         _active.Clear(); // 行为态清空（存在性/参值保留——登记保留语义；重复注销＝无操作）
@@ -383,13 +343,17 @@ public sealed class KeywordManager
     // ---------- 内部辅助 ----------
 
     /// <summary>
-    /// 词条效果库实例化（批 4 数据化·装载期实例化点）：按「词条 → 数据壳效果清单」绑定声明（注册面）逐项
-    /// 实例化数据效果（<see cref="DynamicEffectFactory"/>——数据壳快照 ＋ assemblyKey 行为引用），以声明序
-    /// 接入组件内嵌效果通道（随词条生灭；实例化名＝绑定的效果名——卡容器效果检索面契约保持）。
-    /// 失败语义（沿既有口径）：context 为 null（独立构造）＝不实例化/跳过（功能不可用、加载不失败）；
-    /// 库键缺失 / 实例化失败（处理器缺失、签名不符、装配异常等）＝fail-fast（异常上抛——授予链整体回滚、零残留）。
+    /// 词条效果装载（批 4 数据化·装载期装配点）：按「词条 → 效果清单」绑定声明（注册面）逐项装配。
+    /// <para>
+    /// **唯一承载形态＝v4 组件资产**（<c>effects-v4/*.component.json</c>）：绑定 id 在编排运行时目录里可解析
+    /// ＋宿主卡有编排实体 ⇒ 直接在宿主实体上装配组件（执行面＝组件成员边，
+    /// <see cref="KeywordComponent.AttachedComponents"/> 持有句柄）。
+    /// 旧格式数据壳效果（<c>Effect</c> 实例）随 Effect 家族删除——非 v4 宿主（HQ 等）由词条组件自身接线承担。
+    /// </para>
+    /// 失败语义（沿既有口径）：context 为 null（独立构造）＝不装配/跳过（功能不可用、加载不失败）；
+    /// 绑定 id 不在 v4 目录＝fail-fast（异常上抛——授予链整体回滚、零残留）。
     /// </summary>
-    private void AttachKeywordEffectPrefabs(KeywordComponent component, KeywordLoadContext? context)
+    private void AttachKeywordEffects(KeywordComponent component, KeywordLoadContext? context)
     {
         // S5：有对局快照＝按快照查绑定（运行期覆盖不影响本局）；无快照＝回退静态面。
         var bindings = context?.Keywords is { } keywords
@@ -407,72 +371,61 @@ public sealed class KeywordManager
 
         foreach (var binding in bindings)
         {
-            if (!context.Engine.Prefabs.TryGetPrefab(binding.PrefabId, out var snapshot))
+            if (TryAttachComponent(component, context, binding))
             {
-                throw new InvalidOperationException(
-                    $"词条 '{component.Keyword}' 的数据壳效果 '{binding.PrefabId}' 未在词条效果库注册（库键缺失——装载 fail-fast，授予整体回滚）。");
+                continue; // v4 组件资产形态已装配
             }
 
-            var instantiation = DynamicEffectFactory.Instantiate(context.Engine, snapshot, binding.EffectName);
-            if (!instantiation.Success)
+            if (_card is not CardBase)
             {
-                throw new InvalidOperationException(
-                    $"词条 '{component.Keyword}' 的数据壳效果 '{binding.PrefabId}' 实例化失败"
-                    + $"（{instantiation.ErrorCategory}）：{instantiation.Error}（装载 fail-fast，授予整体回滚）。");
+                // 非卡牌宿主（HQ 等）无编排实体：v4 组件形态不适用，该宿主的行为由词条组件自身接线承担
+                // （先例＝免疫 HQ 侧伤害改写器，见 ImmuneKeywordComponent.Mount）。不视为配置错误。
+                continue;
             }
 
-            component.AttachDataEffect(instantiation.Effect!); // 数据效果接入内嵌效果通道（随词条生灭）
-
-            // 词条效果同样可声明 injects / judicatorWrappers（效果自注册；随内嵌效果卸载）。
-            if (_card is CardBase cardBase)
-            {
-                try
-                {
-                    CardEffectLoader.ApplyFrameworkDeclarations(
-                        cardBase, context.Engine, snapshot, instantiation.Effect!);
-                }
-                catch (Exception ex)
-                {
-                    WriteError("词条效果声明", "injects/judicatorWrappers 落地异常（隔离、不阻断授予）", ex);
-                }
-            }
+            // 旧格式数据壳效果（Effect 实例）随 Effect 家族删除——绑定 id 必须在 v4 组件目录里可解析，
+            // 否则＝配置错误（装配期已由 KeywordEffectAssembly.VerifyBindings 核验过，此处兜底 fail-fast）。
+            throw new InvalidOperationException(
+                $"词条 '{component.Keyword}' 的效果 '{binding.PrefabId}' 不在编排运行时的 v4 组件目录"
+                + "（库键缺失——装载 fail-fast，授予整体回滚）。");
         }
     }
 
     /// <summary>
-    /// 内嵌效果装载（复用 Effect 体系完整链语义）：登记入卡（列表序；Add 即装载——W3-A3）→ 装载兜底
-    /// （幂等：已装载跳过；未装载者经装载面补齐）→ 装载失败＝fail-fast（上抛——词条授予链据此整体回滚）；
-    /// 托管登记（卸载时框架按来源撤销修饰器/光环）自 W3-A3 起随「通用装载路径」自动完成——本链不再手动登记。
+    /// v4 组件形态装配（词条效果的首选承载）：绑定 id 在编排运行时目录里可解析 ＋ 宿主卡有编排实体 ⇒
+    /// 在宿主实体上装配该组件（装配即建边——执行面不再是 <c>Effect</c> 实例）。
+    /// 无运行时／无实体／目录无该 id ＝ false（调用方回退旧格式数据壳效果——过渡期两形态并存）。
+    /// 装配失败＝上抛（授予链 fail-fast、整体回滚——与旧形态同一失败口径）。
     /// </summary>
-    private void AttachEmbeddedEffect(KeywordComponent component, Effect effect, List<Effect> attached)
+    private bool TryAttachComponent(
+        KeywordComponent component, KeywordLoadContext context, KeywordEffectBinding binding)
     {
-        _card.AddEffect(effect);
-        attached.Add(effect); // 先记录：其后任何失败回滚均须将其撤离（未装载＝仅容器移除）
-
-        if (effect.Kind != TriggerKind.Passive)
+        if (context.Engine.Model is not { } runtime
+            || _card is not CardBase { ModelEntity: { } entity }
+            || !runtime.Catalog.Contains(binding.PrefabId))
         {
-            return; // 主动效果不参与装载/卸载（仅列表进出；施放经 CastAsync——与外部主动效果同待遇）
+            return false;
         }
 
-        if (!effect.IsMounted)
+        try
         {
-            _card.MountPassiveEffects(); // 装载兜底（幂等：已装载者跳过）
+            var attachment = runtime.AddComponent(entity, binding.PrefabId, $"{binding.PrefabId}@{entity.Name}");
+            component.AttachComponent(attachment);
+            return true; // 动作端接缝（wraps→旧身份触发器）由运行时段事件统一接线（CommandManager 订阅 Assembled）
         }
-
-        if (!effect.IsMounted)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             throw new InvalidOperationException(
-                $"词条 '{component.Keyword}' 的内嵌效果 '{effect.Name}' 装载失败（装载链内失败——词条授予整体回滚）。");
+                $"词条 '{component.Keyword}' 的 v4 效果组件 '{binding.PrefabId}' 装配失败：{ex.Message}"
+                + "（装载 fail-fast，授予整体回滚）。",
+                ex);
         }
     }
 
-    /// <summary>授予链整体回滚（逆序：②内嵌效果 → 运行逻辑 → ①存在性）；回滚动作力求完成（异常隔离记录——不掩盖原始失败）。</summary>
-    private void RollbackGrant(KeywordComponent component, List<Effect> attached)
+    /// <summary>授予链整体回滚（逆序：②组件挂载 → 运行逻辑 → ①存在性）；回滚动作力求完成（异常隔离记录——不掩盖原始失败）。</summary>
+    private void RollbackGrant(KeywordComponent component)
     {
-        for (var i = attached.Count - 1; i >= 0; i--)
-        {
-            _card.RemoveEffectSilently(attached[i]); // 静默清理路径：「无痕」回滚——不发 effect.removed（W3-A3；已装载＝统一卸载链、未装载＝容器移除，幂等、不抛）
-        }
+        component.DisposeAttachedComponents(); // v4 组件挂载态回滚（授予失败＝零残留）
 
         try
         {

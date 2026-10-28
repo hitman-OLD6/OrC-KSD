@@ -1,5 +1,6 @@
-﻿using Orc.Cards;
+using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Actions;
 
 namespace Orc.Game.Damage;
@@ -26,27 +27,36 @@ public sealed class DamagePipeline
     /// <summary>
     /// 以目录装配的伤害动作构造（S15/P5b：管道只做门面，不再持有实现类型与目录本体；
     /// 唯一构造者为 <c>CommandManager</c>）。
+    /// <para>
+    /// **批次 7（§27）**：本类只做门面——四端由实现自报的**成员地址**标识，端的执行体是引擎成员上的边
+    /// （由伤害动作构造期接入）。这里不再持有任何触发器实例，也不再按地址反查实例。
+    /// </para>
     /// </summary>
     internal DamagePipeline(IDamageAction action)
     {
         ArgumentNullException.ThrowIfNull(action);
         _action = action;
+
+        CombatDamage = ActionEnds.EndOf(action.Ends, action.CombatDamage).Member;
+        EffectDamage = ActionEnds.EndOf(action.Ends, action.EffectDamage).Member;
+        BattleDamage = ActionEnds.EndOf(action.Ends, action.BattleDamage).Member;
+        Apply = ActionEnds.EndOf(action.Ends, action.Apply).Member;
     }
 
     /// <summary>伤害动作实体（S11：攻击动作经构造注入本接口——互伤只经伤害动作）。</summary>
     public IDamageAction Action => _action;
 
-    /// <summary>卡牌对战伤害触发端（<c>combat.damage</c>；重甲只挂这里）。</summary>
-    public Trigger<DamageEventView> CombatDamage => _action.CombatDamage;
+    /// <summary>卡牌对战伤害触发端（<c>combat-damage</c>；重甲只挂这里）。</summary>
+    public MemberAddress CombatDamage { get; }
 
-    /// <summary>效果伤害触发端（<c>effect.damage</c>）。</summary>
-    public Trigger<DamageEventView> EffectDamage => _action.EffectDamage;
+    /// <summary>效果伤害触发端（<c>effect-damage</c>）。</summary>
+    public MemberAddress EffectDamage { get; }
 
-    /// <summary>战斗伤害触发端（<c>battle.damage</c>）。</summary>
-    public Trigger<DamageEventView> BattleDamage => _action.BattleDamage;
+    /// <summary>战斗伤害触发端（<c>battle-damage</c>）。</summary>
+    public MemberAddress BattleDamage { get; }
 
-    /// <summary>伤害处理端（<c>damage.apply</c>；唯一扣数值）。</summary>
-    public Trigger<DamageApplyView> Apply => _action.Apply;
+    /// <summary>伤害处理端（<c>damage-apply</c>；唯一扣数值）。</summary>
+    public MemberAddress Apply { get; }
 
     /// <summary>对战伤害：<paramref name="source"/> 打 <paramref name="target"/>，走 <c>combat.damage</c> → <c>damage.apply</c>。</summary>
     /// <returns><c>true</c> ＝处理端已执行（含免疫归零）；<c>false</c> ＝不支持的目标/被中断。</returns>

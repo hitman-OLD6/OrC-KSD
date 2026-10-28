@@ -1,6 +1,8 @@
-﻿using Orc.Cards;
+using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Cards;
+using Orc.Game.Model;
 using Orc.Game.Actions;
 
 namespace Orc.Foundation.Actions;
@@ -12,6 +14,11 @@ namespace Orc.Foundation.Actions;
 /// 结果语义：<c>Interrupted</c>（链级中断）＝<see cref="ActionOutcomeKind.Skipped"/> +
 /// <see cref="ActionFailureKind.Cancelled"/>（牌留手、不扣费）；其余（含被反制 <c>Stop</c>）＝
 /// <see cref="ActionOutcomeKind.Applied"/>——指令照常扣费/离手，只是效果不触发。
+/// </para>
+/// <para>
+/// **U3**：两端升为引擎成员（<c>engine#order.cast</c>／<c>engine#order.finalize</c>）。实例仍由内核唯一 flow 持有
+/// （阶段 1／阶段 2 两个触发器），本类只负责**自报地址＋端清单**供目录装配——与其它 8 个动作同一形态，
+/// 因此动作目录不再有"两端无地址"的特例。
 /// </para>
 /// </summary>
 public sealed class OrderAction : IOrderAction
@@ -25,7 +32,24 @@ public sealed class OrderAction : IOrderAction
     {
         ArgumentNullException.ThrowIfNull(flow);
         _flow = flow;
+
+        Cast = MemberAddress.Create(AddressScope.Engine, EngineProcesses.OrderCast);
+        Finalize = MemberAddress.Create(AddressScope.Engine, EngineProcesses.OrderFinalize);
+        Ends = new[]
+        {
+            new ActionTriggerEnd("触发端", Cast),
+            new ActionTriggerEnd(ActionTriggerEnd.HandleRole, Finalize),
+        };
     }
+
+    /// <inheritdoc />
+    public MemberAddress Cast { get; }
+
+    /// <inheritdoc />
+    public MemberAddress Finalize { get; }
+
+    /// <inheritdoc />
+    public IReadOnlyList<ActionTriggerEnd> Ends { get; }
 
     /// <inheritdoc />
     public async Task<ActionResult> ExecuteAsync(
@@ -33,13 +57,15 @@ public sealed class OrderAction : IOrderAction
     {
         ArgumentNullException.ThrowIfNull(card);
 
-        // 登记序、全部主动效果（禁止 FirstOrDefault——多主动效果必须全跑）。
-        var effects = card.Effects.OfType<ICastAction>().ToArray();
-
+        // v4 收口的施放语义：主动效果**不再是"指令实例集"**——它就是卡实体上的组件边
+        // （施放结算在 <c>engine#order.cast</c> 的宣告点发 <c>card.played</c>，订阅该信号的组件边随之执行；
+        // 卡上没有组件＝没有主动效果，这是卡的声明问题，不是流程的缺口）。
+        // 因此这里显式传"无旧面指令"（旧 `CardCastActions.Of` 空壳已删除）：两阶段流程
+        // （反制检查 → 宣告 → 结算 → 收尾）照常走完，结算段只剩声明序上的组件/外来边。
         var result = new ActionTargetResult(card.Ref, card, amount);
-        var stream = await _flow.ExecuteAsync(card, effects, target, amount, ct).ConfigureAwait(false);
+        var interrupted = await _flow.ExecuteAsync(card, (ICastAction?)null, target, amount, ct).ConfigureAwait(false);
 
-        if (stream.Interrupted)
+        if (interrupted)
         {
             result.MarkSkipped(ActionFailureKind.Cancelled); // 牌留手、不扣费（Interrupt 两阶段全停）
         }

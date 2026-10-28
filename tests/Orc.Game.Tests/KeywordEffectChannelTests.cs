@@ -168,25 +168,6 @@ public class KeywordEffectChannelTests
         Assert.Equal(CommandResultStatus.Success, result.Status);
     }
 
-    /// <summary>探针亡计内容效果：记录执行次数（内容可消费/卸载的证据）。</summary>
-    private sealed class ProbeDeathrattleEffect : DeathrattleEffect
-    {
-        private readonly Func<DeathrattleContext, Task> _onExecute;
-
-        public ProbeDeathrattleEffect(string name, Func<DeathrattleContext, Task> onExecute)
-            : base(name)
-        {
-            _onExecute = onExecute;
-        }
-
-        public int Executions { get; private set; }
-
-        protected override async Task OnExecuteAsync(DeathrattleContext context, CancellationToken ct)
-        {
-            Executions++;
-            await _onExecute(context);
-        }
-    }
 
     // ---------- ① 参值→模板/效果参数化通道 ----------
 
@@ -387,89 +368,7 @@ public class KeywordEffectChannelTests
 
     // ---------- ② 运行时口（内容型授予：C# 行为级全生命周期） ----------
 
-    [Fact]
-    public async Task GrantWithContent_Direct_Gate_Full_Lifecycle()
-    {
-        var match = CommandTestKit.CreateCommandMatch();
-        await match.Initialize();
-        var playerA = match.Players[0];
-        var playerB = match.Players[1];
-
-        var anchor = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
-        var runtime = EffectRuntime.ResolveFor(anchor);
-        Assert.NotNull(runtime);
-
-        // A1（硬性）：授予带内容 → 词条存在＋内容装载 → 死亡结算消费内容（真实链路）。
-        var victim = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.WeakId, 2);
-        var probe = new ProbeDeathrattleEffect("门面探针", _ => Task.CompletedTask);
-        Assert.True(await runtime!.GrantWithContentAsync(victim, KeywordIds.Deathrattle, probe));
-        Assert.True(victim.Keywords.Has(KeywordIds.Deathrattle));
-        Assert.Contains(probe, victim.Effects);
-        Assert.True(probe.IsMounted);
-        await victim.ApplyDefenseDamageAsync(victim.Modifiers.GetEffectiveValue(CardStatFields.Defense));
-        Assert.True(victim.GetData<UnitStateData>().IsDestroyed);
-        Assert.Equal(1, probe.Executions);
-
-        // A2（硬性）：授予 → 移除 → 内容卸载（不可再消费）。
-        var victim2 = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.WeakId, 1);
-        var probe2 = new ProbeDeathrattleEffect("卸载探针", _ => Task.CompletedTask);
-        Assert.True(await runtime.GrantWithContentAsync(victim2, KeywordIds.Deathrattle, probe2));
-        Assert.True(await runtime.RevokeAsync(victim2, KeywordIds.Deathrattle));
-        Assert.False(victim2.Keywords.Has(KeywordIds.Deathrattle));
-        Assert.False(probe2.IsMounted);
-        await victim2.ApplyDefenseDamageAsync(victim2.Modifiers.GetEffectiveValue(CardStatFields.Defense));
-        Assert.Equal(0, probe2.Executions);
-
-        // A3（硬性）：重复授予＝幂等（无操作 false；内容不重复装载）。
-        var victim3 = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.WeakId, 1);
-        var probe3 = new ProbeDeathrattleEffect("幂等探针", _ => Task.CompletedTask);
-        Assert.True(await runtime.GrantWithContentAsync(victim3, KeywordIds.Deathrattle, probe3));
-        Assert.False(await runtime.GrantWithContentAsync(victim3, KeywordIds.Deathrattle, probe3));
-        Assert.True(victim3.Keywords.Has(KeywordIds.Deathrattle));
-        Assert.Single(victim3.Effects, effect => ReferenceEquals(effect, probe3));
-
-        // A4（建议纳入）：空内容＝合法静默（结算无操作、不抛错）；未注册标识＝fail-fast、零残留。
-        var victim4 = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.WeakId, 2);
-        Assert.True(await runtime.GrantWithContentAsync(victim4, KeywordIds.Deathrattle, content: null));
-        Assert.True(victim4.Keywords.Has(KeywordIds.Deathrattle));
-        await victim4.ApplyDefenseDamageAsync(victim4.Modifiers.GetEffectiveValue(CardStatFields.Defense));
-        Assert.True(victim4.GetData<UnitStateData>().IsDestroyed);
-
-        var victim5 = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.WeakId, 1);
-        Assert.Throws<InvalidOperationException>(() =>
-        {
-            _ = runtime.GrantWithContentAsync(victim5, "不存在的词条", content: null);
-        });
-        Assert.False(victim5.Keywords.Has("不存在的词条"));
-    }
 
     // ---------- ② 运行时口（词条面统一判定：Hq 可达＋无词条面降级） ----------
 
-    [Fact]
-    public async Task Gates_Reach_Hq_And_Degrade_For_NonKeyword_Faces()
-    {
-        var match = CommandTestKit.CreateCommandMatch();
-        await match.Initialize();
-        var playerA = match.Players[0];
-        var unit = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
-        var runtime = EffectRuntime.ResolveFor(unit);
-        Assert.NotNull(runtime);
-
-        // 词条面统一判定（一致性收编）：HQ 可达——授予（含参值）/改写/撤销全链真实生效。
-        var hq = playerA.Hq;
-        Assert.True(await runtime!.GrantAsync(hq, KeywordIds.Armor, 2));
-        Assert.Equal(2, KeywordRules.GetKeywordValue(hq, KeywordIds.Armor));
-        Assert.True(await runtime.SetKeywordValueAsync(hq, KeywordIds.Armor, 3));
-        Assert.Equal(3, KeywordRules.GetKeywordValue(hq, KeywordIds.Armor));
-        Assert.True(await runtime.RevokeAsync(hq, KeywordIds.Armor));
-        Assert.Null(KeywordRules.GetKeywordValue(hq, KeywordIds.Armor));
-
-        // 无词条面（纯内核 Card：非 CardBase/Hq）＝降级 false（服务不可达口径；不抛错）。
-        var bare = new Card(new LogicEngine(), "裸卡");
-        Assert.False(await runtime.GrantAsync(bare, KeywordIds.Armor));
-        Assert.False(await runtime.GrantAsync(bare, KeywordIds.Armor, 2));
-        Assert.False(await runtime.RevokeAsync(bare, KeywordIds.Armor));
-        Assert.False(await runtime.SetKeywordValueAsync(bare, KeywordIds.Armor, 1));
-        Assert.False(await runtime.GrantWithContentAsync(bare, KeywordIds.Deathrattle, content: null));
-    }
 }

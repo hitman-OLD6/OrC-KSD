@@ -118,7 +118,8 @@ public static class PackageRegistrar
             declarations,
             scan.EffectsDirectory,
             PackageScanner.ReadKeywords(scan.RootDirectory),
-            texts);
+            texts,
+            scan.ComponentsDirectory);
 
         return new PackageRegistrationResult(manifest, content, registered, diagnostics);
     }
@@ -547,6 +548,14 @@ public static class PackageRegistrar
                 continue;
             }
 
+            // 卡数据体已显式声明效果（`effects` 组件的 prefabs/inline）＝作者意图优先：
+            // 文本模板不再叠加。叠加会让同一张卡同时持两个效果实例，一次打出把同一段效果结算两次
+            // （card.played 上有两个 handler，各自完整跑一遍）。
+            if (declarations.Exists(item => string.Equals(item.CardId, entry.Id, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
             var cardType = entry.Definition.Category == CardCategory.Unit ? "unit" : "order";
             var drafts = CardTextEffectCompiler.Parse(text, cardType)
                 ?? throw new InvalidDataException(
@@ -558,15 +567,7 @@ public static class PackageRegistrar
 
             var snapshot = CardTextEffectCompiler.Compile(cardType, drafts, "pack." + manifest.Id + "." + rawId);
             inlinePrefabs.Add(snapshot);
-            var existing = declarations.FindIndex(d => string.Equals(d.CardId, entry.Id, StringComparison.Ordinal));
-            if (existing >= 0)
-            {
-                declarations[existing] = (entry.Id, [.. declarations[existing].PrefabIds, snapshot.Root.Id]);
-            }
-            else
-            {
-                declarations.Add((entry.Id, new[] { snapshot.Root.Id }));
-            }
+            declarations.Add((entry.Id, new[] { snapshot.Root.Id }));
         }
     }
 

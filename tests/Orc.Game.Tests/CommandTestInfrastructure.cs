@@ -112,6 +112,20 @@ internal static class CommandTestKit
         new CardDefinitionEntry(FuryTankId, new CardDefinition("奋击坦克", 1, 1, 2, 5, unitTypes: new[] { UnitType.Tank }, keywords: new[] { new KeywordDeclaration(KeywordIds.Fury) }, faction: Faction.Germany, rarity: Rarity.Standard)),
     };
 
+    /// <summary>
+    /// 自动应答的目标选择桥接（测试扮演前端）：每个待决请求立即选第一个允许项。
+    /// <para>
+    /// S9／R2 之后的必要夹具：<c>sel=one／any</c> 属"外部裁定"，必须经提交通道（引擎永不代选）；
+    /// 需要该选择器的既有用例以本桥接显式充当"前端"，不再依赖旧的"取首个"隐式兜底。
+    /// </para>
+    /// </summary>
+    public static MockTargeterBridge AutoPickBridge()
+    {
+        var bridge = new MockTargeterBridge();
+        bridge.InteractionScript = TargeterTestKit.AutoCompleteWithFirstAllowed();
+        return bridge;
+    }
+
     /// <summary>创建指挥测试对局（双方步兵 x10 卡组＋定制定义集；可选目标选择桥接）。
     /// W2c X2 加性：可选效果注册表（卡牌加载时效果装载的装配源）与追加定义集（测试专用卡；
     /// 与既有 id 重复的条目将导致初始化注册期 fail-fast——测试自行避免）。
@@ -121,14 +135,15 @@ internal static class CommandTestKit
         int seed = 42,
         CardEffectRegistry? effectRegistry = null,
         IEnumerable<CardDefinitionEntry>? extraDefinitions = null,
-        bool skipMulligan = true)
+        bool skipMulligan = true,
+        bool allowRandomTargeting = false)
         => new(
             new CardList(Enumerable.Repeat(InfantryId, 10)),
             new CardList(Enumerable.Repeat(InfantryId, 10)),
             CreateDefinitions().Concat(extraDefinitions ?? Enumerable.Empty<CardDefinitionEntry>()),
             seed,
             firstPlayerIndex: null,
-            options: new MatchOptions { SkipMulligan = skipMulligan },
+            options: new MatchOptions { SkipMulligan = skipMulligan, AllowRandomTargeting = allowRandomTargeting },
             targeterBridge: bridge,
             effectRegistry: effectRegistry,
             packageActivator: TestHost.Activator);

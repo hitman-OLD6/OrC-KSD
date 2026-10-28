@@ -185,32 +185,6 @@ public class EntryPointBeginTests
 
     // ---------- ③ 单位预打出视图携带槽位；三类槽位工厂 ----------
 
-    [Fact]
-    public async Task BeginUnitPrePlayAsync_View_Carries_Declared_Selector_Slots()
-    {
-        var bridge = new MockTargeterBridge();
-        var match = PlayChainTestKit.CreatePlayMatch(bridge);
-        await match.Initialize();
-        var player = match.Players[0];
-        var unit = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(match, player);
-        bridge.CollectScript = PlayChainTestKit.AllSlotsCandidatesScript(match);
-        IReadOnlyList<Selector>? observedSlots = null;
-        unit.PrePlayTrigger.Register("观测槽位声明", (view, ctx, ct) =>
-        {
-            observedSlots = view.SelectorSlots;
-            return Task.CompletedTask;
-        });
-
-        var task = match.PlayManager.BeginUnitPrePlayAsync(unit);
-        var (description, responder) = await bridge.WaitForNextBeginAsync();
-        Assert.True(responder.Complete(
-            description.RequestId,
-            TargeterTestKit.Selection(description.Slots[0].Name, description.AllowedTargets[0])));
-        var result = await task;
-
-        Assert.Equal(PlayResultStatus.Success, result.Status);
-        Assert.Equal(SelectorNames.UnitHandDrag, Assert.Single(observedSlots!).Name); // 单位＝手牌拖出形态
-    }
 
     [Fact]
     public async Task Selector_Templates_Produce_Declared_Names()

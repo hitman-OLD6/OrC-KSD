@@ -70,7 +70,9 @@ public class PlayChainUpdateTests
     {
         var match = PlayChainTestKit.CreatePlayMatch();
         await match.Initialize();
-        var unit = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId);
+        // 夹具（v4）：加入经卡实体成员 `host#join`，卡须经正式装配路径加载（未加载卡＝fail-fast）。
+        var unit = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(
+            match, match.Players[0], PlayChainTestKit.UnitCheapId, toHand: false);
         var front = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
         using var recorder = new UpdateRecorder(match.Engine);
 

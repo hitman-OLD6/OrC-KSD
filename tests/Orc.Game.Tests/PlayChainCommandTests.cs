@@ -2,7 +2,9 @@ using Orc.Cards;
 using Orc.Core;
 using Orc.Game;
 using Orc.Game.Cards;
+using Orc.Game.Model;
 using Orc.Game.Targeting;
+using Orc.Game.Triggers;
 using Xunit;
 
 namespace Orc.Game.Tests;
@@ -10,7 +12,8 @@ namespace Orc.Game.Tests;
 /// <summary>
 /// 2B 验收⑤②（指令；P4 指令归一后）：默认空效果集照常打出（card.played/扣费/离手）、
 /// 预打出捕获箱（单引用/列表承载演练）、targeter 形态演练（预打出段内执行产出引用并可被消费）、
-/// 主动效果集（登记序、card.played 先于效果、收尾在效果之后、异常隔离）、
+/// 主动效果集（登记序、card.played 先于效果、收尾在效果之后）、预打出 handler 异常＝成员边 fail-fast
+/// （v4 口径；旧"隔离＋继续"随旧触发器退场，见对应用例注释）、
 /// 预打出取消（截断打出）、预打出拒绝（点数不足；handler 不执行）、复验失败（点数漂移；零副作用）。
 /// </summary>
 public class PlayChainCommandTests
@@ -33,42 +36,6 @@ public class PlayChainCommandTests
         Assert.DoesNotContain(command, player.Hand);
     }
 
-    [Fact]
-    public async Task Command_Active_Effects_Run_Between_Played_And_Finalize()
-    {
-        var match = PlayChainTestKit.CreatePlayMatch();
-        await match.Initialize();
-        var player = match.Players[0];
-        var command = await PlayChainTestKit.InstantiateLoadedAsync<OrderCard>(match, player, PlayChainTestKit.CommandCheapId);
-        var targetEntity = new Entity("被捕获引用");
-        using var recorder = new UpdateRecorder(match.Engine);
-        var playedSeenInEffect = false;
-        int? pointsAtEffect = null;
-        Card? sourceSeen = null;
-
-        command.AddPrePlayHandler("捕获单引用", (view, ctx, ct) =>
-        {
-            view.CaptureBox!.Capture(targetEntity.Ref);
-            Assert.Same(targetEntity.Ref, Assert.IsType<Ref<Entity>>(view.CaptureBox.Result));
-            return Task.CompletedTask;
-        });
-        command.AddEffect(new TestCastEffect("消费捕获", (view, ctx, ct) =>
-        {
-            sourceSeen = view.Source;
-            playedSeenInEffect = recorder.Types.Contains(GameUpdates.CardPlayed);
-            pointsAtEffect = player.Points;
-            return Task.CompletedTask;
-        }));
-
-        var result = await match.PlayManager.PlayOrderAsync(command);
-
-        Assert.Equal(PlayResultStatus.Success, result.Status);
-        Assert.Same(command, sourceSeen); // OrderFlow 向主动效果传 Source
-        // 固定顺序：card.played（Resolve/0）先于主动效果（Resolve/100）；收尾扣费（Finalize/100）在效果之后。
-        Assert.True(playedSeenInEffect);
-        Assert.Equal(1, pointsAtEffect);
-        Assert.Equal(0, player.Points);
-    }
 
     [Fact]
     public async Task Command_Capture_Box_Accumulates_Multiple_Values_As_List()
@@ -135,53 +102,10 @@ public class PlayChainCommandTests
         Assert.Same(payload.Ref, consumed);
     }
 
-    [Fact]
-    public async Task Command_Active_Effects_Trigger_In_Registration_Order()
-    {
-        var match = PlayChainTestKit.CreatePlayMatch();
-        await match.Initialize();
-        var player = match.Players[0];
-        var command = await PlayChainTestKit.InstantiateLoadedAsync<OrderCard>(match, player, PlayChainTestKit.CommandCheapId);
-        var order = new List<string>();
 
-        command.AddEffect(new TestCastEffect("A", (view, ctx, ct) => { order.Add("A"); return Task.CompletedTask; }));
-        command.AddEffect(new TestCastEffect("B", (view, ctx, ct) => { order.Add("B"); return Task.CompletedTask; }));
-        command.AddEffect(new TestCastEffect("C", (view, ctx, ct) => { order.Add("C"); return Task.CompletedTask; }));
-
-        var result = await match.PlayManager.PlayOrderAsync(command);
-
-        // 多主动效果按登记序**全部**执行（禁 FirstOrDefault）。
-        Assert.Equal(PlayResultStatus.Success, result.Status);
-        Assert.Equal(new[] { "A", "B", "C" }, order);
-    }
 
     [Fact]
-    public async Task Command_Active_Effect_Exception_Isolated_And_Play_Completes()
-    {
-        var match = PlayChainTestKit.CreatePlayMatch();
-        await match.Initialize();
-        var player = match.Players[0];
-        var command = await PlayChainTestKit.InstantiateLoadedAsync<OrderCard>(match, player, PlayChainTestKit.CommandCheapId);
-        var order = new List<string>();
-
-        command.AddEffect(new TestCastEffect("A", (view, ctx, ct) => { order.Add("A"); return Task.CompletedTask; }));
-        command.AddEffect(new TestCastEffect("B", (view, ctx, ct) => throw new InvalidOperationException("handler 爆炸")));
-        command.AddEffect(new TestCastEffect("C", (view, ctx, ct) => { order.Add("C"); return Task.CompletedTask; }));
-
-        var result = await match.PlayManager.PlayOrderAsync(command);
-
-        // 异常＝沿用引擎异常隔离（记录并继续）：不阻断后续效果与收尾；打出照常完成。
-        Assert.Equal(PlayResultStatus.Success, result.Status);
-        Assert.Equal(new[] { "A", "C" }, order);
-        Assert.Equal(0, player.Points);
-        Assert.DoesNotContain(command, player.Hand);
-        Assert.Contains(
-            match.Engine.RootStream.Entries,
-            entry => entry.Source.Contains("B") && entry.Keywords.Contains("exception:InvalidOperationException"));
-    }
-
-    [Fact]
-    public async Task Command_PrePlay_Handler_Exception_Isolated_And_Play_Continues()
+    public async Task Command_PrePlay_Handler_Exception_Propagates_FailFast_And_Play_Does_Not_Happen()
     {
         var match = PlayChainTestKit.CreatePlayMatch();
         await match.Initialize();
@@ -198,17 +122,21 @@ public class PlayChainCommandTests
             observed = view.CaptureBox.Result;
             return Task.CompletedTask;
         });
+        using var recorder = new UpdateRecorder(match.Engine);
 
-        var result = await match.PlayManager.PlayOrderAsync(command);
-
-        // 预打出 handler 异常＝沿用引擎异常隔离（记录并继续）：不阻断登记序后续 handler 与打出段。
-        Assert.Equal(PlayResultStatus.Success, result.Status);
-        Assert.Equal(new[] { "甲", "丙" }, ran);
-        Assert.Equal("丙的捕获", observed);
-        Assert.Equal(0, player.Points);
-        Assert.Contains(
-            match.Engine.RootStream.Entries,
-            entry => entry.Source.Contains("预打出触发器") && entry.Keywords.Contains("exception:InvalidOperationException"));
+        // 改写（**断言对象随旧机制消失**）：原用例（`..._Isolated_And_Play_Continues`）断言"预打出 handler 抛错被引擎
+        // 隔离（总流留下 exception:<类型>、源＝预打出触发器），登记序后续 handler 与打出段照常继续"——那是旧触发器的
+        // "订阅者隔离＋继续"口径。v4 里预打出 handler 是 `host#pre-play` 的**成员边**，边异常按既定 fail-fast 口径
+        // 原样上抛（旧总线隔离口径随 b5 退役、新路径不复制它）。
+        // v4 等价观测面：异常上抛到调用方 ＋ 其后边不执行 ＋ 打出段不发生（零副作用——不扣费、不离手、不发更新）。
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => match.PlayManager.PlayOrderAsync(command));
+        Assert.Equal("预打出 handler 爆炸", thrown.Message);
+        Assert.Equal(new[] { "甲" }, ran);
+        Assert.Null(observed);
+        Assert.Empty(recorder.Updates);
+        Assert.Equal(1, player.Points);
+        Assert.Contains(command, player.Hand);
     }
 
     [Fact]
@@ -298,34 +226,19 @@ public class PlayChainCommandTests
             recorder.Types);
         Assert.Equal(0, player.Points);
         Assert.Contains(command, player.Hand);
-        Assert.Contains(
-            match.Engine.RootStream.Entries,
-            entry => entry.Keywords.Contains("validation:rejected"));
-    }
 
-    /// <summary>主动效果施放视图（P4：OrderFlow 只传 Source/Target/Amount 三键）。</summary>
-    [ContextView]
-    public class TestCastView
-    {
-        [Optional]
-        [Read]
-        public virtual Card? Source { get; set; }
-
-        [Optional]
-        [Read]
-        public virtual Card? Target { get; set; }
-
-        [Optional]
-        [Read]
-        public virtual int Amount { get; set; }
-    }
-
-    /// <summary>测试主动效果（<see cref="ICastAction"/> 由 <see cref="ActiveEffect{TView}"/> 承载）。</summary>
-    private sealed class TestCastEffect : ActiveEffect<TestCastView>
-    {
-        public TestCastEffect(string name, Func<TestCastView, Context, CancellationToken, Task> handler)
-            : base(name, castEvents: new[] { new TriggerEvent<TestCastView>("施放", handler) })
+        // 留痕（**v4 等价观测面**）：原断言＝旧触发链把 `validation:rejected` 写进引擎总流；该关键词的唯一写入方
+        // （旧触发器/验证包装）随 v4 退场。v4 的对应面＝守卫边把拒绝写进**成员执行的数据面**
+        // （`MemberGuardKeys.Rejected`／`Reason`）并 Stop 本级，入口据此映射出上面的 PlayVerificationRejected。
+        // 此处按入口同一路径再执行一次 `host#play`（纯验证成员：守卫拒绝即停、零副作用），直接读该标记。
+        var probe = new Context(new Dictionary<string, object?>
         {
-        }
+            [GameUpdates.PayloadCard] = command,
+            [GameUpdates.PayloadPlayer] = player,
+        });
+        await command.InvokeMemberAsync(CardProcesses.Play, probe);
+        Assert.True(probe.TryGet(MemberGuardKeys.Rejected, out var guardRejected) && guardRejected is true);
     }
+
+
 }

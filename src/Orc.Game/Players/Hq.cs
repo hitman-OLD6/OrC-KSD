@@ -1,7 +1,9 @@
 using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Board;
 using Orc.Game.Cards;
+using Orc.Game.Model;
 
 namespace Orc.Game.Players;
 
@@ -47,40 +49,40 @@ public sealed class Hq : Card
         Keywords = new KeywordManager(this, engine);
 
         // 通用接入点：指向触发器（与单位卡同一承载；HQ 不继承 CardBase，故自带具名触发面）。
-        TargetingTrigger = new Trigger<TargetingView>(TargetingRules.TriggerName);
-        TargetingTrigger.Register("指向", HandleTargetingAsync, seams: [TargetingRules.SeamName], registrant: this);
-        _namedTriggers.Register(TargetingRules.TriggerName, TargetingTrigger, typeof(TargetingView));
+        // S8（批次 3）：成员表由类型预制体 `card.hq` 声明——本类不自建执行体、不再手写显示名登记（批次 7 起只持成员地址）。
+        MemberTable = Orc.Game.Model.CardTypeBinder.Bind(
+            this,
+            HostKind.Hq,
+            engine,
+            definition: null,
+            validationJudicatorResolver: null);
+        TargetingTrigger = MemberTable.AddressOf(CardProcesses.Targeting);
     }
 
-    private readonly NamedTriggerTable _namedTriggers = new();
+    /// <summary>HQ 的成员表（S8：由类型预制体 <c>card.hq</c> 声明；与卡牌类同一绑定面）。</summary>
+    public CardMemberTable MemberTable { get; }
 
-    /// <summary>指向触发器（「某方指向本总部」的最终确定面；默认 handler 声明具名动作缝 <see cref="TargetingRules.SeamName"/>）。</summary>
-    public Trigger<TargetingView> TargetingTrigger { get; }
+    /// <summary>指向成员地址（<c>host#targeting</c>；「某方指向本总部」的最终确定面）。</summary>
+    public MemberAddress TargetingTrigger { get; }
 
-    /// <summary>按名查找具名触发器（与 <see cref="CardBase"/> 同一读面；HQ 词条效果注入通道本版不接）。</summary>
-    public bool TryFindNamedTrigger(
-        string name,
-        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out object? trigger,
-        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Type? viewType)
-        => _namedTriggers.TryFind(name, out trigger, out viewType);
-
-    /// <summary>指向默认 handler：只暴露具名动作缝（无业务逻辑）。</summary>
-    private static Task HandleTargetingAsync(TargetingView view, Context ctx, CancellationToken ct)
-        => ctx.SeamAsync(TargetingRules.SeamName, ct);
-
-    /// <summary>发动指向通知（由 <see cref="TargetingRules.NotifyAsync"/> 调用）。</summary>
+    /// <summary>
+    /// 发动指向通知（由 <see cref="TargetingRules.NotifyAsync"/> 调用）。
+    /// <para>
+    /// **HQ 没有编排实体**（它是玩家侧的薄容器，不参与卡牌装载链），因此没有成员边可跑；
+    /// 旧实现也只在这里跑一条"只暴露动作缝、无业务逻辑"的 handler，而该缝的包装器由效果注入挂载——
+    /// 效果家族已删除后缝上恒无包装器。本方法因此只保留**调用点语义**（谁被指向、什么来源），
+    /// 不再伪装成一次成员执行。若将来 HQ 需要被订阅，给它建实体即可（地址已在
+    /// <see cref="TargetingTrigger"/> 上就位）。
+    /// </para>
+    /// </summary>
     internal Task InvokeTargetingTriggerAsync(Card? source, string kind, Card? triggerCard, CancellationToken ct)
-        => TargetingTrigger.InvokeAsync(
-            _damageEngine,
-            new Dictionary<string, object?>
-            {
-                [nameof(TargetingView.Source)] = source,
-                [nameof(TargetingView.Target)] = this,
-                [nameof(TargetingView.Kind)] = kind,
-                [nameof(TargetingView.TriggerCard)] = triggerCard,
-                [nameof(TargetingView.Host)] = this,
-            },
-            ct);
+    {
+        _ = source;
+        _ = kind;
+        _ = triggerCard;
+        _ = ct;
+        return Task.CompletedTask;
+    }
 
     /// <summary>归属玩家（HQ 随 Player 创建——恒非空）。</summary>
     public Player Owner { get; }

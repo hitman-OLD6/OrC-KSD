@@ -123,11 +123,6 @@ public static class JsonValueWriter
             case IRefInfo reference:
                 WriteReference(writer, reference, visibility, viewer, hideEntities);
                 return;
-            case Effect effect:
-                writer.WriteStartObject();
-                writer.WriteString("$effect", effect.Name);
-                writer.WriteEndObject();
-                return;
             case IReadOnlyDictionary<string, object?> readOnlyDictionary:
                 WriteDictionary(writer, readOnlyDictionary, depth, visibility, viewer, hideEntities);
                 return;

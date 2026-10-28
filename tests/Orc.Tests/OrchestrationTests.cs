@@ -4,144 +4,95 @@ using Xunit;
 namespace Orc.Tests;
 
 /// <summary>
-/// S-C3 编排管理器验收：登记（自动/显式）、反向依赖、种类聚合、声明期可达链与图缺口。
+/// S-C3 编排管理器验收（v4 形态）：节点＝带边的**成员**（不再登记触发器实例），
+/// 实例＝该成员上的外来边，下游＝边声明的目标；反向依赖＝<c>AuditGraph.EdgesInto</c>。
 /// </summary>
 public class OrchestrationTests
 {
-    private static Trigger<CounterView> Make(string stableKey, params string[] downstream)
+    private static LogicEngine Subscribed(string signal, params string[] names)
     {
-        var trigger = new Trigger<CounterView>(stableKey, stableKey: stableKey);
-        trigger.Register("事件", (v, c, ct) => Task.CompletedTask, downstream: downstream);
-        return trigger;
+        var engine = new LogicEngine();
+        foreach (var name in names)
+        {
+            SignalTestHelpers.Subscribe(engine, signal, name, new List<string>());
+        }
+
+        return engine;
     }
 
     [Fact]
-    public void 总线挂载_自动登记进编排管理器()
+    public void 订阅投影为成员节点()
     {
-        var engine = new LogicEngine();
-        var trigger = BusTestHelpers.RecordingPassive("自动", new[] { "h.auto" }, new List<string>());
-
-        engine.Bus.Mount(trigger);
+        var engine = Subscribed(Updates.CardPlaced, "订阅者");
 
         Assert.Equal(1, engine.Orchestration.Count);
         var node = engine.Orchestration.BuildAuditChain().Nodes.Single();
-        Assert.Equal("自动", node.DisplayName);
-        Assert.Equal("bus-mount", node.Instances.Single().Origin);
+        Assert.Equal("engine#card.placed", node.DisplayName); // 展示名＝成员地址（不再有触发器显示名）
+        Assert.Equal("passive", node.Kind);
         Assert.True(node.Instances.Single().Mounted);
+        Assert.Equal("Explicit", node.Instances.Single().Origin);
+        Assert.Equal("订阅者", node.Instances.Single().Host);
     }
 
     [Fact]
-    public void 显式登记_主动触发器_未装载标记()
+    public void 审查链_同一成员上的多条外来边聚合为单节点()
     {
-        var engine = new LogicEngine();
-        var active = Make("unit.play");
-
-        engine.Orchestration.Register(active, host: "卡:测试卡");
-
-        var node = engine.Orchestration.BuildAuditChain().Nodes.Single();
-        Assert.Equal(TriggerKind.Active, node.Kind);
-        Assert.False(node.Instances.Single().Mounted);
-        Assert.Equal("卡:测试卡", node.Instances.Single().Host);
-    }
-
-    [Fact]
-    public void 重复登记同一实例_幂等()
-    {
-        var engine = new LogicEngine();
-        var trigger = Make("k");
-
-        engine.Orchestration.Register(trigger);
-        engine.Orchestration.Register(trigger);
-
-        Assert.Equal(1, engine.Orchestration.Count);
-    }
-
-    [Fact]
-    public void 反向依赖_按hook查触发器()
-    {
-        var engine = new LogicEngine();
-        var a = BusTestHelpers.RecordingPassive("甲", new[] { "shared.hook" }, new List<string>());
-        var b = BusTestHelpers.RecordingPassive("乙", new[] { "shared.hook", "other.hook" }, new List<string>());
-        var c = BusTestHelpers.RecordingPassive("丙", new[] { "other.hook" }, new List<string>());
-
-        engine.Bus.Mount(a);
-        engine.Bus.Mount(b);
-        engine.Bus.Mount(c);
-
-        var subscribers = engine.Orchestration.TriggersWithHook("shared.hook");
-
-        Assert.Equal(new[] { "甲", "乙" }, subscribers.Select(t => t.DisplayName));
-
-        var otherHook = engine.Orchestration.TriggersWithHook("other.hook");
-        Assert.Equal(2, otherHook.Count);
-        Assert.Single(otherHook, t => t.DisplayName == "丙");
-    }
-
-    [Fact]
-    public void 审查链_同种类多实例聚合为单节点()
-    {
-        var engine = new LogicEngine();
-        var first = Make("unit.play");
-        var second = Make("unit.play");
-
-        engine.Orchestration.Register(first, host: "卡:甲");
-        engine.Orchestration.Register(second, host: "卡:乙");
+        var engine = Subscribed(Updates.CardPlaced, "甲", "乙");
 
         var chain = engine.Orchestration.BuildAuditChain();
 
         var node = Assert.Single(chain.Nodes);
         Assert.Equal(2, node.Instances.Count);
-        Assert.Equal(new[] { "卡:甲", "卡:乙" }, node.Instances.Select(i => i.Host));
+        Assert.Equal(new[] { "甲", "乙" }, node.Instances.Select(i => i.Host));
+        Assert.Equal(new[] { "甲", "乙" }, node.Events.Select(e => e.Name)); // 步骤＝边在成员内的执行序
+        Assert.Equal(new[] { 1, 2 }, node.Events.Select(e => e.Seq));
     }
 
     [Fact]
-    public void 审查链_可达链_沿下游BFS_排除无关节点()
+    public void 反向依赖_按信号名查边()
     {
         var engine = new LogicEngine();
-        engine.Orchestration.Register(Make("root", "mid"));
-        engine.Orchestration.Register(Make("mid", "leaf"));
-        engine.Orchestration.Register(Make("leaf"));
-        engine.Orchestration.Register(Make("orphan"));
+        SignalTestHelpers.Subscribe(engine, "shared.hook", "甲", new List<string>());
+        SignalTestHelpers.Subscribe(engine, new[] { "shared.hook", "other.hook" }, "乙", new List<string>());
+        SignalTestHelpers.Subscribe(engine, "other.hook", "丙", new List<string>());
 
-        var chain = engine.Orchestration.QueryChain(TriggerId.FromKey("root"));
+        var subscribers = engine.BuildAuditGraph().EdgesInto("shared.hook");
 
-        var keys = chain.Nodes.Select(n => n.StableKey).ToHashSet(StringComparer.Ordinal);
-        Assert.Equal(3, keys.Count);
-        Assert.Contains("root", keys);
-        Assert.Contains("mid", keys);
-        Assert.Contains("leaf", keys);
-        Assert.DoesNotContain("orphan", keys);
+        Assert.Equal(new[] { "甲", "乙" }, subscribers.Select(e => e.Member));
+        Assert.Equal(2, engine.BuildAuditGraph().EdgesInto("other.hook").Count);
+        Assert.Contains(engine.BuildAuditGraph().EdgesInto("other.hook"), e => e.Member == "丙");
     }
 
     [Fact]
-    public void 审查链_未登记的下游键_显式呈现为图缺口()
+    public void 审查链_可达链以成员为起点_未登记起点为空链()
     {
-        var engine = new LogicEngine();
-        engine.Orchestration.Register(Make("solo", "not.registered"));
+        var engine = Subscribed(Updates.CardPlaced, "订阅者");
 
-        var node = engine.Orchestration.QueryChain(TriggerId.FromKey("solo")).Nodes.Single();
-        var edge = Assert.Single(node.Downstream);
+        var reachable = engine.Orchestration.QueryChain(TriggerId.FromKey("engine#card.placed"));
+        Assert.Equal(new[] { "engine#card.placed" }, reachable.Nodes.Select(n => n.StableKey));
 
-        Assert.Equal("not.registered", edge.DownstreamKey);
-        Assert.Null(edge.ResolvedTriggerId);
+        var unregistered = engine.Orchestration.QueryChain(TriggerId.FromKey("engine#unknown"));
+        Assert.Empty(unregistered.Nodes);
     }
 
     [Fact]
-    public void 审查链_携带schema版本与hook读面()
+    public void 审查链_携带schema版本与挂载边图()
     {
-        var engine = new LogicEngine();
-        engine.Bus.Mount(BusTestHelpers.RecordingPassive("t", new[] { "h.chained" }, new List<string>()));
+        var engine = Subscribed(Updates.CardPlaced, "订阅者");
 
         var chain = engine.Orchestration.BuildAuditChain();
 
         Assert.Equal(OrchestrationManager.SchemaVersion, chain.SchemaVersion);
-        Assert.Contains(chain.Hooks, h => h.Hook == "h.chained");
+        Assert.Equal(2, chain.SchemaVersion); // S10／A-4：四集合替代 hooks 段
+        Assert.Contains(chain.Graph.EdgesInto(Updates.CardPlaced), e => e.Member == "订阅者");
     }
 
     [Fact]
-    public void 登记非触发器对象_拒绝()
+    public void 无边的引擎不产生节点()
     {
         var engine = new LogicEngine();
-        Assert.Throws<ArgumentException>(() => engine.Orchestration.Register(new object()));
+
+        Assert.Equal(0, engine.Orchestration.Count);
+        Assert.Empty(engine.Orchestration.BuildAuditChain().Nodes);
     }
 }

@@ -2,6 +2,7 @@ using Orc.Core;
 using Orc.Game;
 using Orc.Game.Board;
 using Orc.Game.Cards;
+using Orc.Game.Model;
 using Orc.Game.Targeting;
 using Orc.Game.Triggers;
 using Xunit;
@@ -51,7 +52,9 @@ public class PlayChainUnitTests
         // 占满支援线（容量＝5 元素：HQ ＋ 4 个单位）——满员＝无插入点（位置模型里「无空位」就是这条）。
         while (!line.IsFull)
         {
-            var filler = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId);
+            // 夹具（v4）：填位卡同样要经正式装配路径（加入经 `host#join` 成员，未加载卡＝fail-fast）。
+            var filler = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(
+                match, player, PlayChainTestKit.UnitCheapId, toHand: false);
             Assert.Equal(
                 PlayResultStatus.Success,
                 (await match.PlayManager.JoinUnitAsync(filler, line.GetInsertionGaps().At(1))).Status);
@@ -156,7 +159,9 @@ public class PlayChainUnitTests
         // 新位置模型下插入点没有「被占用」形态：占掉该位置＝阵线快照变化 ⇒ 先前取得的空隙失效；
         // 直接驱动时目标不可用＝拒绝（原语义），失败分类按入口既有契约（部署门户＝FormationGapUnavailable）。
         var occupied = front.GetInsertionGaps().At(0);
-        var occupant = (UnitCard)match.CardLibrary.Instantiate(PlayChainTestKit.UnitCheapId);
+        // 夹具（v4）：占位卡经正式装配路径（加入经 `host#join` 成员，未加载卡＝fail-fast）。
+        var occupant = await PlayChainTestKit.InstantiateLoadedAsync<UnitCard>(
+            match, player, PlayChainTestKit.UnitCheapId, toHand: false);
         Assert.Equal(PlayResultStatus.Success, (await match.PlayManager.JoinUnitAsync(occupant, occupied)).Status);
         Assert.False(occupied.IsCurrent);
 
@@ -222,9 +227,19 @@ public class PlayChainUnitTests
         Assert.Empty(recorder.Updates);
         Assert.Contains(second, player.Hand);
         Assert.Equal(0, player.Points);
-        Assert.Contains(
-            match.Engine.RootStream.Entries,
-            entry => entry.Keywords.Contains("validation:rejected"));
+
+        // 留痕（**v4 等价观测面**）：原断言＝旧触发链把 `validation:rejected` 写进引擎总流；
+        // 该关键词的唯一写入方（旧触发器/验证包装）随 v4 退场，总流里不再有这一条。
+        // v4 的对应面＝守卫边把拒绝写进**成员执行的数据面**（`MemberGuardKeys.Rejected`／`Reason`）并 Stop 本级，
+        // 入口据此映射出上面的 PlayVerificationRejected。此处按入口同一路径再执行一次 `host#play`
+        // （纯验证成员：守卫拒绝即停、零副作用），直接读该标记——与旧留痕同义（拒绝可辨识、可程序化确认）。
+        var probe = new Context(new Dictionary<string, object?>
+        {
+            [GameUpdates.PayloadCard] = second,
+            [GameUpdates.PayloadPlayer] = player,
+        });
+        await second.InvokeMemberAsync(CardProcesses.Play, probe);
+        Assert.True(probe.TryGet(MemberGuardKeys.Rejected, out var guardRejected) && guardRejected is true);
     }
 
     [Fact]
@@ -238,20 +253,4 @@ public class PlayChainUnitTests
             () => match.PlayManager.PlayUnitAsync(raw, match.Battlefield.FrontLine.GetInsertionGaps().At(0)));
     }
 
-    [Fact]
-    public void Unit_Card_Declares_Chain_Triggers_InPlace()
-    {
-        var unit = new UnitCard(new LogicEngine(), new CardDefinition("单位", 1, 1, 1, 1, faction: Faction.Germany, rarity: Rarity.Standard));
-
-        // 2B 链触发器声明位：部署/加入/单位化（对象在位、名称/类型可断言）。
-        Assert.NotNull(unit.DeployTrigger);
-        Assert.NotNull(unit.JoinTrigger);
-        Assert.NotNull(unit.UnitizeTrigger);
-        Assert.Equal("部署触发器", unit.DeployTrigger.Name);
-        Assert.Equal("加入触发器", unit.JoinTrigger.Name);
-        Assert.Equal("单位化触发器", unit.UnitizeTrigger.Name);
-        Assert.IsAssignableFrom<Trigger<CardTriggerView>>(unit.DeployTrigger);
-        Assert.IsAssignableFrom<Trigger<CardTriggerView>>(unit.JoinTrigger);
-        Assert.IsAssignableFrom<Trigger<CardTriggerView>>(unit.UnitizeTrigger);
-    }
 }

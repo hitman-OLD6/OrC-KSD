@@ -79,7 +79,7 @@ public class SnapshotJsonTests
         var a = new Card(engine, "甲"); // 未放置（含未放置卡—登记范围）
         var b = new Card(engine, "乙");
         b.AddData(new HealthData { Hp = 3 });
-        await S4TestHelpers.Place(engine, b);
+        await engine.Emit(Updates.CardPlaced, new Dictionary<string, object?> { [PayloadKeys.Card] = b });
         var c = new Card(engine, "丙");
         await engine.DestroyCard(c); // 一步式销毁 → 登记移除
 
@@ -159,6 +159,13 @@ public sealed class LinkData
     public int Mana { get; set; }
 
     public Card? Linked { get; set; }
+}
+
+/// <summary>样例数据组件（中性示范：任意作者类皆可作数据组件）。</summary>
+public sealed class SampleData
+{
+    /// <summary>样例数值。</summary>
+    public int Value { get; set; }
 }
 
 /// <summary>测试用数据组件（getter 异常降级：可读属性抛出 → {"$error": 类型名}）。</summary>

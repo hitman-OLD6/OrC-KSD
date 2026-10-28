@@ -382,11 +382,13 @@ public class CardValiditySuiteTests
             new[] { "valid", "warning", "invalid" },
             Enum.GetValues<CardLoadTier>().Select(CardLoadTierTokens.Token));
 
+        // 冻结词表（I10）：新增原因＝表尾追加（§34 加 scriptCompileFailed），既有值一字不动。
         Assert.Equal(
             new[]
             {
                 "missing", "wrongType", "outOfRange", "sourceMissing", "sidecarMissing",
                 "idMismatch", "versionInvalid", "loaderUnregistered", "conflict", "duplicateGuid",
+                "scriptCompileFailed",
             },
             Enum.GetValues<CardIssueReason>().Select(CardIssueReasonTokens.Token));
 

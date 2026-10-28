@@ -43,13 +43,6 @@ public static class GameHooksJson
             }
             writer.WriteEndArray();
 
-            writer.WriteStartArray("triggerLayers");
-            foreach (var layer in GameHooks.TriggerLayers)
-            {
-                writer.WriteStringValue(layer.ToString());
-            }
-            writer.WriteEndArray();
-
             writer.WriteStartArray("pending");
             foreach (var pending in GameHooks.PendingTriggers)
             {

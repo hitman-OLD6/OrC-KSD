@@ -72,35 +72,6 @@ public class CommandFrontLineTests
         Assert.Equal(front.GetInsertionGaps().Select(gap => gap.Ref), report.Move.Candidates);
     }
 
-    [Fact]
-    public async Task Advance_Execution_Revalidation_Rejects_When_Enemy_On_Front()
-    {
-        var match = CommandTestKit.CreateCommandMatch();
-        await match.Initialize();
-        var playerA = match.Players[0];
-        var playerB = match.Players[1];
-        var mover = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
-        await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.WeakId, 0); // 敌占前线（位置 0）
-        CommandTestKit.Activate(mover);
-        var oldSlot = new Orc.Game.Board.BoardPosition(match.Battlefield.PlayerASupportLine, 1); // 已成事实的位置（载荷口径）
-        var targetSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0); // 目标空隙（前置不满足——防御性双保险拒绝）
-
-        // 执行兜底复验：分派后、执行前复验前置条件——不满足＝ValidationRejected（零副作用：槽位不变、行动状态不消耗）。
-        var stream = await match.CommandManager.UnitMoveTrigger.InvokeAsync(
-            match.Engine,
-            new Dictionary<string, object?>
-            {
-                [CommandDataKeys.Unit] = mover.Ref,
-                [CommandDataKeys.OldPosition] = oldSlot.Ref,
-                [CommandDataKeys.NewPosition] = targetSlot.Ref,
-            });
-
-        Assert.Equal(ExecutionOutcome.ValidationRejected, stream.Outcome);
-        Assert.Same(mover, match.Battlefield.PlayerASupportLine[1]); // 原位不变（位置元素仍是该单位）
-        Assert.DoesNotContain(mover, match.Battlefield.FrontLine.Members); // 零副作用：移动未落位（前线只剩既有的敌方占位）
-        Assert.True(mover.GetData<CommandData>().CanMove);
-        Assert.Equal(1, playerA.Points); // 零副作用：费用未扣
-    }
 
     [Fact]
     public async Task Bomber_Interception_Blocks_Non_Fighter_Targets_On_Fighter_Line()

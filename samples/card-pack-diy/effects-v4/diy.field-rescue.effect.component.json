@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 4,
+  "asset": {
+    "kind": "component",
+    "id": "diy.field-rescue.effect",
+    "requires-host": "any",
+    "active-when": "loaded",
+    "one-shot": false,
+    "private-fields": [],
+    "members": [
+      {
+        "name": "onDiscarded",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Card",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Effect",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Unit",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Player",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Killer",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Source",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "TriggerCard",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            }
+          ]
+        },
+        "handler": {
+          "id": "diy.field-rescue.effect#onDiscarded",
+          "entry": "HandleAsync",
+          "script": "Func<dynamic, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n    if (view.Card is not Orc.Cards.Card discarded || view.Source is not Orc.Cards.Card source || view.Host is not Orc.Cards.Card self)\n    {\n        return;\n    }\n\n    if (object.ReferenceEquals(source, self))\n    {\n        return;\n    }\n\n    var sourceOwner = (source as Orc.Game.Cards.CardBase)?.Owner;\n    var selfOwner = (self as Orc.Game.Cards.CardBase)?.Owner;\n    if (sourceOwner is null || selfOwner is null || object.ReferenceEquals(sourceOwner, selfOwner))\n    {\n        return;\n    }\n\n    var runtime = Orc.Game.Effects.EffectRuntime.ResolveFor(self);\n    if (runtime is null)\n    {\n        return;\n    }\n\n    await runtime.FetchFromDeckAsync(self, ct, self);\n};\n"
+        }
+      }
+    ],
+    "mounts": [
+      {
+        "target": "engine#card.discarded",
+        "member": "onDiscarded"
+      }
+    ],
+    "wraps": []
+  }
+}

@@ -1,4 +1,4 @@
-﻿using Orc.Cards;
+using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Cards;
 using Orc.Game.Commanding;
@@ -32,7 +32,7 @@ public sealed class ActionImplementationSet
     public Func<LogicEngine, IDeathActionServices, IAddToHandAction, IDeathAction>? CreateDeath { get; init; }
 
     /// <summary>攻击（<c>attack</c>）工厂；依赖伤害。</summary>
-    public Func<LogicEngine, Trigger<UnitAttackTriggerView>, Trigger<AttackDamageTriggerView>, IDamageAction,
+    public Func<LogicEngine, IDamageAction,
         Func<UnitCard, Ref<Entity>, bool>, Func<UnitCard, UnitCard, bool>, IAttackAction>? CreateAttack { get; init; }
 
     /// <summary>卡牌移动（<c>move</c>）工厂；返回宿主侧契约 <see cref="IMoveAction"/>（实现可来自插件程序集）。</summary>

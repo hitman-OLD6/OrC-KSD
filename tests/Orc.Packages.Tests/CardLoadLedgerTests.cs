@@ -122,7 +122,7 @@ public sealed class CardLoadLedgerTests
         try
         {
             var library = new CardLibrary(new LogicEngine());
-            assembly.Attach(library, new TriggerRegistry());
+            assembly.Attach(library);
 
             // 装配期（资产加载器）不产批次报告：台账只记「卡牌加载器整批」。
             Assert.Equal(0, assembly.Ledger.BatchCount);

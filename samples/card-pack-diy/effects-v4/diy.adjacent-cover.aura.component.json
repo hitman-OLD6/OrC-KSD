@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 4,
+  "asset": {
+    "kind": "component",
+    "id": "diy.adjacent-cover.aura",
+    "requires-host": "any",
+    "active-when": "loaded",
+    "one-shot": false,
+    "private-fields": [],
+    "members": [
+      {
+        "name": "onLoad",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Card",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Effect",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Unit",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Player",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Killer",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Source",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "TriggerCard",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            }
+          ]
+        },
+        "handler": {
+          "id": "diy.adjacent-cover.aura#onLoad",
+          "entry": "HandleAsync",
+          "script": "Func<dynamic, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Cards.Card self || view.Card is not Orc.Cards.Card loaded)\n    {\n        return;\n    }\n\n    if (!object.ReferenceEquals(loaded, self))\n    {\n        return;\n    }\n\n    var runtime = Orc.Game.Effects.EffectRuntime.ResolveFor(self);\n    var auras = runtime is null ? null : runtime.AurasOf(self);\n    if (runtime is null || auras is null)\n    {\n        return;\n    }\n\n    auras.Register(new Orc.Game.Cards.AuraDeclaration(\n        self,\n        Orc.Game.Cards.CardStatFields.OperateCost,\n        (_, current) => current - 1,\n        self,\n        (env, beneficiary) =>\n            runtime.Judge(Orc.Game.Judicators.JudicatorNames.UnitAdjacent, self, beneficiary)\n            && runtime.Judge(Orc.Game.Judicators.JudicatorNames.UnitTypeMatch, beneficiary, \"infantry\")\n            && runtime.Judge(Orc.Game.Judicators.JudicatorNames.UnitSide, self, beneficiary)));\n\n    await runtime.RerunAurasAsync(self, ct);\n};\n"
+        }
+      }
+    ],
+    "mounts": [
+      {
+        "target": "engine#card.load",
+        "member": "onLoad"
+      }
+    ],
+    "wraps": []
+  }
+}

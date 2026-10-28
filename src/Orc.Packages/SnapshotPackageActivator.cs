@@ -28,11 +28,16 @@ public sealed class SnapshotPackageActivator : IMatchPackageActivator
         IMatchBindingServices? bindingServices,
         AssetServiceRegistry assetServices,
         JudicatorRegistry judicators,
-        PrefabManager prefabs,
+        SnapshotStore prefabs,
         Orc.Game.Ui.IUiPluginServices? uiServices = null)
     {
         var report = PackageActivation.Activate(
             _snapshot, assetServices, judicators, prefabs, matchServices, bindingServices, phase, uiServices);
-        return new MatchPackageActivationResult(report.ActivatedPackages, report.Failures);
+        return new MatchPackageActivationResult(
+            report.ActivatedPackages,
+            report.Failures,
+            report.Skipped
+                .Select(static skip => new Orc.Game.Plugins.MatchPackageSkip(skip.PackageLabel, skip.Required, skip.Failures))
+                .ToArray());
     }
 }

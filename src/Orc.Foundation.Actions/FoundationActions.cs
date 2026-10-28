@@ -18,8 +18,8 @@ public static class FoundationActions
         CreateDraw = (engine, services, addToHand) => new DrawAction(engine, services, addToHand),
         CreateDamage = (engine, services) => new DamageAction(engine, services),
         CreateDeath = (engine, services, addToHand) => new DeathAction(engine, services, addToHand),
-        CreateAttack = (engine, trigger, handle, damage, targetLegal, counterEligibility)
-            => new AttackAction(engine, trigger, handle, damage, targetLegal, counterEligibility),
+        CreateAttack = (engine, damage, targetLegal, counterEligibility)
+            => new AttackAction(engine, damage, targetLegal, counterEligibility),
         CreateMove = (engine, services) => new MoveAction(engine, services),
         CreateJoinBattlefield = (engine, services) => new JoinBattlefieldAction(engine, services),
         CreateOrder = flow => new OrderAction(flow),

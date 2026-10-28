@@ -63,10 +63,11 @@ public sealed class FuryKeywordComponent : KeywordComponent
 }
 
 /// <summary>
-/// 伏击（能力型）词条组件（批 2 效果化：收薄为壳——标识／授予-移除／读取面）：
-/// 「造成攻击伤害」改写逻辑（先资格、后条件的判定链与置改写标志）由内嵌效果
-/// <see cref="AmbushRewriteEffect"/> 承载（注册/撤销随效果生命周期；判定器通道经同一装载上下文取用；
-/// 无装载上下文或通道缺失＝不注册——防御、不抛错、不回退直调；单源约束保持）。不区分攻击者类型；HQ 攻击不走该流程。
+/// 伏击（能力型）词条组件（A2：收薄为**纯壳**——标识／授予-移除／读取面）：
+/// 「造成攻击伤害」改写逻辑（先资格、后条件的判定链与置改写标志）由 **v4 效果组件** <c>keyword.ambush</c>
+/// 的 csx 成员承载（绑定声明见 <see cref="KeywordEffectAssembly.AmbushComponentId"/>；装配/卸载随词条生灭）。
+/// 判定器通道在 csx 内经 <c>EffectRuntime.Judge</c> 取用、死亡动作经 <c>EffectRuntime.DeathAsync</c>（完整两端）；
+/// 不区分攻击者类型；HQ 攻击不走该流程。
 /// </summary>
 public sealed class AmbushKeywordComponent : KeywordComponent
 {
@@ -74,6 +75,5 @@ public sealed class AmbushKeywordComponent : KeywordComponent
     public AmbushKeywordComponent()
         : base(KeywordIds.Ambush)
     {
-        EmbedEffect(new AmbushRewriteEffect()); // 批 2：伤害改写行为（注册/撤销与判定链）迁效果承载
     }
 }

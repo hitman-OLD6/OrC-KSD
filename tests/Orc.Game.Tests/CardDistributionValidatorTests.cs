@@ -54,6 +54,15 @@ public class CardDistributionValidatorTests
     private static string SnapshotJson(string id) =>
         $"{{\"schemaVersion\":2,\"root\":{{\"id\":\"{id}\",\"mainTrigger\":{{\"id\":\"main\",\"stableKey\":\"stable\",\"kind\":\"passive\",\"hooks\":[\"unit.deployed\"],\"events\":[{{\"id\":\"evt\",\"entry\":\"HandleAsync\",\"assemblyKey\":\"k\"}}]}}}}}}";
 
+    /// <summary>
+    /// 效果库文件的内容（**v4 组件资产**；§29 第 4 项的可解析判据）：
+    /// 只有 `schemaVersion=4` ＋ `asset.kind=component` 的 `*.component.json` 才进入"可解析 id 集合"。
+    /// </summary>
+    private static string LibraryComponentJson(string id) =>
+        "{\"schemaVersion\":4,\"asset\":{\"kind\":\"component\",\"id\":\"" + id + "\","
+        + "\"requires-host\":\"any\",\"active-when\":\"loaded\",\"one-shot\":false,"
+        + "\"private-fields\":[],\"members\":[],\"mounts\":[],\"wraps\":[]}}";
+
     /// <summary>缺 root.id 的内联快照（读面＝组件级反序列化失败——内联完整性形态）。</summary>
     private static string SnapshotJsonWithoutRootId() =>
         "{\"schemaVersion\":2,\"root\":{\"mainTrigger\":{\"id\":\"main\",\"stableKey\":\"stable\",\"kind\":\"passive\",\"hooks\":[\"unit.deployed\"],\"events\":[{\"id\":\"evt\",\"entry\":\"HandleAsync\",\"assemblyKey\":\"k\"}]}}}";
@@ -74,8 +83,8 @@ public class CardDistributionValidatorTests
     private static void WriteCard(string directory, string fileName, string json) =>
         File.WriteAllText(Path.Combine(directory, fileName + ".card.json"), json);
 
-    private static void WritePrefab(string directory, string fileName, string json) =>
-        File.WriteAllText(Path.Combine(directory, fileName + ".prefab.json"), json);
+    private static void WriteLibraryComponent(string directory, string fileName, string json) =>
+        File.WriteAllText(Path.Combine(directory, fileName + ".component.json"), json);
 
     private static void CleanUp(params string[] directories)
     {
@@ -126,8 +135,8 @@ public class CardDistributionValidatorTests
             // B：引用库 2 的 lib-y ＋ 跨目录共享引用 lib-x（另一目录也引用）＋ 本卡内联 inline-b。
             WriteCard(cardDirB, "b1", CardJsonWithEffects(
                 "card-b1", prefabIds: new[] { "lib-y", "lib-x" }, inlineSnapshots: new[] { SnapshotJson("inline-b") }));
-            WritePrefab(libDir1, "lib-x", SnapshotJson("lib-x"));
-            WritePrefab(libDir2, "lib-y", SnapshotJson("lib-y"));
+            WriteLibraryComponent(libDir1, "lib-x", LibraryComponentJson("lib-x"));
+            WriteLibraryComponent(libDir2, "lib-y", LibraryComponentJson("lib-y"));
 
             var report = CardDistributionValidator.Validate(new[] { cardDirA, cardDirB }, new[] { libDir1, libDir2 });
 
@@ -194,7 +203,7 @@ public class CardDistributionValidatorTests
         {
             WriteCard(cardDir, "a1", CardJsonWithEffects(
                 "card-a1", prefabIds: new[] { "lib-x", "missing-1", "missing-2" }));
-            WritePrefab(libDir, "lib-x", SnapshotJson("lib-x"));
+            WriteLibraryComponent(libDir, "lib-x", LibraryComponentJson("lib-x"));
 
             var report = CardDistributionValidator.Validate(new[] { cardDir }, new[] { libDir });
 
@@ -283,6 +292,77 @@ public class CardDistributionValidatorTests
     // id 重复与冲突（跨卡目录卡 id／库内同库与跨库／跨来源冲突）。
     // ─────────────────────────────────────────────────────────────────────────
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // ⑨ v4 判据（§29 第 4 项）：「效果引用可解析」＝目录内存在 **v4 组件资产**且其 id 匹配。
+    //    旧格式文件（*.prefab.json）在 v4-only 装载链下不贡献任何可解析 id——留在目录里只是死文件。
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>v4 组件资产是唯一的可解析来源：卡引用它＝零告警；旧格式同 id 文件不被采信＝仍是未解析。</summary>
+    [Fact]
+    public void V4_Component_Asset_Is_The_Only_Resolvable_Reference_Source()
+    {
+        var cardDir = NewTempDir("cards-v4");
+        var libDir = NewTempDir("lib-v4");
+        try
+        {
+            WriteCard(cardDir, "a1", CardJsonWithEffects("card-a1", prefabIds: new[] { "lib-v4-ok", "lib-legacy-only" }));
+
+            // v4 组件资产（可解析）＋旧格式文件（同名 id，但 v4-only 装载链不读它）。
+            WriteLibraryComponent(libDir, "lib-v4-ok", LibraryComponentJson("lib-v4-ok"));
+            File.WriteAllText(
+                Path.Combine(libDir, "lib-legacy-only.prefab.json"),
+                "{\"schemaVersion\":3,\"root\":{\"id\":\"lib-legacy-only\"}}");
+
+            var report = CardDistributionValidator.Validate(new[] { cardDir }, new[] { libDir });
+
+            Assert.Empty(report.Errors);
+            Assert.Equal(1, report.SuccessfulLibrarySnapshotCount); // 只有 v4 组件被读面接受
+            var warning = Assert.Single(report.Warnings);           // 旧格式文件不贡献可解析 id
+            Assert.Equal(CardDistributionValidationCategory.UnresolvedReference, warning.Category);
+            Assert.Equal("lib-legacy-only", warning.PrefabId);
+            Assert.Contains("未在效果库或卡内联中解析", warning.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            CleanUp(cardDir, libDir);
+        }
+    }
+
+    /// <summary>可解析＝**schema 合法**：`*.component.json` 但携带旧字段（<c>mainTrigger</c>）＝库侧导入错误，且不算解析。</summary>
+    [Fact]
+    public void Component_File_With_Legacy_Fields_Is_Import_Error_And_Not_Resolvable()
+    {
+        var cardDir = NewTempDir("cards-v4bad");
+        var libDir = NewTempDir("lib-v4bad");
+        try
+        {
+            WriteCard(cardDir, "a1", CardJsonWithEffects("card-a1", prefabIds: new[] { "lib-bad" }));
+            WriteLibraryComponent(
+                libDir,
+                "lib-bad",
+                "{\"schemaVersion\":4,\"asset\":{\"kind\":\"component\",\"id\":\"lib-bad\","
+                + "\"mainTrigger\":{\"id\":\"main\"}}}");
+
+            var report = CardDistributionValidator.Validate(new[] { cardDir }, new[] { libDir });
+
+            var importError = Assert.Single(
+                report.Errors.Where(e => e.Category == CardDistributionValidationCategory.LibrarySideImport));
+            Assert.Equal(Path.Combine(libDir, "lib-bad.component.json"), importError.File);
+            Assert.Contains("mainTrigger", importError.Message, StringComparison.Ordinal);
+
+            // 该文件没进可解析集合 → 卡引用仍是未解析（Warning）。
+            Assert.Contains(
+                report.Warnings,
+                w => w.Category == CardDistributionValidationCategory.UnresolvedReference
+                     && string.Equals(w.PrefabId, "lib-bad", StringComparison.Ordinal));
+            Assert.Equal(0, report.SuccessfulLibrarySnapshotCount);
+        }
+        finally
+        {
+            CleanUp(cardDir, libDir);
+        }
+    }
+
     [Fact]
     public void Card_Id_Duplicate_Across_Directories_Is_Error()
     {
@@ -320,7 +400,7 @@ public class CardDistributionValidatorTests
         try
         {
             WriteCard(cardDir, "a1", CardJson("card-a1"));
-            WritePrefab(libDir, "lib-x", SnapshotJson("lib-x"));
+            WriteLibraryComponent(libDir, "lib-x", LibraryComponentJson("lib-x"));
 
             var report = CardDistributionValidator.Validate(new[] { cardDir, cardDir }, new[] { libDir, libDir });
 
@@ -344,8 +424,8 @@ public class CardDistributionValidatorTests
         var libDir = NewTempDir("lib");
         try
         {
-            WritePrefab(libDir, "dup-a", SnapshotJson("dup-shot"));
-            WritePrefab(libDir, "dup-b", SnapshotJson("dup-shot"));
+            WriteLibraryComponent(libDir, "dup-a", LibraryComponentJson("dup-shot"));
+            WriteLibraryComponent(libDir, "dup-b", LibraryComponentJson("dup-shot"));
 
             var report = CardDistributionValidator.Validate(null, new[] { libDir });
 
@@ -353,9 +433,9 @@ public class CardDistributionValidatorTests
             Assert.Equal(CardDistributionValidationCategory.LibraryPrefabDuplicate, error.Category);
             Assert.Equal("dup-shot", error.PrefabId);
             Assert.Contains("同库目录内", error.Message);
-            Assert.Contains(Path.Combine(libDir, "dup-a.prefab.json"), error.Message);
-            Assert.Contains(Path.Combine(libDir, "dup-b.prefab.json"), error.Message);
-            Assert.Equal(Path.Combine(libDir, "dup-b.prefab.json"), error.File); // 第二来源（触发重复者）。
+            Assert.Contains(Path.Combine(libDir, "dup-a.component.json"), error.Message);
+            Assert.Contains(Path.Combine(libDir, "dup-b.component.json"), error.Message);
+            Assert.Equal(Path.Combine(libDir, "dup-b.component.json"), error.File); // 第二来源（触发重复者）。
             Assert.False(report.HasNoErrors);
             Assert.Equal(2, report.SuccessfulLibrarySnapshotCount);
         }
@@ -372,8 +452,8 @@ public class CardDistributionValidatorTests
         var libDir2 = NewTempDir("lib-2");
         try
         {
-            WritePrefab(libDir1, "x", SnapshotJson("dup-shot"));
-            WritePrefab(libDir2, "x", SnapshotJson("dup-shot"));
+            WriteLibraryComponent(libDir1, "x", LibraryComponentJson("dup-shot"));
+            WriteLibraryComponent(libDir2, "x", LibraryComponentJson("dup-shot"));
 
             var report = CardDistributionValidator.Validate(null, new[] { libDir1, libDir2 });
 
@@ -421,14 +501,14 @@ public class CardDistributionValidatorTests
         try
         {
             WriteCard(cardDir, "a1", CardJsonWithEffects("card-a1", inlineSnapshots: new[] { SnapshotJson("shared-id") }));
-            WritePrefab(libDir, "shared", SnapshotJson("shared-id"));
+            WriteLibraryComponent(libDir, "shared", LibraryComponentJson("shared-id"));
 
             var report = CardDistributionValidator.Validate(new[] { cardDir }, new[] { libDir });
 
             var error = Assert.Single(report.Errors);
             Assert.Equal(CardDistributionValidationCategory.CrossSourceConflict, error.Category);
             Assert.Equal("shared-id", error.PrefabId);
-            Assert.Equal(Path.Combine(libDir, "shared.prefab.json"), error.File);
+            Assert.Equal(Path.Combine(libDir, "shared.component.json"), error.File);
             Assert.Contains("同时由效果库文件与卡内联提供", error.Message);
             Assert.False(report.HasNoErrors);
         }
@@ -509,7 +589,7 @@ public class CardDistributionValidatorTests
         {
             WriteCard(cardDir, "good", CardJsonWithEffects("card-good", prefabIds: new[] { "lib-x" }));
             WriteCard(cardDir, "bad", "{ not json");
-            WritePrefab(libDir, "lib-x", SnapshotJson("lib-x"));
+            WriteLibraryComponent(libDir, "lib-x", LibraryComponentJson("lib-x"));
 
             var report = CardDistributionValidator.Validate(new[] { cardDir }, new[] { libDir });
 
@@ -533,14 +613,14 @@ public class CardDistributionValidatorTests
         var libDir = NewTempDir("lib");
         try
         {
-            WritePrefab(libDir, "good", SnapshotJson("lib-x"));
-            WritePrefab(libDir, "bad", "{ not json");
+            WriteLibraryComponent(libDir, "good", LibraryComponentJson("lib-x"));
+            WriteLibraryComponent(libDir, "bad", "{ not json");
 
             var report = CardDistributionValidator.Validate(null, new[] { libDir });
 
             var error = Assert.Single(report.Errors);
             Assert.Equal(CardDistributionValidationCategory.LibrarySideImport, error.Category);
-            Assert.Equal(Path.Combine(libDir, "bad.prefab.json"), error.File);
+            Assert.Equal(Path.Combine(libDir, "bad.component.json"), error.File);
             Assert.Contains("JSON 非法", error.Message);
             Assert.Equal(1, report.SuccessfulLibrarySnapshotCount);
             Assert.Equal(1, report.PrefabLibraryDirectoryCount);
@@ -655,7 +735,7 @@ public class CardDistributionValidatorTests
         var libDir = NewTempDir("lib");
         try
         {
-            WritePrefab(libDir, "lib-x", SnapshotJson("lib-x"));
+            WriteLibraryComponent(libDir, "lib-x", LibraryComponentJson("lib-x"));
 
             var report = CardDistributionValidator.Validate(null, new[] { libDir });
 
@@ -703,8 +783,8 @@ public class CardDistributionValidatorTests
             WriteCard(cardDirA, "a1", CardJsonWithEffects("card-dup", prefabIds: new[] { "ghost" }));
             WriteCard(cardDirA, "bad", "{ not json");
             WriteCard(cardDirB, "b1", CardJson("card-dup"));
-            WritePrefab(libDir, "lib-x", SnapshotJson("lib-x"));
-            WritePrefab(libDir, "bad", "{ not json");
+            WriteLibraryComponent(libDir, "lib-x", LibraryComponentJson("lib-x"));
+            WriteLibraryComponent(libDir, "bad", "{ not json");
 
             var first = CardDistributionValidator.Validate(new[] { cardDirA, cardDirB, missingDir }, new[] { libDir });
             var second = CardDistributionValidator.Validate(new[] { cardDirA, cardDirB, missingDir }, new[] { libDir });
@@ -760,7 +840,7 @@ public class CardDistributionValidatorTests
             WriteCard(cardDir, "a1", CardJsonWithEffects(
                 "card-a1", prefabIds: new[] { "lib-x" }, inlineSnapshots: new[] { SnapshotJson("inline-a") }));
             WriteCard(cardDir, "bad", "{ not json");
-            WritePrefab(libDir, "lib-x", SnapshotJson("lib-x"));
+            WriteLibraryComponent(libDir, "lib-x", LibraryComponentJson("lib-x"));
 
             // 纯只读证明：调用前后输入目录快照（文件清单＋内容）不变。
             var before = SnapshotDirectory(cardDir).Concat(SnapshotDirectory(libDir)).ToArray();
@@ -823,7 +903,11 @@ public class CardDistributionValidatorTests
 
         if (libraryDirectories.Count > 0)
         {
-            Assert.Equal(6, report.SuccessfulLibrarySnapshotCount);
+            // 该目录同时含旧 prefab 与 v4 组件（同一词条的两种承载）；计数是**条目数**，不按 id 去重。
+            // 断言下界＝内建词条 v4 组件数（8）：v4-only 后它们才是生产承载，少一个就说明库面退化。
+            Assert.True(
+                report.SuccessfulLibrarySnapshotCount >= 8,
+                $"库成功装载数 {report.SuccessfulLibrarySnapshotCount} 少于内建词条 v4 组件数 8（库面退化）。");
         }
     }
 }

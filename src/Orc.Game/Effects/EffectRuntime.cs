@@ -1,5 +1,6 @@
 using Orc.Cards;
 using Orc.Core;
+using Orc.Game.Actions;
 using Orc.Game.Board;
 using Orc.Game.Cards;
 using Orc.Game.Commanding;
@@ -93,6 +94,9 @@ public sealed partial class EffectRuntime
     private readonly Func<JudicatorRegistry?> _judicators;
     private readonly Func<ResourceManager?> _resources;
     private readonly Func<Orc.Game.Board.Battlefield?>? _battlefield;
+    private readonly Func<bool>? _allowRandom;
+    private readonly Func<LogicEngine?>? _engine;
+    private readonly Func<bool>? _isActionAllowed;
 
     /// <summary>创建运行时门面（协作者以延迟读取注入——装配链时序无关）。</summary>
     /// <param name="commands">指挥管理器访问器。</param>
@@ -101,6 +105,11 @@ public sealed partial class EffectRuntime
     /// <param name="resources">资源管理器访问器。</param>
     /// <param name="engine">对局引擎访问器（批 4 加性；动态效果受控面用——实例化/预制体库；缺省 null＝动态效果面按「服务不可用」降级）。</param>
     /// <param name="isActionAllowed">可操作相位门禁访问器（批 4 加性；终局/非进行相位的受控面拒斥——缺省 null＝无门禁）。</param>
+    /// <param name="battlefield">战场访问器（加性）。</param>
+    /// <param name="allowRandom">
+    /// 随机选择器开关访问器（R2c／A-5）：缺省 null＝**禁止**随机取样（生产口径）；
+    /// 测试／沙盒／简单 AI 装配方显式返回 true。
+    /// </param>
     /// <exception cref="ArgumentNullException">任一必填访问器为 null。</exception>
     public EffectRuntime(
         Func<CommandManager?> commands,
@@ -109,7 +118,8 @@ public sealed partial class EffectRuntime
         Func<ResourceManager?> resources,
         Func<LogicEngine?>? engine = null,
         Func<bool>? isActionAllowed = null,
-        Func<Orc.Game.Board.Battlefield?>? battlefield = null)
+        Func<Orc.Game.Board.Battlefield?>? battlefield = null,
+        Func<bool>? allowRandom = null)
     {
         ArgumentNullException.ThrowIfNull(commands);
         ArgumentNullException.ThrowIfNull(players);
@@ -122,6 +132,7 @@ public sealed partial class EffectRuntime
         _engine = engine;
         _isActionAllowed = isActionAllowed;
         _battlefield = battlefield;
+        _allowRandom = allowRandom;
     }
 
     /// <summary>
@@ -249,6 +260,41 @@ public sealed partial class EffectRuntime
 
         await commands.KillUnitAsync(unit, source as UnitCard, ct).ConfigureAwait(false);
         return true;
+    }
+
+    /// <summary>
+    /// **死亡动作**（A2 加性；csx 侧取用死亡动作的等价入口）：把目标单位交给死亡动作
+    /// <see cref="Orc.Game.Actions.IDeathAction.ExecuteAsync"/> 走**完整两端**（触发端 <c>engine#death</c> →
+    /// 处理端 <c>engine#death.handle</c>）——与词条效果时代经 <c>KeywordLoadContext.DeathAction</c> 的调用**同一路径**。
+    /// <para>
+    /// 与 <see cref="KillAsync"/> 的关系：两者最终都进死亡动作（<c>KillAsync</c> → <c>CommandManager.KillUnitAsync</c>
+    /// → <c>DeathAction.ExecuteAsync</c>），差别只在 **<c>triggerCard</c> 透传**——伏击类效果必须把攻击链的触发者卡
+    /// 带进死亡链（<c>card.died</c> 归因与链路追溯），故 csx 侧用本入口而不是 <see cref="KillAsync"/>。
+    /// </para>
+    /// <para>服务不可达／目标非单位＝<c>false</c>（零副作用、不抛错——沿本门面「功能不可用＝不失败」口径）。</para>
+    /// </summary>
+    /// <param name="target">被消灭的单位（其它实体类型＝false）。</param>
+    /// <param name="killer">击杀者（<c>card.died</c> 的 <c>Killer</c> 归属）。</param>
+    /// <param name="triggerCard">触发者卡（链路传递；可空）。</param>
+    /// <exception cref="ArgumentNullException">target 为 null。</exception>
+    /// <remarks>
+    /// **internal**：本门面属**契约冻结面**（<c>ContractFreezeTests</c> 逐条比对 <c>effectRuntime</c> 段），
+    /// 新增公开成员＝未授权契约变更；csx 侧统一走 <see cref="Orc.Game.Cards.KeywordEffectActionFace"/>（非冻结面）。
+    /// </remarks>
+    internal async Task<bool> DeathAsync(
+        Card target, Card? killer = null, Card? triggerCard = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        if (_commands() is not { } commands || target is not UnitCard unit)
+        {
+            return false;
+        }
+
+        var result = await commands.DeathAction
+            .ExecuteAsync(unit, killer, triggerCard, ct)
+            .ConfigureAwait(false);
+        return result.Targets.Count > 0
+            && result.Targets[0].Outcome == ActionOutcomeKind.Applied;
     }
 
     /// <summary>
@@ -419,22 +465,6 @@ public sealed partial class EffectRuntime
 
         manager.SetValue(keyword, value); // 语义沿用既有：改写前提＝词条存在（不存在＝异常透传）；置空合法
         return Task.FromResult(true);
-    }
-
-    /// <summary>
-    /// 内容型词条授予（词条效果化·批 0）：词条面统一判定（CardBase＋Hq 同族）；沿用既有内容签名
-    /// （<c>keyword ＋ 内容对象</c>——如「获得亡计」的 <see cref="Effect"/> 载荷）；内容生命周期随词条组件生灭
-    /// （授予＝内容装载；撤销/死亡注销＝内容卸载；授予失败回滚＝无残留）；空内容（null）＝合法静默；
-    /// 幂等/终态/异常语义完全沿用既有标识授予。
-    /// </summary>
-    /// <exception cref="ArgumentNullException">target 为 null。</exception>
-    public Task<bool> GrantWithContentAsync(Card target, string keyword, Effect? content, CancellationToken ct = default, Card? source = null)
-    {
-        ArgumentNullException.ThrowIfNull(target);
-        ArgumentException.ThrowIfNullOrWhiteSpace(keyword);
-        return KeywordRules.TryGetKeywordManager(target) is { } manager
-            ? manager.GrantWithContentAsync(keyword, content)
-            : Task.FromResult(false);
     }
 
     /// <summary>抽牌（走玩家管理器——含满手爆牌裁决）；返回请求的抽牌次数（服务不可达＝0）。</summary>
@@ -743,8 +773,20 @@ public sealed partial class EffectRuntime
         return await resources.LosePointsAsync(player, amount, ct).ConfigureAwait(false);
     }
 
-    /// <summary>无头选靶（经游戏层判定器 <see cref="JudicatorNames.EffectTargetResolve"/> 求值；不可用＝空集）。</summary>
+    /// <summary>
+    /// 效果选靶（**唯一入口**，R2／A-6）：把「取样语义」与「裁定语义」拆开——
+    /// <list type="bullet">
+    /// <item><b>确定性</b>（<c>all</c>／<c>self</c>）：候选集即答案，经判定器求值、不产生 targeter（无往返）。</item>
+    /// <item><b>引擎随机</b>（<c>random</c>）：归对局随机服务（种子可复现）；生产对局禁止，
+    ///   未开启 <see cref="MatchOptions.AllowRandomTargeting"/>＝**明确错误**（不静默降级为"取首个"，R2c）。</item>
+    /// <item><b>外部裁定</b>（其余，如 <c>one</c>／<c>any</c>／<c>choose</c>）：**必须经提交通道**
+    ///   （玩家侧 <c>TargeterManager</c> → 前端桥接）；引擎永不代选（R2）。无前端接入＝明确失败。</item>
+    /// </list>
+    /// </summary>
     /// <exception cref="ArgumentNullException">viewer 或 selector 为 null。</exception>
+    /// <exception cref="InvalidOperationException">
+    /// 需要外部裁定时没有前端接入（无桥接），或生产对局执行到 <c>random</c> 选择器。
+    /// </exception>
     public async Task<IReadOnlyList<Card>> SelectAsync(Card viewer, EffectSelector selector, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(viewer);
@@ -755,15 +797,60 @@ public sealed partial class EffectRuntime
             return Array.Empty<Card>();
         }
 
-        var result = judicators.Invoke(
-            JudicatorNames.EffectTargetResolve, new object[] { viewer, selector }, OwnerOf(viewer)?.Index);
-        var cards = result is { Length: > 0 } && result[0] is IReadOnlyList<Card> resolved
-            ? resolved
-            : (IReadOnlyList<Card>)Array.Empty<Card>();
+        var cards = selector.Sel switch
+        {
+            "all" or "self" => ResolveDeterministic(judicators, viewer, selector),
+            "random" => ResolveRandom(judicators, viewer, selector),
+            _ => await SubmitAsync(viewer, selector, judicators, ct).ConfigureAwait(false),
+        };
 
         // 指向：最终名单确定后对每个目标各触发一次（候选枚举不算、后续失败不回滚）。
         await NotifyTargetedAsync(viewer, cards, ct).ConfigureAwait(false);
         return cards;
+    }
+
+    /// <summary>确定性取样（候选集即答案；不产生 targeter）。</summary>
+    private IReadOnlyList<Card> ResolveDeterministic(JudicatorRegistry judicators, Card viewer, EffectSelector selector)
+        => InvokeResolveJudicator(judicators, viewer, selector);
+
+    /// <summary>
+    /// 引擎随机取样（R2c）：<c>random</c> 归对局随机服务；生产对局未开启＝明确错误（不取首个兜底）。
+    /// </summary>
+    /// <exception cref="InvalidOperationException">未开启随机选择器。</exception>
+    private IReadOnlyList<Card> ResolveRandom(JudicatorRegistry judicators, Card viewer, EffectSelector selector)
+    {
+        if (_allowRandom is not null && !_allowRandom())
+        {
+            throw new InvalidOperationException(
+                $"效果选择器 sel=random 被拒绝：生产对局禁止随机取样（R2c）。"
+                + $"如为测试／沙盒／简单 AI 场景，请在对局配置中显式开启 {nameof(MatchOptions)}.AllowRandomTargeting。");
+        }
+
+        var cards = InvokeResolveJudicator(judicators, viewer, selector);
+
+        // R2c／R7：本对局用过的随机选择器登记（审查导出 randomSelectors 段的数据源）。
+        _engine?.Invoke()?.RandomSelections.Add(new RandomSelectionRecord(viewer.Name, Describe(selector)));
+
+        return cards;
+    }
+
+    /// <summary>选择器的可读描述（审查导出用；不参与求值）。</summary>
+    private static string Describe(EffectSelector selector)
+        => $"sel={selector.Sel}"
+           + (selector.Side is null ? string.Empty : $",side={selector.Side}")
+           + (selector.Zone is null ? string.Empty : $",zone={selector.Zone}")
+           + (selector.UnitType is null ? string.Empty : $",unitType={selector.UnitType}")
+           + (selector.Keyword is null ? string.Empty : $",keyword={selector.Keyword}")
+           + (selector.Count is null ? string.Empty : $",count={selector.Count}");
+
+    private IReadOnlyList<Card> InvokeResolveJudicator(
+        JudicatorRegistry judicators, Card viewer, EffectSelector selector)
+    {
+        var result = judicators.Invoke(
+            JudicatorNames.EffectTargetResolve, new object[] { viewer, selector }, OwnerOf(viewer)?.Index);
+        return result is { Length: > 0 } && result[0] is IReadOnlyList<Card> resolved
+            ? resolved
+            : Array.Empty<Card>();
     }
 
     /// <summary>「指向」通知（效果选靶路径；对最终选定的每个目标各一次）。</summary>
@@ -782,28 +869,22 @@ public sealed partial class EffectRuntime
     }
 
     /// <summary>
-    /// 交互式选靶（首选单目标）：候选来自**目标候选名单判定器**（玩家域＝viewer 归属域）——
-    /// "不可被敌方指令指向"等可选性声明经该判定器的包装器生效；取消/失败/无候选＝空集。
-    /// 一次调用＝一次 targeter 请求（经玩家侧 TargeterManager → 前端桥接）。
+    /// 外部裁定（提交通道）：候选来自**目标候选名单判定器**（玩家域＝viewer 归属域）——
+    /// "不可被敌方指令指向"等可选性声明经该判定器的包装器生效；一次调用＝一次 targeter 请求
+    /// （经玩家侧 TargeterManager → 前端桥接；请求 id 与提交结果沿用既有协议形态，S12 加性口径不变）。
     /// </summary>
-    /// <exception cref="ArgumentNullException">viewer 或 selector 为 null。</exception>
-    public async Task<IReadOnlyList<Card>> BeginTargetSelectionAsync(
-        Card viewer,
-        EffectSelector selector,
-        CancellationToken ct = default)
+    /// <exception cref="InvalidOperationException">需要裁定但没有前端接入（无 TargeterManager／无桥接）。</exception>
+    private async Task<IReadOnlyList<Card>> SubmitAsync(
+        Card viewer, EffectSelector selector, JudicatorRegistry judicators, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(viewer);
-        ArgumentNullException.ThrowIfNull(selector);
-
-        if (_judicators() is not { } judicators)
-        {
-            return Array.Empty<Card>();
-        }
-
         var targeterManager = OwnerOf(viewer)?.TargeterManager;
-        if (targeterManager is null)
+        if (targeterManager?.Bridge is null)
         {
-            return Array.Empty<Card>();
+            // R2：引擎永不代选——没有前端就不是"取首个"，而是明确失败（不静默降级）。
+            throw new InvalidOperationException(
+                $"效果选靶 sel={selector.Sel} 需要外部裁定（提交通道），但当前对局没有前端接入"
+                + $"（{TargeterFailureReason.BridgeNotAssembled}）：引擎不代选（R2）。"
+                + "请装配 targeter 桥接（人类 UI／MCP／AI 前端），或把选择器改为确定性（all/self）。");
         }
 
         var rule = new JudicatorSelectionRule(
@@ -814,6 +895,10 @@ public sealed partial class EffectRuntime
             return Array.Empty<Card>();
         }
 
+        // 数量：显式 Count 优先；否则按旧取样口径取 1（sel=any 与 one 同口径——裁定权在前端，数量是声明）。
+        var take = selector.Count is > 0 ? selector.Count.Value : 1;
+        take = Math.Min(take, candidates.Count);
+
         // 单次请求内用名单快照复核（避免逐候选重算）；候选本身也是快照（D15）。
         var validator = rule.Snapshot();
         Ref<Entity>? selected = null;
@@ -821,7 +906,7 @@ public sealed partial class EffectRuntime
         {
             var step = await flow.Step(
                 SelectorTemplates.FieldUnit,
-                new ReferenceSetParameter(candidates, 1, 1, domainValidator: validator, tag: viewer)
+                new ReferenceSetParameter(candidates, take, take, domainValidator: validator, tag: viewer)
                 {
                     // S6：选靶归属＝观察者的归属玩家（与 TargeterManager 的取用同源）。
                     Owner = OwnerOf(viewer),
@@ -850,14 +935,14 @@ public sealed partial class EffectRuntime
 
         if (result.IsOk && selected is { IsAlive: true } reference && reference.Value is Card card)
         {
-            // 指向：交互落定即最终确定（每个目标一次；取消/失败路径不触发）。
-            if (_engine?.Invoke() is { } engine)
-            {
-                await TargetingRules.NotifyAsync(
-                    engine, card, viewer, TargetingRules.KindEffect, triggerCard: viewer, ct).ConfigureAwait(false);
-            }
-
             return new[] { card };
+        }
+
+        if (result.Reason == TargeterFailureReason.BridgeNotAssembled)
+        {
+            // 前端在请求处理期间缺失（桥接被拆／未装配）＝明确失败，不当作"没有目标"。
+            throw new InvalidOperationException(
+                $"效果选靶 sel={selector.Sel} 失败：{TargeterFailureReason.BridgeNotAssembled}（引擎不代选，R2）。");
         }
 
         return Array.Empty<Card>();

@@ -301,7 +301,8 @@ internal static class ShapeTools
 
                     await m.Engine.Emit(eventName, payload, ct).ConfigureAwait(false);
 
-                    var subscribers = m.Engine.Bus.GetSubscribers(eventName);
+                    // A2：订阅者读面＝审查图上"挂到该信号成员的边"（旧 GetSubscribers 的等价替代）。
+                    var subscribers = m.Engine.BuildAuditGraph().EdgesInto(eventName);
                     return ActionOutcome.Completed(new JsonObject
                     {
                         ["event"] = eventName,

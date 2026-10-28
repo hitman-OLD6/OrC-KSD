@@ -1,4 +1,7 @@
 using Orc.Core;
+using Orc.Core.Model;
+using Orc.Game.Model;
+using Orc.Game.Triggers;
 using Orc.Game.Targeting;
 using Orc.Game.Triggers;
 
@@ -38,15 +41,21 @@ public class OrderCard : CardBase
         Func<string, JudicatorBinding>? validationJudicatorResolver = null)
         : base(engine, definition)
     {
-        PrePlayTrigger = new CostCheckTrigger("预打出触发器", this, validationJudicatorResolver);
-        PlayTrigger = new CostCheckTrigger("打出触发器", this, validationJudicatorResolver);
+        // S8（批次 3）：成员表由类型预制体 `card.order` 声明；批次 7（§27）起本类只持成员地址。
+        var members = BindMembers(engine, HostKind.Order, validationJudicatorResolver);
+        PrePlayTrigger = members.AddressOf(CardProcesses.PrePlay);
+        PlayTrigger = members.AddressOf(CardProcesses.Play);
+
+        // 守卫边（费用校验：预打出＋打出段复验各一条）。
+        CardPlayGuards.AttachCostGuard(this, CardProcesses.PrePlay, validationJudicatorResolver);
+        CardPlayGuards.AttachCostGuard(this, CardProcesses.Play, validationJudicatorResolver);
     }
 
-    /// <summary>预打出触发器（费用校验：指挥点验证；装配方 handler 捕获集经此挂载）。</summary>
-    public Trigger<CardTriggerView> PrePlayTrigger { get; }
+    /// <summary>预打出成员地址（<c>host#pre-play</c>；费用校验守卫＋装配方捕获边）。</summary>
+    public MemberAddress PrePlayTrigger { get; }
 
-    /// <summary>打出触发器（纯验证：费用校验——打出段复验；链事件已迁至 <c>OrderFlow</c>）。</summary>
-    public Trigger<CardTriggerView> PlayTrigger { get; }
+    /// <summary>打出成员地址（<c>host#play</c>；费用校验守卫——打出段复验；链事件在 <c>OrderFlow</c>）。</summary>
+    public MemberAddress PlayTrigger { get; }
 
     /// <summary>
     /// 手牌起始指向槽位声明（S2：由指令卡自行声明——基类不持 targeter）：指令＝手牌打出时指向单位/HQ
@@ -57,14 +66,22 @@ public class OrderCard : CardBase
 
     /// <summary>
     /// 预打出 handler 装配入口（增强入口；装配/加载阶段注册——本批不设运行期动态注册）：
-    /// 注册为预打出触发器事件（登记序触发；异常沿用引擎隔离）；handler 经视图 <c>CaptureBox</c> 提交捕获值
-    /// （或经 targeter 交互后提交）。返回注册句柄（可用于撤销）。
+    /// 接为预打出成员的**自有边**（接入序＝执行序）；handler 经视图 <c>CaptureBox</c> 提交捕获值
+    /// （或经 targeter 交互后提交）。
+    /// <para>
+    /// **异常口径**：v4 成员边**不做隔离**——handler 抛出的异常直接上抛，后续边不再执行、打出段不发生
+    /// （`Signals.cs` 已定："隔离＋继续"随 b5 退役）。这与旧触发器"每个订阅者隔离、隔离后继续"相反：
+    /// 静默吞掉可打出牌的中途失败，会让对局状态停在半途，比失败更难排查。
+    /// </para>
     /// </summary>
     /// <exception cref="ArgumentNullException">handler 为 null。</exception>
     /// <exception cref="ArgumentException">name 为 null/空白。</exception>
-    /// <exception cref="ArgumentOutOfRangeException">priority 越界。</exception>
-    public TriggerRegistration AddPrePlayHandler(
-        string name, Func<CardTriggerView, Context, CancellationToken, Task> handler, int priority = 0,
-        object? registrant = null)
-        => PrePlayTrigger.Register(name, handler, priority, registrant: registrant);
+    public void AddPrePlayHandler(
+        string name, Func<CardTriggerView, Context, CancellationToken, Task> handler)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(handler);
+
+        AttachMemberEdge(CardProcesses.PrePlay, MemberEdges.For(handler));
+    }
 }

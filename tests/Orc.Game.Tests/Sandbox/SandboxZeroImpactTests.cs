@@ -53,10 +53,9 @@ public sealed class SandboxZeroImpactTests
         var match = await SandboxTestKit.CreateMatchAsync(authorized: true);
 
         // 保留触发器不进入编排面（不参与挂载、不被按名解析、不影响既有计数器）。
-        foreach (var (name, trigger) in match.Sandbox.ReservedTriggers)
+        foreach (var (name, _) in match.Sandbox.ReservedTriggers)
         {
             Assert.DoesNotContain(name, match.Engine.Hooks.Names);
-            Assert.False(trigger.IsSealed == false, "保留触发器应封闭。");
         }
 
         await Task.CompletedTask;

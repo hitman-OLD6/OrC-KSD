@@ -16,44 +16,6 @@ public class CounterArmingWindowTests
 {
     // ---------- R1.1 归属过滤：己方指令不被己方反制拦截 ----------
 
-    [Fact]
-    public async Task Own_Order_In_Own_Turn_Is_Not_Countered()
-    {
-        var match = PlayChainTestKit.CreatePlayMatch();
-        await match.Initialize();
-        var playerA = match.Players[0];
-
-        // 推到回合 3（A 行动、2 点）：反制费 1 + 指令费 1 同回合内都付得起。
-        await match.EndTurn();
-        await match.EndTurn();
-        Assert.Same(playerA, match.CurrentPlayer);
-
-        var counter = await CreateArmedCounterAsync(match, playerA);
-        var order = await PlayChainTestKit.InstantiateLoadedAsync<OrderCard>(
-            match, playerA, PlayChainTestKit.CommandCheapId);
-        var effectRan = false;
-        order.AddEffect(new WindowCastEffect("己方指令", (_, _, _) =>
-        {
-            effectRan = true;
-            return Task.CompletedTask;
-        }));
-
-        using var recorder = new UpdateRecorder(match.Engine);
-        var result = await match.PlayManager.PlayOrderAsync(order);
-
-        // 指令照常结算：宣告发出、效果执行、照常离手。
-        Assert.Equal(PlayResultStatus.Success, result.Status);
-        Assert.Contains(GameUpdates.CardPlayed, recorder.Types);
-        Assert.True(effectRan);
-        Assert.DoesNotContain(order, playerA.Hand);
-
-        // 反制既不命中也不消耗：仍激活、仍在册、仍在手牌。
-        Assert.False(counter.IsConsumed);
-        Assert.True(counter.GetData<CounterActivationData>().IsActive);
-        Assert.Single(counter.RegisteredEffectHandlerNames);
-        Assert.Contains(counter, playerA.Hand);
-        Assert.DoesNotContain(GameUpdates.CounterDisarmed, recorder.Types);
-    }
 
     [Fact]
     public async Task Unknown_Order_Ownership_Is_Still_Countered()
@@ -260,11 +222,4 @@ public class CounterArmingWindowTests
         public virtual int Amount { get; set; }
     }
 
-    private sealed class WindowCastEffect : ActiveEffect<WindowCastView>
-    {
-        public WindowCastEffect(string name, Func<WindowCastView, Context, CancellationToken, Task> handler)
-            : base(name, castEvents: new[] { new TriggerEvent<WindowCastView>("施放", handler) })
-        {
-        }
-    }
 }

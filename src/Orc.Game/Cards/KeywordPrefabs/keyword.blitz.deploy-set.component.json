@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 4,
+  "asset": {
+    "kind": "component",
+    "id": "keyword.blitz.deploy-set",
+    "requires-host": "any",
+    "active-when": "loaded",
+    "one-shot": false,
+    "private-fields": [],
+    "members": [
+      {
+        "name": "onUnitDeployed",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Unit",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Position",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            }
+          ]
+        },
+        "handler": {
+          "id": "keyword.blitz.deploy-set#onUnitDeployed",
+          "entry": "HandleAsync",
+          "script": "Func<dynamic, Context, CancellationToken, Task> HandleAsync = (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Game.Cards.UnitCard host) { return Task.CompletedTask; }\n    if (view.Unit is not Orc.Game.Cards.UnitCard deployed || !object.ReferenceEquals(deployed, host))\n    {\n        return Task.CompletedTask; // 非本单位部署：不处理\n    }\n\n    Orc.Game.Cards.KeywordRules.ResetActionQuotas(deployed); // 置额度（重复信号幂等）\n    return Task.CompletedTask;\n};\n"
+        }
+      }
+    ],
+    "mounts": [
+      {
+        "target": "engine#unit.deployed",
+        "member": "onUnitDeployed"
+      }
+    ],
+    "wraps": []
+  }
+}

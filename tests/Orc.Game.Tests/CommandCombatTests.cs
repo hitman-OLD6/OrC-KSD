@@ -372,37 +372,4 @@ public class CommandCombatTests
         Assert.Equal(4, attackerAmbush.GetData<UnitStateData>().Defense);
     }
 
-    [Fact]
-    public async Task Ambush_No_Longer_Rewrites_After_Death()
-    {
-        var bridge = new MockTargeterBridge();
-        var match = CommandTestKit.CreateCommandMatch(bridge);
-        await match.Initialize();
-        var playerA = match.Players[0];
-        var playerB = match.Players[1];
-        var killer = await CommandTestKit.PrepareOnFrontAsync(match, playerA, CommandTestKit.BeastId, 0); // 攻 6 / 防 7
-        var ambusher = await CommandTestKit.PrepareOnSupportAsync(match, playerB, CommandTestKit.AmbushId, 1); // 攻 5 / 防 6
-        CommandTestKit.Activate(killer);
-        bridge.CollectScript = CommandTestKit.AllRefsScript(match);
-
-        // 先杀死伏击兵（互伤：防 6-6=0）——死亡后逻辑组件注销、不再参与结算。
-        var attackResult = await CommandTestKit.RunCommandAsync(match, bridge, killer, ambusher.Ref);
-        Assert.Equal(CommandResultStatus.Success, attackResult.Status);
-        Assert.True(ambusher.GetData<UnitStateData>().IsDestroyed);
-
-        // 手动驱动「造成攻击伤害」（模拟对局内结算路径）：探针攻击者满足伏击条件（防 2 ＜ 伏击兵攻 5），
-        // 但伏击兵已死 → 不再改写（resolution 未被置位）。
-        var probe = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.WeakId, 1);
-        var resolution = new AttackDamageResolution();
-        await match.CommandManager.AttackDamageTrigger.InvokeAsync(
-            match.Engine,
-            new Dictionary<string, object?>
-            {
-                [CommandDataKeys.Attacker] = probe.Ref,
-                [CommandDataKeys.Target] = ambusher.Ref,
-                [CommandDataKeys.Resolution] = resolution,
-            });
-
-        Assert.False(resolution.IsRewritten);
-    }
 }

@@ -121,40 +121,6 @@ public sealed class KeywordProgramTests
         Assert.False(u.GetData<UnitStateData>().IsDestroyed);Assert.Equal(1,u.Modifiers.GetEffectiveValue(CardStatFields.Defense));
         await EffectRuntime.ResolveFor(u)!.DamageAsync(u,1);Assert.True(u.GetData<UnitStateData>().IsDestroyed);
     }
-    [Fact]
-    public async Task DeathRewriteSlotIsConsultedBeforeTheKeywordProgramAndCanCancel()
-    {
-        // S8：旧的两个并列取消口（DeathInterceptor 属性 / 词条 death.cancel）收敛为死亡处理端 Rewrite 段的 handler；
-        // 次序＝注册面（priority 0）先、内置词条 handler（priority 100）后——任一取消即终止，且都在置毁之前。
-        var (m, u, _) = await Create(new()
-        {
-            State = new() { { "consulted", 0 } },
-            Handlers = [new() { Event = "unit.destroy.before", Actions = [A("state.add", "1", "consulted")] }],
-        });
-        await m.PlayManager.PlayUnitAsync(u, m.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1));
-        var calls = 0;
-        m.CommandManager.DeathAction.Handle.Register(
-            "测试拦截器",
-            (view, ctx, _) =>
-            {
-                calls++;
-                view.ShouldDie = false;
-                ctx.Stop();
-                return Task.CompletedTask;
-            },
-            ActionHandleBands.Rewrite);
-
-        await EffectRuntime.ResolveFor(u)!.DamageAsync(u, 100);
-
-        Assert.Equal(1, calls);
-        Assert.False(u.GetData<UnitStateData>().IsDestroyed);
-        Assert.Same(m.Battlefield.PlayerASupportLine, u.GetData<UnitStateData>().Line);
-        // 拦截器先于内置词条 handler：取消后词条程序全程未被咨询（「任一取消即终止」次序保持）。
-        Assert.Equal(0, Assert.Single(KeywordProgramRuntime.Components(u)).State["consulted"]);
-
-        // 无拦截时的正常死亡路径由 PreventDeathOnceRetainsOneDefenseAndLaterDeathStillExecutes 覆盖
-        // （该用例验证 death.cancel 后再次致死仍会消灭）。
-    }
 
     [Fact]
     public async Task EffectDisplacementUsesThePortalWithoutPayingOrConsumingActions()

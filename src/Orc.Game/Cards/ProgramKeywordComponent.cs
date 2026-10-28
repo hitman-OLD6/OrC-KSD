@@ -196,7 +196,8 @@ public sealed class ProgramKeywordComponent : KeywordComponent
             if(a.Op=="state.set"){_state[a.Key]=n;continue;}
             if(a.Op=="state.add"){_state[a.Key]=Math.Clamp(checked(_state[a.Key]+n),-1_000_000,1_000_000);continue;}
             if(a.Op=="death.cancel"){if(frame is null)throw new InvalidOperationException("取消消灭只能用于消灭前事件");frame.Cancelled=true;continue;}
-            if(a.Op=="emit"){await _host.Engine.Emit(a.Key,new Dictionary<string,object?>{{GameUpdates.PayloadCard,_host},{GameUpdates.PayloadKeyword,Keyword}},ct);continue;}
+            // 沙盒／脚本的自定义信号：先运行期注册（R1e）再发射——不存在"任意字符串直接发射"的旁路。
+            if(a.Op=="emit"){_host.Engine.RegisterSignal(a.Key);await _host.Engine.Emit(a.Key,new Dictionary<string,object?>{{GameUpdates.PayloadCard,_host},{GameUpdates.PayloadKeyword,Keyword}},ct);continue;}
             foreach(var target in a.Target=="attack.target"?(frame?.AttackTarget is { } attackTarget?new[]{attackTarget}:Array.Empty<Card>()):await Targets(a.Target,actor,ct))
             {
                 n=NumberFor(a.Value,target,actor);second=NumberFor(a.Second,target,actor);
@@ -267,7 +268,9 @@ public sealed class ProgramKeywordComponent : KeywordComponent
                     case "move":await Runtime.MoveAsync(target,a.Key,ct,_host);break;
                     case "draw":await Runtime.DrawAsync(target,Math.Max(0,n),ct,_host);break;
                     case "points":if(n>=0)await Runtime.GainPointsAsync(target,n,ct,_host);else await Runtime.LosePointsAsync(target,-n,ct,_host);break;
-                    case "attach.prefab":await Runtime.AttachPrefabAsync(target,a.Key,ct:ct);break;
+                    // 运行期动态挂载面（旧 <c>Effect</c> 实例）已随 Effect 家族删除：v4 组件只在卡/词条**装配期**挂载，
+                    // 运行期没有等价通道——明确拒绝（不静默吞掉作者写错的 op）。
+                    case "attach.prefab":throw new NotSupportedException("attach.prefab 不可用：运行期动态效果面已删除（v4 组件仅在装配期挂载）。");
                     case "copy.hand":case "create.hand":
                         var match=KeywordProgramRuntime.MatchFor(_host.Engine);var owner=(target as CardBase)?.Owner??Owner??throw new InvalidOperationException("无归属");
                         string? id=a.Key;

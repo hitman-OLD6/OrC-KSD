@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 4,
+  "asset": {
+    "kind": "component",
+    "id": "keyword.sponge-armor",
+    "requires-host": "any",
+    "active-when": "loaded",
+    "one-shot": false,
+    "private-fields": [],
+    "members": [
+      {
+        "name": "onApply",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Source",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Target",
+              "type": "entity",
+              "writable": false,
+              "required": true
+            },
+            {
+              "name": "Amount",
+              "type": "number",
+              "writable": true,
+              "required": true
+            },
+            {
+              "name": "Kind",
+              "type": "string",
+              "writable": false,
+              "required": true
+            },
+            {
+              "name": "IsZeroed",
+              "type": "boolean",
+              "writable": true,
+              "required": true
+            },
+            {
+              "name": "Result",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            }
+          ]
+        },
+        "handler": {
+          "id": "keyword.sponge-armor#onApply",
+          "entry": "Handle",
+          "script": "Func<dynamic, Context, CancellationToken, Task> Handle = async (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Game.Cards.UnitCard host) { return; }\n    if (!object.ReferenceEquals(view.Target, host)) { return; }\n    if (!host.Keywords.Has(\"强磁护盾\")) { return; } // 无强磁护盾＝无效\n\n    // 海绵装甲：最终伤害值至多 1（在强磁护盾 -1 之后封顶）。\n    if (view.Amount > 1) { view.Amount = 1; }\n};\n"
+        }
+      }
+    ],
+    "mounts": [],
+    "wraps": [
+      {
+        "target": "engine#damage-apply",
+        "phase": "before",
+        "handler": "keyword.sponge-armor#onApply"
+      }
+    ]
+  }
+}

@@ -1,4 +1,5 @@
-using Orc.Cards;
+﻿using Orc.Cards;
+using Orc.Core.Model;
 using Orc.Core;
 using Orc.Game.Cards;
 using Orc.Game.Commanding;
@@ -9,6 +10,7 @@ using Xunit;
 namespace Orc.Game.Tests;
 
 /// <summary>太空战争系列（强磁护盾 / 磁反应装甲 / 海绵装甲 / 游击）行为验收：伤害规则、指向扣层、撤退规则。</summary>
+[Collection("PackKeywordRegistrySerial")]
 public sealed class SpaceWarKeywordTests : IDisposable
 {
     private const string Shield = "强磁护盾";
@@ -97,11 +99,14 @@ public sealed class SpaceWarKeywordTests : IDisposable
 
         match.Engine.ScriptEvaluator = new CSharpScriptEvaluator();
         match.Engine.SyncScriptEvaluator = new CSharpSyncScriptEvaluator();
-        foreach (var id in new[] { "keyword.magnetic-shield", "keyword.magnetic-reaction", "keyword.sponge-armor" })
-        {
-            match.Engine.Prefabs.RegisterPrefab(PrefabJson.Deserialize(File.ReadAllText(
-                Path.Combine(PackRoot, "effects", id + ".prefab.json"))));
-        }
+
+        // v4-only（§23.8 第 1 项）：词条行为由 effects-v4 组件承载（旧 effects/ 预制体已归档）。
+        var loaded = AssetPackLoader.Load(
+            match.Engine.Model!, Path.Combine(PackRoot, "effects-v4"),
+            match.Engine.ScriptEvaluator, match.Engine.SyncScriptEvaluator);
+        Assert.True(
+            loaded.Loaded,
+            "v4 装载失败：" + string.Join("；", loaded.Errors.Select(static e => $"{e.Category}/{e.Target}: {e.Message}")));
 
         return match;
     }

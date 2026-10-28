@@ -1,5 +1,6 @@
 ﻿using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Cards;
 using Orc.Game.Players;
 
@@ -7,17 +8,24 @@ namespace Orc.Game.Actions;
 
 /// <summary>
 /// 抽牌动作（S7/S10 动作接口）：两入口（卡组顶／指定牌）共用同一处理端。
+/// <para>
+/// **两端是引擎成员（S13／U3）**：公开面只给成员地址；旧身份实例随 <see cref="Ends"/> 交给宿主装配，
+/// 随旧类型在 U5 退役。
+/// </para>
 /// </summary>
 public interface IDrawAction
 {
-    /// <summary>卡组顶抽牌**触发端**。</summary>
-    Trigger<DrawTriggerView> Top { get; }
+    /// <summary>卡组顶抽牌**触发端**的成员地址（<c>engine#draw.top</c>）。</summary>
+    MemberAddress Top { get; }
 
-    /// <summary>指定牌抽取**触发端**。</summary>
-    Trigger<DrawTriggerView> Specific { get; }
+    /// <summary>指定牌抽取**触发端**的成员地址（<c>engine#draw.specific</c>）。</summary>
+    MemberAddress Specific { get; }
 
-    /// <summary>抽牌**处理端**（两入口共用）。</summary>
-    Trigger<DrawHandleView> Handle { get; }
+    /// <summary>抽牌**处理端**的成员地址（<c>engine#draw.handle</c>；两入口共用）。</summary>
+    MemberAddress Handle { get; }
+
+    /// <summary>三端登记项（两触发端＋共享处理端）。</summary>
+    IReadOnlyList<ActionTriggerEnd> Ends { get; }
 
     /// <summary>抽卡组顶（移除由本动作触发端完成；空卡组＝集合契约的既有抛错）。</summary>
     Task<ActionResult> DrawTopAsync(Player player, Card? triggerCard = null, CancellationToken ct = default);

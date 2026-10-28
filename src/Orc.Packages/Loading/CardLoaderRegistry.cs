@@ -39,7 +39,7 @@ public sealed record CardLoaderDescriptor(string Name, string PluginId, CardLoad
 /// </para>
 /// <para>
 /// 本面**只管声明**（名称白名单＋来源），不持有对局实例、不参与挂载、不参与事件分发。
-/// 对局实际使用的加载器实例登记在**对局级** <c>TriggerRegistry(layer=LowLevel)</c>（第二层注册面，仅记账审计）——
+/// 对局实际使用的加载器实例由**卡装载链**自己持有（旧的对局级登记簿已随触发器类型删除）——
 /// 两层注册面**不得混用**：本面管「谁被允许」，对局面管「本局用了谁」。
 /// </para>
 /// </summary>

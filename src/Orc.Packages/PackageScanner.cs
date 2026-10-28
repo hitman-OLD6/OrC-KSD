@@ -42,6 +42,7 @@ public sealed record PackageScan(
     PackageManifest Manifest,
     IReadOnlyList<string> CardDirectories,
     string? EffectsDirectory,
+    string? ComponentsDirectory,
     string? TextsFile,
     string? KeywordsFile,
     IReadOnlyList<ScannedSourceFile> CardFiles,
@@ -58,8 +59,11 @@ public static class PackageScanner
     /// <summary>卡目录名前缀（<c>cards</c> / <c>cards-support</c> …）。</summary>
     public const string CardsDirectoryPrefix = "cards";
 
-    /// <summary>效果库目录名。</summary>
+    /// <summary>效果库目录名（旧格式 <c>*.prefab.json</c>；U5-a 起仅作无 v4 包的过渡兼容）。</summary>
     public const string EffectsDirectoryName = "effects";
+
+    /// <summary>组件资产目录名（v4：<c>*.component.json</c>；生产装载的首选来源）。</summary>
+    public const string ComponentsDirectoryName = "effects-v4";
 
     /// <summary>卡面文本文件名。</summary>
     public const string TextsFileName = "texts.json";
@@ -103,6 +107,7 @@ public static class PackageScanner
         }
 
         var effectsDirectory = Path.Combine(root, EffectsDirectoryName);
+        var componentsDirectory = Path.Combine(root, ComponentsDirectoryName);
         var textsFile = Path.Combine(root, TextsFileName);
         var keywordsFile = Path.Combine(root, KeywordsFileName);
 
@@ -119,6 +124,7 @@ public static class PackageScanner
             manifest,
             cardDirectories,
             Directory.Exists(effectsDirectory) ? effectsDirectory : null,
+            Directory.Exists(componentsDirectory) ? componentsDirectory : null,
             File.Exists(textsFile) ? textsFile : null,
             File.Exists(keywordsFile) ? keywordsFile : null,
             cardFiles,

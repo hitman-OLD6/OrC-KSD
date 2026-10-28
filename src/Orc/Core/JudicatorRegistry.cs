@@ -15,6 +15,19 @@ namespace Orc.Core;
 /// </summary>
 public sealed class JudicatorRegistry : ServiceRegistry<Judicator, JudicatorRegistration, JudicatorWrapperRegistration>
 {
+    private Orc.Core.Model.WrapRegistry? _modelWraps;
+
+    /// <summary>
+    /// 新模型包装注册面（S9／R1i）：组件资产声明的 <c>judge-wraps</c> 登记于此，
+    /// 执行时与成员包装器**同一相位语义**（before FIFO／after FIFO／replace 最后声明者；R1i 修订）。
+    /// <para>null＝未接入编排运行时（独立构造路径／无编排模型的对局）；此时只有旧式域桶包装器生效。</para>
+    /// </summary>
+    public Orc.Core.Model.WrapRegistry? ModelWraps
+    {
+        get => _modelWraps;
+        set => _modelWraps = value;
+    }
+
     /// <summary>
     /// 注册一枚判定器条目（字符串名 ordinal；注册即配置——重复注册拒绝）。返回条目等价句柄
     /// （与按名解析所得为同一可寻址锚——注册方自持句柄、按名解析两通道等效）。
@@ -25,7 +38,12 @@ public sealed class JudicatorRegistry : ServiceRegistry<Judicator, JudicatorRegi
     /// <exception cref="ArgumentException">name 为 null/空白。</exception>
     /// <exception cref="ArgumentNullException">judicator 为 null。</exception>
     /// <exception cref="InvalidOperationException">同名条目重复注册（被拒绝——注册即配置）。</exception>
-    public JudicatorRegistration Register(string name, Judicator judicator) => RegisterCore(name, judicator);
+    public JudicatorRegistration Register(string name, Judicator judicator)
+    {
+        var handle = RegisterCore(name, judicator);
+        handle.Entry.ModelJudgeWrapSource = () => _modelWraps;
+        return handle;
+    }
 
     /// <summary>
     /// 按名解析条目（字符串名 ordinal、逐字敏感）。返回条目等价句柄（与注册所得为同一可寻址锚——

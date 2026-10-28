@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 4,
+  "asset": {
+    "kind": "component",
+    "id": "keyword.mobilize.accrual",
+    "requires-host": "any",
+    "active-when": "loaded",
+    "one-shot": false,
+    "private-fields": [],
+    "members": [
+      {
+        "name": "onTurnStart",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Player",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "TurnNumber",
+              "type": "number",
+              "writable": false,
+              "required": false
+            }
+          ]
+        },
+        "handler": {
+          "id": "keyword.mobilize.accrual#onTurnStart",
+          "entry": "HandleAsync",
+          "script": "Func<dynamic, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Game.Cards.CardBase host) { return; }\n    if (view.Player is not Orc.Game.Players.Player current) { return; }\n    if (!object.ReferenceEquals(host.Owner, current)) { return; }\n\n    if (host is not Orc.Game.Cards.UnitCard unit) { return; }\n    if (!unit.TryGetData<Orc.Game.Cards.UnitStateData>(out var state) || state.IsDestroyed || state.Line is null)\n    {\n        return; // 未在场（未单位化/已死亡/无位置）：不获得\n    }\n\n    await unit.Modifiers.AddModifiersAsync(\n        new Orc.Game.Cards.Modifier[]\n        {\n            new Orc.Game.Cards.AddModifier(Orc.Game.Cards.CardStatFields.Attack, 1, host),\n            new Orc.Game.Cards.AddModifier(Orc.Game.Cards.CardStatFields.Defense, 1, host),\n        },\n        ct);\n};\n"
+        }
+      }
+    ],
+    "mounts": [
+      {
+        "target": "engine#turn.start",
+        "member": "onTurnStart"
+      }
+    ],
+    "wraps": []
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 4,
+  "asset": {
+    "kind": "component",
+    "id": "keyword.magnetic-reaction",
+    "requires-host": "any",
+    "active-when": "loaded",
+    "one-shot": false,
+    "private-fields": [],
+    "members": [
+      {
+        "name": "onApply",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Source",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Target",
+              "type": "entity",
+              "writable": false,
+              "required": true
+            },
+            {
+              "name": "Amount",
+              "type": "number",
+              "writable": true,
+              "required": true
+            },
+            {
+              "name": "Kind",
+              "type": "string",
+              "writable": false,
+              "required": true
+            },
+            {
+              "name": "IsZeroed",
+              "type": "boolean",
+              "writable": true,
+              "required": true
+            },
+            {
+              "name": "Result",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            }
+          ]
+        },
+        "handler": {
+          "id": "keyword.magnetic-reaction#onApply",
+          "entry": "Handle",
+          "script": "Func<dynamic, Context, CancellationToken, Task> Handle = async (view, ctx, ct) =>\n{\n    var host = view.Host;\n    if (host is null || !object.ReferenceEquals(view.Target, host)) { return; }\n\n    // 磁反应装甲：具有免疫（伤害归零；不拦索敌、不防抑制）。\n    view.IsZeroed = true;\n    view.Amount = 0;\n};\n"
+        }
+      },
+      {
+        "name": "onTargeted",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Source",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Target",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Kind",
+              "type": "entity",
+              "writable": false,
+              "required": true
+            },
+            {
+              "name": "TriggerCard",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            }
+          ]
+        },
+        "handler": {
+          "id": "keyword.magnetic-reaction#onTargeted",
+          "entry": "Handle",
+          "script": "Func<dynamic, Context, CancellationToken, Task> Handle = async (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Game.Cards.UnitCard host) { return; }\n\n    var sourceOwner = view.Source switch\n    {\n        Orc.Game.Cards.UnitCard unit => unit.Owner,\n        Orc.Game.Players.Hq hq => hq.Owner,\n        _ => null,\n    };\n    if (sourceOwner is null || object.ReferenceEquals(sourceOwner, host.Owner)) { return; } // 仅敌方指向\n\n    var x = host.Keywords.GetValue(\"磁反应装甲\");\n    if (x is null) { return; }\n\n    var next = x.Value - 1;\n    if (next <= 0) { await host.Keywords.RevokeAsync(\"磁反应装甲\"); }\n    else { host.Keywords.SetValue(\"磁反应装甲\", next); }\n};\n"
+        }
+      }
+    ],
+    "mounts": [
+      {
+        "target": "host#targeting",
+        "member": "onTargeted"
+      }
+    ],
+    "wraps": [
+      {
+        "target": "engine#damage-apply",
+        "phase": "before",
+        "handler": "keyword.magnetic-reaction#onApply"
+      }
+    ]
+  }
+}

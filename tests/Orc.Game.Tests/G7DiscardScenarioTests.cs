@@ -401,19 +401,15 @@ internal sealed class DiscardWatchHandler
 {
     private readonly LogicEngine _engine;
     private readonly Player _watchedPlayer;
-    private readonly Trigger<DiscardWatchView> _watchTrigger;
+    private readonly string _watchName;
     private readonly List<Card> _discarded = new();
+    private IDisposable? _watch;
 
     public DiscardWatchHandler(LogicEngine engine, Player watchedPlayer)
     {
         _engine = engine;
         _watchedPlayer = watchedPlayer;
-        _watchTrigger = new Trigger<DiscardWatchView>(
-            $"{watchedPlayer.Index}/弃置监听",
-            TriggerKind.Passive,
-            events: new[] { new TriggerEvent<DiscardWatchView>("累计", OnDiscardedAsync) },
-            hooks: new[] { GameUpdates.CardDiscarded },
-            owner: this);
+        _watchName = $"{watchedPlayer.Index}/弃置监听";
     }
 
     /// <summary>收到的 card.discarded 事件总数（过滤前；真实源联动证据）。</summary>
@@ -428,7 +424,8 @@ internal sealed class DiscardWatchHandler
     /// <summary>条件达成（第 2 张起）触发次数（可断言结果）。</summary>
     public int ThresholdFires { get; private set; }
 
-    public void Attach() => _engine.Bus.Mount(_watchTrigger);
+    public void Attach()
+        => _watch ??= _engine.Watch<DiscardWatchView>(GameUpdates.CardDiscarded, _watchName, this, OnDiscardedAsync);
 
     private Task OnDiscardedAsync(DiscardWatchView view, Context ctx, CancellationToken ct)
     {

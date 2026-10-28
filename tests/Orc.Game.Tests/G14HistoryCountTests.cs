@@ -86,7 +86,7 @@ public class G14HistoryCountTests
         await match.ResourceManager.AddPointsAsync(playerA, 10); // 受控加值面：准备攻击行动费（每击 1 点）
 
         var handler = new DamageThresholdWatchHandler(match.Engine, dummy, threshold: 3);
-        handler.Attach(match.CommandManager);
+        handler.Attach();
 
         // 回合 1：三击（每击 2 伤——伤害数值真实取自结算〔承受方损伤量增量〕；承受方不反击）
         await StrikeAsync(match, bridge, w1, dummy);
@@ -268,26 +268,17 @@ internal sealed class UseCountWatchHandler
     private readonly LogicEngine _engine;
     private readonly Player _player;
     private readonly CardDefinition _watchedDefinition;
-    private readonly Trigger<CardPlayedWatchView> _watchTrigger;
-    private readonly Trigger<CardEventView> _fireTrigger;
+    private readonly string _watchName;
+    private readonly string _fireSink;
+    private IDisposable? _watch;
 
     public UseCountWatchHandler(LogicEngine engine, Player player, CardDefinition watchedDefinition)
     {
         _engine = engine;
         _player = player;
         _watchedDefinition = watchedDefinition;
-        _watchTrigger = new Trigger<CardPlayedWatchView>(
-            $"{watchedDefinition.Name}/使用计数监听",
-            TriggerKind.Passive,
-            events: new[] { new TriggerEvent<CardPlayedWatchView>("累计", OnPlayedAsync) },
-            hooks: new[] { GameUpdates.CardPlayed },
-            owner: this);
-        _fireTrigger = new Trigger<CardEventView>($"{watchedDefinition.Name}/结算产出目标", TriggerKind.Active);
-        _fireTrigger.Register("产出", (view, ctx, ct) =>
-        {
-            FireCount += 1;
-            return Task.CompletedTask;
-        });
+        _watchName = $"{watchedDefinition.Name}/使用计数监听";
+        _fireSink = GameKernelTestKit.Sink(engine, $"{watchedDefinition.Name}/结算产出目标", () => FireCount += 1);
     }
 
     /// <summary>收到的 card.played 事件总数（过滤前；真实源联动证据）。</summary>
@@ -299,7 +290,8 @@ internal sealed class UseCountWatchHandler
     /// <summary>结算产出的触发次数（可断言结果）。</summary>
     public int FireCount { get; private set; }
 
-    public void Attach() => _engine.Bus.Mount(_watchTrigger);
+    public void Attach()
+        => _watch ??= _engine.Watch<CardPlayedWatchView>(GameUpdates.CardPlayed, _watchName, this, OnPlayedAsync);
 
     private Task OnPlayedAsync(CardPlayedWatchView view, Context ctx, CancellationToken ct)
     {
@@ -325,7 +317,7 @@ internal sealed class UseCountWatchHandler
         var count = UseCount;
         for (var i = 0; i < count; i++)
         {
-            await _fireTrigger.InvokeAsync(_engine, null, ct);
+            await GameKernelTestKit.FireAsync(_engine, _fireSink, ct);
         }
 
         return count;
@@ -335,18 +327,25 @@ internal sealed class UseCountWatchHandler
 // ---------- 场景②：累计伤害阈值监听 handler ----------
 
 /// <summary>
-/// 累计伤害阈值监听 handler（场景②「累计受到伤害≥3 时」）：订阅「造成攻击伤害」共享流程触发器
-/// （注册优先级＝默认互伤之后——读取结算后的承受方损伤量真实变化）；状态＝私有闭环：
+/// 累计伤害阈值监听 handler（场景②「累计受到伤害≥3 时」）：订阅**受伤害信号** <c>card.damaged</c>
+/// （伤害结算后、防御实际变化恰一次——读取结算后的承受方损伤量真实变化）；状态＝私有闭环：
 /// 上次观测损伤量＋域内累计＋已触发标志；≥阈值达成 → 触发自持主动触发器恰一次（同域不重复）；
 /// 域＝回合（turn.end 重置——累计归零、标志复位）。伤害数值＝损伤量差值（真实取自结算，非事件次数）。
+/// <para>
+/// 夹具口径（v4）：原订阅面＝「造成攻击伤害」共享流程成员 <c>engine#attack-damage</c>（外来边 priority 200）。
+/// v4 里该成员是管道型（自有边位次＝last 之外，外来边先于默认结算跑），探针因此在**结算前**执行、损伤量增量恒 0。
+/// 等价观测面＝结算后发射的 <c>card.damaged</c>（E1-33：防御实际变化才发）——同一承受方、同一"每击一次"粒度。
+/// </para>
 /// </summary>
 internal sealed class DamageThresholdWatchHandler
 {
     private readonly LogicEngine _engine;
     private readonly UnitCard _watched;
     private readonly int _threshold;
-    private readonly Trigger<CardEventView> _fireTrigger;
-    private readonly Trigger<CardEventView> _resetTrigger;
+    private readonly string _fireSink;
+    private readonly string _watchName;
+    private IDisposable? _watch;
+    private IDisposable? _damageWatch;
     private int _lastSeenLoss;
     private bool _firedInDomain;
 
@@ -355,18 +354,8 @@ internal sealed class DamageThresholdWatchHandler
         _engine = engine;
         _watched = watched;
         _threshold = threshold;
-        _fireTrigger = new Trigger<CardEventView>($"{watched.Name}/阈值触发目标", TriggerKind.Active);
-        _fireTrigger.Register("发布", (view, ctx, ct) =>
-        {
-            FireCount += 1;
-            return Task.CompletedTask;
-        });
-        _resetTrigger = new Trigger<CardEventView>(
-            $"{watched.Name}/域重置监听",
-            TriggerKind.Passive,
-            events: new[] { new TriggerEvent<CardEventView>("重置", OnTurnEndAsync) },
-            hooks: new[] { GameUpdates.TurnEnd },
-            owner: this);
+        _fireSink = GameKernelTestKit.Sink(engine, $"{watched.Name}/阈值触发目标", () => FireCount += 1);
+        _watchName = $"{watched.Name}/域重置监听";
     }
 
     /// <summary>受击结算观测次数（指定承受方；订阅生效证据）。</summary>
@@ -381,18 +370,17 @@ internal sealed class DamageThresholdWatchHandler
     /// <summary>域重置次数（回合结束驱动）。</summary>
     public int ResetCount { get; private set; }
 
-    /// <summary>订阅伤害流程（「造成攻击伤害」共享触发器；默认互伤之后执行）＋挂载域重置监听。</summary>
-    public void Attach(CommandManager commands)
+    /// <summary>订阅受伤害信号（结算后）＋挂载域重置监听。</summary>
+    public void Attach()
     {
-        commands.AttackDamageTrigger.Register(
-            $"{_watched.Name}/伤害结算监听", OnDamageResolvedAsync,
-            Orc.Game.Actions.ActionHandleBands.Apply, priority: 200);
-        _engine.Bus.Mount(_resetTrigger);
+        _damageWatch ??= _engine.Watch<CardDamagedWatchView>(
+            GameUpdates.CardDamaged, $"{_watched.Name}/伤害结算监听", this, OnDamageResolvedAsync);
+        _watch ??= _engine.Watch<CardEventView>(GameUpdates.TurnEnd, _watchName, this, OnTurnEndAsync);
     }
 
-    private async Task OnDamageResolvedAsync(AttackDamageTriggerView view, Context ctx, CancellationToken ct)
+    private async Task OnDamageResolvedAsync(CardDamagedWatchView view, Context ctx, CancellationToken ct)
     {
-        if (view.Target is not { IsAlive: true } targetRef || !ReferenceEquals(targetRef.Value, _watched))
+        if (view.Card is not UnitCard card || !ReferenceEquals(card, _watched))
         {
             return; // 仅统计「指定承受方」受到的伤害
         }
@@ -410,7 +398,7 @@ internal sealed class DamageThresholdWatchHandler
         if (!_firedInDomain && TotalDamage >= _threshold)
         {
             _firedInDomain = true;
-            await _fireTrigger.InvokeAsync(_engine, null, ct); // 阈值达成 → 触发主动触发器（恰一次）
+            await GameKernelTestKit.FireAsync(_engine, _fireSink, ct); // 阈值达成 → 触发产出目标（恰一次）
         }
     }
 
@@ -434,25 +422,16 @@ internal sealed class FirstShuffleWatchHandler
 {
     private readonly LogicEngine _engine;
     private readonly Player _player;
-    private readonly Trigger<DeckShuffleWatchView> _watchTrigger;
-    private readonly Trigger<CardEventView> _fireTrigger;
+    private readonly string _watchName;
+    private readonly string _fireSink;
+    private IDisposable? _watch;
 
     public FirstShuffleWatchHandler(LogicEngine engine, Player player)
     {
         _engine = engine;
         _player = player;
-        _watchTrigger = new Trigger<DeckShuffleWatchView>(
-            $"{player.Index}/首次洗切监听",
-            TriggerKind.Passive,
-            events: new[] { new TriggerEvent<DeckShuffleWatchView>("首次达成", OnShuffledAsync) },
-            hooks: new[] { GameUpdates.DeckShuffled },
-            owner: this);
-        _fireTrigger = new Trigger<CardEventView>($"{player.Index}/首次洗切触发目标", TriggerKind.Active);
-        _fireTrigger.Register("发布", (view, ctx, ct) =>
-        {
-            FireCount += 1;
-            return Task.CompletedTask;
-        });
+        _watchName = $"{player.Index}/首次洗切监听";
+        _fireSink = GameKernelTestKit.Sink(engine, $"{player.Index}/首次洗切触发目标", () => FireCount += 1);
     }
 
     /// <summary>归属过滤后的观察窗口计数（窗口内令标志可参与判定的信号数）。</summary>
@@ -461,7 +440,8 @@ internal sealed class FirstShuffleWatchHandler
     /// <summary>首次达成触发次数（恰一次语义的可断言观测面）。</summary>
     public int FireCount { get; private set; }
 
-    public void Attach() => _engine.Bus.Mount(_watchTrigger);
+    public void Attach()
+        => _watch ??= _engine.Watch<DeckShuffleWatchView>(GameUpdates.DeckShuffled, _watchName, this, OnShuffledAsync);
 
     private async Task OnShuffledAsync(DeckShuffleWatchView view, Context ctx, CancellationToken ct)
     {
@@ -476,7 +456,7 @@ internal sealed class FirstShuffleWatchHandler
             return; // 标志自持：已达成 → 不重复触发
         }
 
-        await _fireTrigger.InvokeAsync(_engine, null, ct);
+        await GameKernelTestKit.FireAsync(_engine, _fireSink, ct);
     }
 }
 
@@ -491,19 +471,14 @@ internal sealed class PointSlotLeadEvaluator
     private readonly LogicEngine _engine;
     private readonly Player _self;
     private readonly Player _opponent;
-    private readonly Trigger<CardEventView> _fireTrigger;
+    private readonly string _fireSink;
 
     public PointSlotLeadEvaluator(LogicEngine engine, Player self, Player opponent)
     {
         _engine = engine;
         _self = self;
         _opponent = opponent;
-        _fireTrigger = new Trigger<CardEventView>($"即时比较/差值产出目标（{self.Index}）", TriggerKind.Active);
-        _fireTrigger.Register("发布", (view, ctx, ct) =>
-        {
-            FireCount += 1;
-            return Task.CompletedTask;
-        });
+        _fireSink = GameKernelTestKit.Sink(engine, $"即时比较/差值产出目标（{self.Index}）", () => FireCount += 1);
     }
 
     /// <summary>差值的触发产出次数（可断言结论）。</summary>
@@ -515,7 +490,7 @@ internal sealed class PointSlotLeadEvaluator
         var lead = _self.PointSlots - _opponent.PointSlots; // 实时读取（无缓存/无历史）
         for (var i = 0; i < lead; i++)
         {
-            await _fireTrigger.InvokeAsync(_engine, null, ct);
+            await GameKernelTestKit.FireAsync(_engine, _fireSink, ct);
         }
 
         return lead;
@@ -548,4 +523,17 @@ public class DeckShuffleWatchView
     [Optional]
     [Read]
     public virtual object? Deck { get; set; }
+}
+
+/// <summary>card.damaged 监听视图（载荷：{ Card, Amount, Source }——受方侧；伤害结算后发射、防御实际变化恰一次）。</summary>
+[ContextView]
+public class CardDamagedWatchView
+{
+    [Optional]
+    [Read]
+    public virtual object? Card { get; set; }
+
+    [Optional]
+    [Read]
+    public virtual int Amount { get; set; }
 }

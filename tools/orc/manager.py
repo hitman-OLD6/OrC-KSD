@@ -18,8 +18,8 @@ from . import timeouts
 
 DEFAULT_ENDPOINT = "127.0.0.1:51999"
 DEFAULT_PACK = os.path.join("samples", "card-pack-ai")
-MANAGER_DLL = os.path.join("src", "Orc.Manager", "bin", "Debug", "net8.0", "Orc.Manager.dll")
-SERVER_DLL = os.path.join("src", "Orc.Manager", "bin", "Debug", "net8.0", "Orc.Server.dll")
+MANAGER_DLL = os.path.join("artifacts", "slot", "bin", "Orc.Manager", "debug", "Orc.Manager.dll")
+SERVER_DLL = os.path.join("artifacts", "slot", "bin", "Orc.Manager", "debug", "Orc.Server.dll")
 SESSION_SCHEMA = 1
 DECK_SIZE = 39
 
@@ -283,7 +283,7 @@ def preflight(repo_root):
     if problems:
         raise CliError(
             "管理器无法启动：" + "；".join(problems),
-            "修复：dotnet build src/Orc.Manager/Orc.Manager.csproj",
+            "修复：dotnet build OrcEngine.sln",
         )
     return manager_dll
 
@@ -359,7 +359,7 @@ def ensure_manager(client, launch, repo_root, say=None):
             "启动方式：\n"
             "  1) start-manager.bat\n"
             "  2) orc_play.bat play --launch-manager\n"
-            "  3) dotnet src/Orc.Manager/bin/Debug/net8.0/Orc.Manager.dll serve --port %s"
+            "  3) dotnet artifacts/slot/bin/Orc.Manager/debug/Orc.Manager.dll serve --port %s"
             % client.port,
         )
     process, log_path = launch_manager(repo_root, client.port)

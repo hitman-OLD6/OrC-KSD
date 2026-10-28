@@ -76,28 +76,6 @@ public class HqEntityTests
         Assert.DoesNotContain(match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(0).Ref, report.Attack.Candidates); // 己方 HQ 槽亦不产出
     }
 
-    [Fact]
-    public async Task Scene1_LoadingFace_Mount_Effect_Unmount_And_Restore_Minimal_Circuit()
-    {
-        var match = CommandTestKit.CreateCommandMatch();
-        await match.Initialize();
-        var playerB = match.Players[1];
-        var hq = playerB.Hq;
-        var source = new object(); // 施加方标识（按来源撤销）
-
-        // d) 最小回路（代表性装载物＝修饰器）：挂载 → 生效 → 卸载（按来源撤销）→ 还原（含数值还原）
-        await hq.Modifiers.AddModifierAsync(new AddModifier(CardStatFields.HqHealth, 3, source));
-        Assert.Equal(23, hq.Health);
-        Assert.Equal(23, playerB.HqHealth);
-
-        await hq.Modifiers.RemoveBySourceAsync(source);
-        Assert.Equal(Player.InitialHqHealth, hq.Health); // 数值还原（卸载后回到挂载前值）
-        Assert.Equal(Player.InitialHqHealth, playerB.HqHealth);
-
-        // 装载面就位核对：修饰容器（挂/卸/按来源撤销）＋效果容器面（AddEffect/Effects）＋引擎订阅面（场景②）
-        Assert.Empty(hq.Modifiers.All);
-        Assert.Empty(hq.Effects);
-    }
 
     [Fact]
     public async Task Scene1_Attack_Base_Path_Applies_Damage_Through_Pipeline_With_Signal()

@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 4,
+  "asset": {
+    "kind": "component",
+    "id": "keyword.magnetic-shield",
+    "requires-host": "any",
+    "active-when": "loaded",
+    "one-shot": false,
+    "private-fields": [],
+    "members": [
+      {
+        "name": "onApply",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Source",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Target",
+              "type": "entity",
+              "writable": false,
+              "required": true
+            },
+            {
+              "name": "Amount",
+              "type": "number",
+              "writable": true,
+              "required": true
+            },
+            {
+              "name": "Kind",
+              "type": "string",
+              "writable": false,
+              "required": true
+            },
+            {
+              "name": "IsZeroed",
+              "type": "boolean",
+              "writable": true,
+              "required": true
+            },
+            {
+              "name": "Result",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            }
+          ]
+        },
+        "handler": {
+          "id": "keyword.magnetic-shield#onApply",
+          "entry": "Handle",
+          "script": "Func<dynamic, Context, CancellationToken, Task> Handle = async (view, ctx, ct) =>\n{\n    var host = view.Host;\n    if (host is null || !object.ReferenceEquals(view.Target, host)) { return; }\n\n    // 强磁护盾：受到的伤害 -1（对战/效果/战斗三类伤害同一处理端；下限 0）。\n    view.Amount = System.Math.Max(0, view.Amount - 1);\n};\n"
+        }
+      },
+      {
+        "name": "onAttack",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Attacker",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Target",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "TriggerCard",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "IsCommandAttack",
+              "type": "boolean",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Result",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            }
+          ]
+        },
+        "handler": {
+          "id": "keyword.magnetic-shield#onAttack",
+          "entry": "Handle",
+          "script": "Func<dynamic, Context, CancellationToken, Task> Handle = async (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Game.Cards.UnitCard host) { return; }\n    if (view.Attacker is not { } attacker || !object.ReferenceEquals(attacker.Value, host)) { return; }\n    if (!view.IsCommandAttack) { return; } // 仅玩家指挥攻击（效果发起的攻击不失去）\n\n    await host.Keywords.RevokeAsync(\"强磁护盾\");\n};\n"
+        }
+      }
+    ],
+    "mounts": [],
+    "wraps": [
+      {
+        "target": "engine#damage-apply",
+        "phase": "before",
+        "handler": "keyword.magnetic-shield#onApply"
+      },
+      {
+        "target": "engine#unit-attack",
+        "phase": "after",
+        "handler": "keyword.magnetic-shield#onAttack"
+      }
+    ]
+  }
+}

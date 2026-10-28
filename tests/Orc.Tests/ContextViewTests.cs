@@ -168,23 +168,21 @@ public class ContextViewTests
     }
 
     [Fact]
-    public async Task Trigger_Isolates_PermissionDenied_From_Events()
+    public async Task Member_Execution_Does_Not_Isolate_PermissionDenied()
     {
+        // §27.1 语义变更：成员执行面**不再把业务异常结局化**（旧 Trigger.InvokeAsync 的
+        // "记录并继续、返回失败流"已删除）——越权写现在原样上抛（fail-fast）。
         var engine = new LogicEngine();
-        var trigger = new Trigger<MatrixView>(name: "权限联动", events: new[]
+        var edge = Orc.Core.Model.MemberEdges.For<MatrixView>((view, ctx, ct) =>
         {
-            new TriggerEvent<MatrixView>("越权", (view, ctx, ct) =>
-            {
-                view.ReadOnlyAmount = 5; // [Read] 写 → 当刻拒绝（PermissionDeniedException）
-                return Task.CompletedTask;
-            }),
+            view.ReadOnlyAmount = 5; // [Read] 写 → 当刻拒绝（PermissionDeniedException）
+            return Task.CompletedTask;
         });
+        var member = KernelTestKit.Member("权限联动", edge);
 
-        // S2 语义（受控变更）：业务类异常（含越权）被隔离——记录并继续，执行正常返回流
-        var stream = await trigger.InvokeAsync(engine, NewMatrixData());
+        var thrown = await Assert.ThrowsAsync<PermissionDeniedException>(
+            () => KernelTestKit.RunAsync(engine, member, NewMatrixData()));
 
-        var record = stream.Entries.Single(e => e.Keywords.Contains("exception:PermissionDeniedException"));
-        Assert.Equal(LogLevel.Error, record.Level);
-        Assert.Equal("权限联动/越权", record.Source);
+        Assert.Contains("只读", thrown.Message, StringComparison.Ordinal);
     }
 }

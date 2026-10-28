@@ -1,10 +1,12 @@
 using Orc.Cards;
+using Orc.Core.Model;
 using Orc.Game;
 using Orc.Game.Board;
 using Orc.Game.Cards;
 using Orc.Game.Cards.Data;
 using Orc.Game.Collections;
 using Orc.Game.Players;
+using Orc.Script;
 using Xunit;
 
 namespace Orc.Game.Tests;
@@ -41,14 +43,14 @@ public class CardPackDemoTests
     [Fact]
     public void 预检_示例包报双零与统计面()
     {
-        if (!TryLocatePackDirectories(out var cardsDirectory, out var supportDirectory, out var libraryDirectory))
+        if (!TryLocatePackDirectories(out var cardsDirectory, out var supportDirectory, out var componentsDirectory))
         {
             return; // 示例卡包目录缺失：跳过（演示数据职责——对齐 OfficialCardDataSmokeTests 先例）。
         }
 
         // ① 预检：分发数据静态校验（多目录合并；不注册、不建对局）。
         var report = CardDistributionValidator.Validate(
-            new[] { cardsDirectory, supportDirectory }, new[] { libraryDirectory });
+            new[] { cardsDirectory, supportDirectory }, new[] { componentsDirectory });
 
         // 问题面：Errors / Warnings 双零（含跨目录共享引用面）。
         Assert.Empty(report.Errors);
@@ -74,7 +76,7 @@ public class CardPackDemoTests
     [Fact]
     public async Task 装载与注册_五卡两内联一库全链就绪()
     {
-        if (!TryLocatePackDirectories(out var cardsDirectory, out var supportDirectory, out var libraryDirectory))
+        if (!TryLocatePackDirectories(out var cardsDirectory, out var supportDirectory, out var componentsDirectory))
         {
             return; // 示例卡包目录缺失：跳过。
         }
@@ -93,10 +95,10 @@ public class CardPackDemoTests
         AssertDeclaration(pack, VanguardId, RallyEffectId);
 
         // ③ 注册 → ④ 初始化（注册先于卡加载——引用就绪前提）。
-        var match = await CreatePackMatchAsync(pack, libraryDirectory);
+        var match = await CreatePackMatchAsync(pack, componentsDirectory);
 
-        // 注册面就绪：库效果与两条内联效果均已在引擎预制体库。
-        Assert.True(match.Engine.Prefabs.TryGetPrefab(RallyEffectId, out _));
+        // 注册面就绪：库效果（v4 组件）在编排目录；两条内联效果（卡面文本编译器产物）仍在旧预制体库。
+        Assert.True(match.Engine.Model!.Catalog.Contains(RallyEffectId), "v4 组件 demo.rally 应已注册进编排目录");
         Assert.True(match.Engine.Prefabs.TryGetPrefab(GrenadeEffectId, out _));
         Assert.True(match.Engine.Prefabs.TryGetPrefab(EnlistEffectId, out _));
     }
@@ -106,12 +108,12 @@ public class CardPackDemoTests
     [Fact]
     public async Task 基础单位卡_真实打出_数值就绪()
     {
-        if (!TryLocatePackDirectories(out var cardsDirectory, out var supportDirectory, out var libraryDirectory))
+        if (!TryLocatePackDirectories(out var cardsDirectory, out var supportDirectory, out var componentsDirectory))
         {
             return; // 示例卡包目录缺失：跳过。
         }
 
-        var match = await CreatePackMatchAsync(LoadPack(cardsDirectory, supportDirectory), libraryDirectory);
+        var match = await CreatePackMatchAsync(LoadPack(cardsDirectory, supportDirectory), componentsDirectory);
         var playerA = match.Players[0];
 
         // ⑤ 使用：真实打出（部署链驱动；步枪兵 0 费、数值 1 / 2）。
@@ -133,12 +135,12 @@ public class CardPackDemoTests
     [Fact]
     public async Task 内联csx效果卡_真实打出_对敌方造成伤害()
     {
-        if (!TryLocatePackDirectories(out var cardsDirectory, out var supportDirectory, out var libraryDirectory))
+        if (!TryLocatePackDirectories(out var cardsDirectory, out var supportDirectory, out var componentsDirectory))
         {
             return; // 示例卡包目录缺失：跳过。
         }
 
-        var match = await CreatePackMatchAsync(LoadPack(cardsDirectory, supportDirectory), libraryDirectory);
+        var match = await CreatePackMatchAsync(LoadPack(cardsDirectory, supportDirectory), componentsDirectory);
         var playerA = match.Players[0];
         var playerB = match.Players[1];
 
@@ -160,12 +162,12 @@ public class CardPackDemoTests
     [Fact]
     public async Task 共享库效果卡_跨目录两张各自打出_各自触发()
     {
-        if (!TryLocatePackDirectories(out var cardsDirectory, out var supportDirectory, out var libraryDirectory))
+        if (!TryLocatePackDirectories(out var cardsDirectory, out var supportDirectory, out var componentsDirectory))
         {
             return; // 示例卡包目录缺失：跳过。
         }
 
-        var match = await CreatePackMatchAsync(LoadPack(cardsDirectory, supportDirectory), libraryDirectory);
+        var match = await CreatePackMatchAsync(LoadPack(cardsDirectory, supportDirectory), componentsDirectory);
         var playerA = match.Players[0];
         using var recorder = new UpdateRecorder(match.Engine);
 
@@ -197,14 +199,14 @@ public class CardPackDemoTests
     [Fact]
     public async Task 定向取卡_加入触发_从卡组抽取自己()
     {
-        if (!TryLocatePackDirectories(out var cardsDirectory, out var supportDirectory, out var libraryDirectory))
+        if (!TryLocatePackDirectories(out var cardsDirectory, out var supportDirectory, out var componentsDirectory))
         {
             return; // 示例卡包目录缺失：跳过。
         }
 
         // 卡组期场景：侦察兵 ×1 ＋ 步兵 ×9（宿主以卡组期承载——起手装载可能将其抽入）。
         var deckForPlayerA = new CardList(new[] { ScoutId }.Concat(Enumerable.Repeat(CommandTestKit.InfantryId, 9)));
-        var match = await CreatePackMatchAsync(LoadPack(cardsDirectory, supportDirectory), libraryDirectory, deckForPlayerA);
+        var match = await CreatePackMatchAsync(LoadPack(cardsDirectory, supportDirectory), componentsDirectory, deckForPlayerA);
         var playerA = match.Players[0];
 
         // 宿主就位：起手装载被抽入的场合回迁卡组顶（静默回迁）——确保其在卡组中等待触发。
@@ -268,12 +270,12 @@ public class CardPackDemoTests
     }
 
     /// <summary>
-    /// ③ 注册 → ④ 初始化：效果声明注册（DeclarePrefab）＋ 内联预制体注册（RegisterPrefab）＋
-    /// 效果库装载（LoadDirectory——含内部注册）；随后 <c>Match.Initialize</c>（效果随卡装载）。
+    /// ③ 注册 → ④ 初始化：效果声明注册（DeclarePrefab）＋ v4 组件资产装载（<see cref="AssetPackLoader"/>，
+    /// 「全量校验 → 统一注册」原子口径）；随后 <c>Match.Initialize</c>（效果随卡装载）。
     /// 默认卡组＝步兵 ×10（与 CommandTestKit 定制定义集同源）；示例包定义集追加。
     /// </summary>
     private static async Task<Match> CreatePackMatchAsync(
-        PackData pack, string libraryDirectory, CardList? deckForPlayerA = null)
+        PackData pack, string componentsDirectory, CardList? deckForPlayerA = null)
     {
         var registry = new CardEffectRegistry();
         foreach (var (cardId, prefabIds) in pack.Declarations)
@@ -286,8 +288,10 @@ public class CardPackDemoTests
             new CardList(Enumerable.Repeat(CommandTestKit.InfantryId, 10)),
             CommandTestKit.CreateDefinitions().Concat(pack.Definitions),
             seed: 42,
+            // S9／R2：内联 csx 的 sel=one 属"外部裁定"——用例扮演前端（自动选首个）。
             options: new MatchOptions { SkipMulligan = true },
             effectRegistry: registry,
+            targeterBridge: CommandTestKit.AutoPickBridge(),
             packageActivator: TestHost.Activator);
 
         foreach (var snapshot in pack.Prefabs)
@@ -295,9 +299,14 @@ public class CardPackDemoTests
             match.Engine.Prefabs.RegisterPrefab(snapshot);
         }
 
-        var libraryLoad = match.Engine.Prefabs.LoadDirectory(libraryDirectory);
-        Assert.Equal(1, libraryLoad.Loaded); // demo.rally
-        Assert.Empty(libraryLoad.Failures);
+        match.Engine.ScriptEvaluator ??= new CSharpScriptEvaluator();
+        match.Engine.SyncScriptEvaluator ??= new CSharpSyncScriptEvaluator();
+        var componentLoad = AssetPackLoader.Load(
+            match.Engine.Model!, componentsDirectory, match.Engine.ScriptEvaluator, match.Engine.SyncScriptEvaluator);
+        Assert.True(
+            componentLoad.Loaded,
+            "v4 装载失败：" + string.Join("；", componentLoad.Errors.Select(static e => $"{e.Category}/{e.Target}: {e.Message}")));
+        Assert.Single(componentLoad.AssetIds); // demo.rally
 
         await match.Initialize();
         return match;
@@ -310,17 +319,20 @@ public class CardPackDemoTests
         Assert.Equal(new[] { prefabId }, declaration.PrefabIds);
     }
 
-    /// <summary>定位示例卡包三个必需目录（任一缺失＝整组跳过；相对仓库根——对齐 OfficialCardDataSmokeTests 先例）。</summary>
+    /// <summary>
+    /// 定位示例卡包三个必需目录（任一缺失＝整组跳过；相对仓库根——对齐 OfficialCardDataSmokeTests 先例）。
+    /// 第三个目录是 v4 组件资产目录（<c>effects-v4/</c>；旧 <c>effects/</c> 已归档、不再参与装载）。
+    /// </summary>
     private static bool TryLocatePackDirectories(
-        out string cardsDirectory, out string supportDirectory, out string libraryDirectory)
+        out string cardsDirectory, out string supportDirectory, out string componentsDirectory)
     {
         var packRoot = Path.Combine(FindRepoRoot(), "samples", "card-pack-demo");
         cardsDirectory = Path.Combine(packRoot, "cards");
         supportDirectory = Path.Combine(packRoot, "cards-support");
-        libraryDirectory = Path.Combine(packRoot, "effects");
+        componentsDirectory = Path.Combine(packRoot, "effects-v4");
         return Directory.Exists(cardsDirectory)
             && Directory.Exists(supportDirectory)
-            && Directory.Exists(libraryDirectory);
+            && Directory.Exists(componentsDirectory);
     }
 
     private static string FindRepoRoot()

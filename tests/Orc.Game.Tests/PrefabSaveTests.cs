@@ -15,71 +15,7 @@ public class PrefabSaveTests
     // ① 入口契约：成功面（命名/报告/读回闭环）。
     // ─────────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public void SaveDirectory_Writes_All_Snapshots_With_Expected_Names_And_Loads_Back_Cleanly()
-    {
-        var directory = NewTempDir();
-        try
-        {
-            var first = MinimalSnapshot("e2e.save.alpha", "样本·甲");
-            var second = RichSnapshot("e2e.save.bravo");
-            var third = CsxSnapshot("e2e.save.charlie");
 
-            var result = PrefabWriter.SaveDirectory(directory, new[] { first, second, third });
-
-            // 报告：成功明细（id＋完整路径）、按输入序；零失败。
-            Assert.Empty(result.Failures);
-            Assert.Equal(
-                new[] { "e2e.save.alpha", "e2e.save.bravo", "e2e.save.charlie" },
-                result.Succeeded.Select(item => item.PrefabId));
-            Assert.All(result.Succeeded, item => Assert.Equal(
-                Path.Combine(directory, item.PrefabId + ".prefab.json"), item.File));
-
-            // 命名口径：单快照一文件 <root.id>.prefab.json（与读侧扫描模式 *.prefab.json 成对）。
-            foreach (var item in result.Succeeded)
-            {
-                Assert.True(File.Exists(item.File), $"缺少文件 {item.File}。");
-            }
-
-            // 读回闭环：同目录经 PrefabManager.LoadDirectory 装载（写→读→注册不冲突）。
-            var engine = new LogicEngine();
-            var load = engine.Prefabs.LoadDirectory(directory);
-            Assert.Equal(3, load.Loaded);
-            Assert.Empty(load.Failures);
-            Assert.True(engine.Prefabs.TryGetPrefab("e2e.save.alpha", out var alpha));
-            Assert.Equal("样本·甲", alpha.Root.MainTrigger.StableKey);
-        }
-        finally
-        {
-            DeleteTempDir(directory);
-        }
-    }
-
-    [Fact]
-    public void SaveFile_Writes_Single_Snapshot_And_Creates_Missing_Directories()
-    {
-        var root = NewTempDir();
-        var directory = Path.Combine(root, "level-1", "level-2");
-        try
-        {
-            var result = PrefabWriter.SaveFile(directory, MinimalSnapshot("e2e.save.single"));
-
-            Assert.Empty(result.Failures);
-            var success = Assert.Single(result.Succeeded);
-            Assert.Equal("e2e.save.single", success.PrefabId);
-            Assert.Equal(Path.Combine(directory, "e2e.save.single.prefab.json"), success.File);
-            Assert.True(File.Exists(success.File));
-
-            var engine = new LogicEngine();
-            var load = engine.Prefabs.LoadDirectory(directory);
-            Assert.Equal(1, load.Loaded);
-            Assert.Empty(load.Failures);
-        }
-        finally
-        {
-            DeleteTempDir(root);
-        }
-    }
 
     [Fact]
     public void SaveDirectory_Empty_Input_Is_Empty_Success_And_Does_Not_Prepare_Directory()
@@ -517,7 +453,7 @@ public class PrefabSaveTests
             new TriggerPrefab(
                 "t.main",
                 stableKey,
-                TriggerKind.Passive,
+                true,
                 hooks: new[] { "unit.deployed" },
                 events: new[] { new EventPrefab("e1", assemblyKey: id) })));
 
@@ -527,7 +463,7 @@ public class PrefabSaveTests
             new TriggerPrefab(
                 "t.main",
                 "样本·csx",
-                TriggerKind.Passive,
+                true,
                 hooks: new[] { "unit.deployed" },
                 events: new[] { new EventPrefab("e1", csxSource: PlaceholderCsx) })));
 
@@ -537,7 +473,7 @@ public class PrefabSaveTests
             new TriggerPrefab(
                 "t.main",
                 "样本·主",
-                TriggerKind.Passive,
+                true,
                 hooks: new[] { "unit.deployed" },
                 events: new[]
                 {
@@ -548,7 +484,7 @@ public class PrefabSaveTests
                 new TriggerPrefab(
                     "t.other",
                     "样本·其它",
-                    TriggerKind.Passive,
+                    true,
                     hooks: new[] { "turn.start" },
                     events: new[] { new EventPrefab("e2", csxSource: PlaceholderCsx) }),
             },

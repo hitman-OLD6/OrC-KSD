@@ -56,22 +56,19 @@ public sealed class MatchCardAssemblyTests : IDisposable
         }
 
         var library = new CardLibrary(new LogicEngine());
-        var triggers = new TriggerRegistry();
-        assembly.Attach(library, triggers);
+        assembly.Attach(library);
 
-        // 装配期：合法卡进卡库（含资产域），加载器登记进对局级 LowLevel 审计面（仅记账）。
+        // 装配期：合法卡进卡库（含资产域）。
         foreach (var localId in LocalIds)
         {
             Assert.True(library.Contains(Prefix + localId), localId);
             Assert.Equal(AssetDomain.Formal, library.DomainOf(Prefix + localId));
         }
 
-        var entry = Assert.Single(triggers.GetByLayer(TriggerLayer.LowLevel));
-        Assert.Same(assembly.Loader, entry.Trigger);
         Assert.Equal(AssetLoadStatus.Loaded, assembly.LoadResult!.Status);
 
         // 重复接入＝明确拒绝（一个装载链只服务一个对局）。
-        Assert.Throws<InvalidOperationException>(() => assembly.Attach(library, triggers));
+        Assert.Throws<InvalidOperationException>(() => assembly.Attach(library));
     }
 
     [Fact]
@@ -79,7 +76,7 @@ public sealed class MatchCardAssemblyTests : IDisposable
     {
         var assembly = CreateAssembly();
         var library = new CardLibrary(new LogicEngine());
-        assembly.Attach(library, new TriggerRegistry());
+        assembly.Attach(library);
 
         // 清空中间层（依赖解析面）——实例化仍必须成功：实例化不做任何依赖查找。
         assembly.Bridge.Clear();

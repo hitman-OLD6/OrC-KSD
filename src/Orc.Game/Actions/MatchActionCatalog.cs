@@ -1,7 +1,9 @@
-﻿using Orc.Cards;
+using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Cards;
 using Orc.Game.Commanding;
+using Orc.Game.Model;
 using Orc.Game.Triggers;
 
 namespace Orc.Game.Actions;
@@ -27,8 +29,6 @@ internal sealed class MatchActionCatalog
     /// <summary>按 S10 依赖序构造八个动作实例并校验合并图。</summary>
     /// <param name="engine">对局引擎（执行流挂载点／信号发射）。</param>
     /// <param name="services">动作服务面（对局级单实例；全部动作共用）。</param>
-    /// <param name="attackTrigger">攻击触发端（<c>UnitAttackTrigger</c>；由宿主建本体、保留公开名）。</param>
-    /// <param name="attackHandle">攻击处理端（<c>AttackDamageTrigger</c>）。</param>
     /// <param name="attackTargetLegal">攻击目标合法性判定通道。</param>
     /// <param name="counterEligibility">反击资格判定通道。</param>
     /// <param name="factories">动作实现集（缺省＝<see cref="ActionImplementationRegistry.Resolve"/> 的合并结果）。</param>
@@ -37,16 +37,12 @@ internal sealed class MatchActionCatalog
     internal MatchActionCatalog(
         LogicEngine engine,
         MatchActionServices services,
-        Trigger<UnitAttackTriggerView> attackTrigger,
-        Trigger<AttackDamageTriggerView> attackHandle,
         Func<UnitCard, Ref<Entity>, bool> attackTargetLegal,
         Func<UnitCard, UnitCard, bool> counterEligibility,
         ActionImplementationSet? factories = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(services);
-        ArgumentNullException.ThrowIfNull(attackTrigger);
-        ArgumentNullException.ThrowIfNull(attackHandle);
         ArgumentNullException.ThrowIfNull(attackTargetLegal);
         ArgumentNullException.ThrowIfNull(counterEligibility);
 
@@ -64,33 +60,24 @@ internal sealed class MatchActionCatalog
         // ② 依赖上一步的实例：抽牌、死亡（加入手牌）；攻击（伤害）。
         Draw = factory.CreateDraw!(engine, services, AddToHand);
         Death = factory.CreateDeath!(engine, services, AddToHand);
-        Attack = factory.CreateAttack!(
-            engine, attackTrigger, attackHandle, Damage, attackTargetLegal, counterEligibility);
+        Attack = factory.CreateAttack!(engine, Damage, attackTargetLegal, counterEligibility);
 
         _entries = new[]
         {
-            Entry(ActionId.HandAdd, AddToHand, Array.Empty<ActionId>(),
-                End("触发端", AddToHand.Trigger), End("处理端", AddToHand.Handle)),
-            Entry(ActionId.Draw, Draw, new[] { ActionId.HandAdd },
-                End("卡组顶触发端", Draw.Top), End("指定牌触发端", Draw.Specific), End("处理端", Draw.Handle)),
-            Entry(ActionId.Damage, Damage, Array.Empty<ActionId>(),
-                End("对战伤害触发端", Damage.CombatDamage), End("效果伤害触发端", Damage.EffectDamage),
-                End("战斗伤害触发端", Damage.BattleDamage), End("处理端", Damage.Apply)),
-            Entry(ActionId.Death, Death, new[] { ActionId.HandAdd },
-                End("触发端", Death.Trigger), End("处理端", Death.Handle)),
+            Entry(ActionId.HandAdd, AddToHand, Array.Empty<ActionId>(), AddToHand.Ends.ToArray()),
+            Entry(ActionId.Draw, Draw, new[] { ActionId.HandAdd }, Draw.Ends.ToArray()),
+            Entry(ActionId.Damage, Damage, Array.Empty<ActionId>(), Damage.Ends.ToArray()),
+            Entry(ActionId.Death, Death, new[] { ActionId.HandAdd }, Death.Ends.ToArray()),
             Entry(ActionId.Attack, Attack, new[] { ActionId.Damage },
-                End("触发端", Attack.Trigger), End("处理端", Attack.Handle)),
+                new ActionTriggerEnd("触发端", Attack.Trigger),
+                new ActionTriggerEnd("处理端", Attack.Handle)),
             // 移动已迁出宿主程序集（P5b）：两端由实现自行暴露（类型擦除），目录不再引用其视图类型。
+            // U2：成员地址同样由实现自报（`ActionTriggerEnd.Member`），目录只按其登记。
             Entry(ActionId.Move, Move, Array.Empty<ActionId>(), Move.Ends.ToArray()),
-            Entry(ActionId.JoinBattlefield, JoinBattlefield, Array.Empty<ActionId>(),
-                End("部署触发端", JoinBattlefield.Deploy),
-                End("加入前线触发端", JoinBattlefield.JoinFrontline),
-                End("加入支援阵线触发端", JoinBattlefield.JoinSupportLine),
-                End("处理端", JoinBattlefield.Handle)),
-            // 指令的两端由内核唯一 flow 承载：阶段 1（Counter → Resolve＝施放结算）为触发端，
-            // 阶段 2（Finalize＝收尾）为处理端；同一 flow 的两个独立触发器，避免重复登记同一对象。
-            Entry(ActionId.Order, Order, Array.Empty<ActionId>(),
-                End("触发端", engine.OrderFlow.Trigger), End("处理端", engine.OrderFlow.FinalizeTrigger)),
+            Entry(ActionId.JoinBattlefield, JoinBattlefield, Array.Empty<ActionId>(), JoinBattlefield.Ends.ToArray()),
+            // 指令的两端由内核唯一 flow 承载（阶段 1＝施放结算、阶段 2＝收尾）；U3 起两端**同样是引擎成员**
+            // （`order.cast`／`order.finalize`）：地址由实现自报、实例仍来自 flow——目录不再有"无地址端"。
+            Entry(ActionId.Order, Order, Array.Empty<ActionId>(), Order.Ends.ToArray()),
         };
 
         Validate(_entries);
@@ -129,35 +116,25 @@ internal sealed class MatchActionCatalog
     /// <summary>按登记序枚举八个动作条目（装配期审计／测试用）。</summary>
     internal IReadOnlyList<MatchActionEntry> Entries => _entries;
 
-    /// <summary>
-    /// 把八个动作的两端触发器登记到对局触发注册表（S15：由「登记 4 个已存在触发器」升级为「按目录装配」）。
-    /// 只登记触发器、不交出目录本体。
-    /// </summary>
-    /// <exception cref="ArgumentNullException">registry 为 null。</exception>
-    internal void RegisterFlowTriggers(TriggerRegistry registry, TriggerLayer layer)
-    {
-        ArgumentNullException.ThrowIfNull(registry);
-
-        foreach (var entry in _entries)
-        {
-            foreach (var end in entry.Ends)
-            {
-                end.Register(registry, layer);
-            }
-        }
-    }
-
     private static MatchActionEntry Entry(
         ActionId id, object instance, IReadOnlyList<ActionId> dependsOn, params ActionTriggerEnd[] ends)
         => new(id, instance, dependsOn, ends);
 
-    private static ActionTriggerEnd End<TView>(string role, Trigger<TView> trigger)
-        where TView : class
-    {
-        ArgumentNullException.ThrowIfNull(trigger);
-        return new ActionTriggerEnd(role, trigger, (registry, layer) => registry.Register(trigger, layer));
-    }
-
+    /// <summary>
+    /// 构造一端（U2：**非泛型**——实例以 <see cref="object"/> 传入）。
+    /// <para>
+    /// 成员地址（<c>engine#&lt;成员名&gt;</c>）由 <see cref="EngineProcesses"/> 的常量给出：本类与预制体同源表，
+    /// 因此"这一端是哪个成员"可被审查面与注册面直接读出，而不必反推触发器实例。
+    /// </para>
+    /// <para>
+    /// **U3 后的唯一用途＝攻击动作**：其余 7 个动作的两端都由实现自报（<c>X.Ends</c>）。
+    /// 攻击两端是宿主建的本体（<c>UnitAttackTrigger</c>／<c>AttackDamageTrigger</c>），
+    /// 因此仍由此处补地址——把它并进 `IAttackAction.Ends` 即 U4 的收口项（届时本方法删除）。
+    /// </para>
+    /// </summary>
+    /// <param name="role">角色（触发端／处理端）。</param>
+    /// <param name="trigger">触发器本体（类型擦除）。</param>
+    /// <param name="member">引擎成员名（null＝该端尚无引擎成员声明）。</param>
     /// <summary>装配期校验实现集是否覆盖八个内置动作（缺任一＝fail-fast，不静默降级）。</summary>
     private static void EnsureComplete(ActionImplementationSet factory)
     {

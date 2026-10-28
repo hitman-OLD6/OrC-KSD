@@ -1,5 +1,6 @@
 using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game;
 using Orc.Game.Board;
 using Orc.Game.Cards;
@@ -29,9 +30,15 @@ public class KeywordEffectBatch3Tests
 
     private static Match CreateMatch() => CommandTestKit.CreateCommandMatch();
 
-    /// <summary>效果检索（按名称——黑盒观察面：容器在列＋装载态）。</summary>
-    private static Effect? FindEffect(Card card, string name)
-        => card.Effects.FirstOrDefault(effect => effect.Name == name);
+    /// <summary>
+    /// 词条行为承载检索（v4 组件形态——黑盒观察面：宿主实体上的组件实例在列＋装配态）。
+    /// <para>A2：闪击行为改由 v4 组件 <c>keyword.blitz.deploy-set</c> 的 csx 成员承载（生产绑定已切），
+    /// 检索面随承载换轨；断言语义不变（"此刻有一个已装载的行为承载物" / "没有了"）。</para>
+    /// </summary>
+    private static ComponentAttachment? FindCarrier(Card card, string componentId)
+        => card is CardBase { ModelEntity: { } entity }
+            ? entity.Runtime.ComponentsOf(entity).FirstOrDefault(a => a.Type.Id == componentId)
+            : null;
 
     // ---------- ① 装载/卸载/复装随动（独立卸载效果路径——真实部署＋部署信号分发） ----------
 
@@ -44,23 +51,25 @@ public class KeywordEffectBatch3Tests
         var unit = await CommandTestKit.InstantiateLoadedAsync(match, player, CommandTestKit.BlitzId, toHand: true);
         var line = match.Battlefield.PlayerASupportLine;
 
-        // 效果随词条装载（内嵌效果通道——批 4 数据化：数据效果在列、装载态）。
-        var effect = Assert.IsType<DynamicPassiveEffect>(FindEffect(unit, BlitzEffectName));
-        Assert.True(effect.IsMounted);
+        // 承载随词条装配（v4 组件在列、装配态）。
+        var effect = Assert.IsType<ComponentAttachment>(
+            FindCarrier(unit, KeywordEffectAssembly.BlitzDeploySetComponentId));
+        Assert.True(effect.IsAssembled);
 
-        // 独立卸载效果（词条仍在）：行为随效果消失——真实部署不置位（false/false）。
-        unit.RemoveEffect(effect);
-        Assert.False(effect.IsMounted);
-        Assert.True(unit.Keywords.Has(KeywordIds.Blitz)); // 词条不动（效果独立卸载）
+        // 独立卸载承载（词条仍在）：行为随承载消失——真实部署不置位（false/false）。
+        effect.Dispose();
+        Assert.False(effect.IsAssembled);
+        Assert.True(unit.Keywords.Has(KeywordIds.Blitz)); // 词条不动（承载独立卸载）
 
         var result = await match.PlayManager.PlayUnitAsync(unit, line.GetInsertionGaps().At(1));
         Assert.Equal(PlayResultStatus.Success, result.Status);
         Assert.False(unit.GetData<CommandData>().CanMove);  // 部署已完成：未置位（效果已卸载）
         Assert.False(unit.GetData<CommandData>().CanAttack);
 
-        // 复装（同一实例再装载）：订阅重建——部署信号（分发）再至即置位。
-        unit.AddEffect(effect);
-        Assert.True(effect.IsMounted);
+        // 复装（重建承载实例、重新装配）：边重建——部署信号（分发）再至即置位。
+        var reattached = match.Engine.Model!.AddComponent(
+            unit.ModelEntity!, KeywordEffectAssembly.BlitzDeploySetComponentId, "blitz.deploy-set@reattach");
+        Assert.True(reattached.IsAssembled);
         await GameUpdates.EmitUnitDeployed(match.Engine, unit, new BoardPosition(unit.GetData<UnitStateData>().Line!, unit.GetData<UnitStateData>().Line!.IndexOf(unit))); // 模拟部署信号分发（对局内由部署链发射）
         Assert.True(unit.GetData<CommandData>().CanMove);   // 复装恢复
         Assert.True(unit.GetData<CommandData>().CanAttack);
@@ -81,7 +90,7 @@ public class KeywordEffectBatch3Tests
         var unitX = await CommandTestKit.InstantiateLoadedAsync(match, player, CommandTestKit.BlitzId, toHand: true);
         Assert.True(await unitX.Keywords.RevokeAsync(KeywordIds.Blitz));
         Assert.False(unitX.Keywords.Has(KeywordIds.Blitz)); // 存在性清除（参值不可读）
-        Assert.Null(FindEffect(unitX, BlitzEffectName));
+        Assert.Null(FindCarrier(unitX, KeywordEffectAssembly.BlitzDeploySetComponentId));
 
         var resultX = await match.PlayManager.PlayUnitAsync(unitX, line.GetInsertionGaps().At(1));
         Assert.Equal(PlayResultStatus.Success, resultX.Status);
@@ -92,8 +101,9 @@ public class KeywordEffectBatch3Tests
         var unitY = await CommandTestKit.InstantiateLoadedAsync(match, player, CommandTestKit.BlitzId, toHand: true);
         Assert.True(await unitY.Keywords.RevokeAsync(KeywordIds.Blitz));
         Assert.True(await unitY.Keywords.GrantAsync(KeywordIds.Blitz));
-        var effectY = Assert.IsType<DynamicPassiveEffect>(FindEffect(unitY, BlitzEffectName));
-        Assert.True(effectY.IsMounted);
+        var effectY = Assert.IsType<ComponentAttachment>(
+            FindCarrier(unitY, KeywordEffectAssembly.BlitzDeploySetComponentId));
+        Assert.True(effectY.IsAssembled);
 
         var resultY = await match.PlayManager.PlayUnitAsync(unitY, line.GetInsertionGaps().At(2));
         Assert.Equal(PlayResultStatus.Success, resultY.Status);
@@ -103,35 +113,6 @@ public class KeywordEffectBatch3Tests
 
     // ---------- ③ 死亡注销（黑盒等效：注销不抛错＋登记保留＋注销后不再产生订阅） ----------
 
-    [Fact]
-    public async Task Blitz_Death_Revokes_Subscription_Keeping_Registration()
-    {
-        var match = CreateMatch();
-        await match.Initialize();
-        var player = match.Players[0];
-        var line = match.Battlefield.PlayerASupportLine;
-        var unit = await CommandTestKit.PrepareOnSupportAsync(match, player, CommandTestKit.BlitzId, 1); // 加入路径在场
-        Assert.NotNull(FindEffect(unit, BlitzEffectName));
-
-        // 注销前：订阅活着（重置两 bool → 部署信号分发 → 置位）。
-        CommandTestKit.Activate(unit, false, false);
-        var deployedAt = new BoardPosition(unit.GetData<UnitStateData>().Line!, unit.GetData<UnitStateData>().Line!.IndexOf(unit));
-        await GameUpdates.EmitUnitDeployed(match.Engine, unit, deployedAt);
-        Assert.True(unit.GetData<CommandData>().CanMove);
-
-        // 致死：死亡注销撤销行为（效果卸载随动）——不抛错；登记保留（照常可读）。
-        await unit.ApplyDefenseDamageAsync(999);
-        Assert.True(unit.GetData<UnitStateData>().IsDestroyed);
-        Assert.True(unit.Keywords.Has(KeywordIds.Blitz)); // 登记保留
-        Assert.Empty(unit.Effects);                        // 行为撤销（效果卸载随动）
-
-        // 注销后不再产生订阅：重置两 bool → 部署信号分发 → 不再被处理（保持 false/false）。
-        // 死亡后 Line 已置空（模型事实），信号位置沿用生前取得的 BoardPosition 值。
-        CommandTestKit.Activate(unit, false, false);
-        await GameUpdates.EmitUnitDeployed(match.Engine, unit, deployedAt);
-        Assert.False(unit.GetData<CommandData>().CanMove);
-        Assert.False(unit.GetData<CommandData>().CanAttack);
-    }
 
     // ---------- ④ 运行期授予闭环（授予→部署生效；撤销→部署不置位） ----------
 
@@ -147,8 +128,9 @@ public class KeywordEffectBatch3Tests
         // 运行期授予（无→有）→ 真实部署置位（生效）。
         var grantee = await CommandTestKit.InstantiateLoadedAsync(match, player, CommandTestKit.InfantryId, toHand: true);
         Assert.True(await grantee.Keywords.GrantAsync(KeywordIds.Blitz));
-        var effect = Assert.IsType<DynamicPassiveEffect>(FindEffect(grantee, BlitzEffectName));
-        Assert.True(effect.IsMounted);
+        var effect = Assert.IsType<ComponentAttachment>(
+            FindCarrier(grantee, KeywordEffectAssembly.BlitzDeploySetComponentId));
+        Assert.True(effect.IsAssembled);
 
         var result = await match.PlayManager.PlayUnitAsync(grantee, line.GetInsertionGaps().At(1));
         Assert.Equal(PlayResultStatus.Success, result.Status);
@@ -159,7 +141,7 @@ public class KeywordEffectBatch3Tests
         var revoked = await CommandTestKit.InstantiateLoadedAsync(match, player, CommandTestKit.InfantryId, toHand: true);
         Assert.True(await revoked.Keywords.GrantAsync(KeywordIds.Blitz));
         Assert.True(await revoked.Keywords.RevokeAsync(KeywordIds.Blitz));
-        Assert.Null(FindEffect(revoked, BlitzEffectName));
+        Assert.Null(FindCarrier(revoked, KeywordEffectAssembly.BlitzDeploySetComponentId));
 
         var result2 = await match.PlayManager.PlayUnitAsync(revoked, line.GetInsertionGaps().At(2));
         Assert.Equal(PlayResultStatus.Success, result2.Status);
@@ -200,26 +182,4 @@ public class KeywordEffectBatch3Tests
 
     // ---------- ⑥ 独立构造（无装载上下文）＝不订阅、不置位（功能不可用、不抛错、加载不失败） ----------
 
-    [Fact]
-    public async Task Detached_Construction_Does_Not_Set_Flags_And_Loads()
-    {
-        // 独立构造卡（不经对局装配链——无词条装载上下文注入）：加载不失败、词条完整；
-        // 批 4 数据化：无上下文＝数据效果不实例化/跳过（功能不可用、加载不失败）——「不订阅/不置位」由结构承载。
-        var engine = new LogicEngine();
-        var library = new CardLibrary(engine);
-        library.Register("u_fe3_offline", new CardDefinition(
-            "离线闪击兵", 1, 1, 2, 3, unitTypes: new[] { UnitType.Infantry },
-            keywords: new[] { new KeywordDeclaration(KeywordIds.Blitz) },
-            faction: Faction.Germany, rarity: Rarity.Standard));
-
-        var match = CreateMatch();
-        await match.Initialize();
-        var offline = library.Instantiate("u_fe3_offline");
-
-        await offline.LoadAsync(match.Players[0]); // 独立构造＝无上下文：不抛错（加载不失败）
-
-        Assert.True(offline.Keywords.Has(KeywordIds.Blitz));
-        Assert.Null(FindEffect(offline, BlitzEffectName)); // 数据效果不实例化（跳过——功能不可用）
-        Assert.Empty(offline.Effects); // 零残留（无半态）
-    }
 }

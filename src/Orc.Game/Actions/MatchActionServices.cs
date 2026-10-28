@@ -1,4 +1,4 @@
-using Orc.Cards;
+﻿using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Board;
 using Orc.Game.Cards;
@@ -173,17 +173,50 @@ internal sealed partial class MatchActionServices :
         state.Line?.TryRemove(unit);
         state.IsDestroyed = true;
 
-        // 宿主侧死亡效果必须在登记仍存在时结算；完成态的观察仍留在清理之后的 card.died。
-        await GameUpdates.EmitCardDying(_engine, unit, killer, ct).ConfigureAwait(false);
-
-        // ③ 亡计结算（置毁之后、词条死亡注销之前；清理前结算）。
-        if (_retrigger is not null)
+        // ②.5 宿主侧死亡信号（`card.dying`）：**亡计内容的主驱动点**——内容＝卡实体上挂在
+        // `engine#card.dying` 的 v4 组件成员（DeathrattleRules.ContentSignal），因此"结算"发生在
+        // 置毁之后、词条注销之前，与本流程的时序契约同源，不再由 C# 侧另行驱动一回。
+        // 隔离口径（域内决定，不是总线口径）：内容组件抛错不得留下半死状态——记录后继续清理；
+        // 取消类照旧穿透（与全仓取消语义一致）。
+        var contentThrew = false;
+        try
         {
-            await _retrigger.ExecuteDeathrattleAsync(unit, ct).ConfigureAwait(false);
+            await GameUpdates.EmitCardDying(_engine, unit, killer, ct).ConfigureAwait(false);
         }
-        else
+        catch (OperationCanceledException)
         {
-            await DeathrattleRules.ExecuteAsync(unit, _engine, ct).ConfigureAwait(false);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            contentThrew = true;
+            RecordDeathrattleError(ex);
+        }
+
+        // ③ 亡计结算**兜底驱动**（b／§29）：主驱动已在 ②.5 完成，这里只对"内容组件没声明 card.dying 挂载"
+        // 的形态生效——驱动的是同一个成员，已结算过的实例被 `one-shot` 额度挡住＝零副作用（恰一次由额度保证）。
+        // ②.5 已经抛过错的实例不再重试（避免同一次死亡把内容跑两遍）。
+        if (!contentThrew)
+        {
+            try
+            {
+                if (_retrigger is not null)
+                {
+                    await _retrigger.ExecuteDeathrattleAsync(unit, ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    await DeathrattleRules.ExecuteAsync(unit, _engine, ct).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                RecordDeathrattleError(ex);
+            }
         }
 
         // ④ 词条死亡注销（仅行为撤销：OnRevoke 序列＋运行逻辑注销＋内嵌效果卸载；登记/参值保留可查询）。
@@ -198,11 +231,8 @@ internal sealed partial class MatchActionServices :
             await PincerRules.OnUnitLeftBattlefieldAsync(unit, _pincers, ct).ConfigureAwait(false);
         }
 
-        // ⑦ 效果卸载（容器移除＋OnUnmount＋撤销登记＋总线卸载；托管清理幂等）。
-        foreach (var effect in unit.Effects.ToArray())
-        {
-            unit.RemoveEffect(effect);
-        }
+        // ⑦ 效果卸载：卡上效果容器随 `Effect` 家族删除——效果＝编排实体上的 v4 组件，
+        //    由实体销毁（CardBase.Destroy → entity.Destroy）统一卸载；此处不再枚举效果列表。
 
         // ⑧ 位置字段置空（实例保留可查询）。
         state.Line = null;
@@ -210,6 +240,19 @@ internal sealed partial class MatchActionServices :
         // ⑨ card.died（恰一次；击杀者为改写后的归属）。
         await GameUpdates.EmitCardDied(_engine, unit, killer, ct, source: killer).ConfigureAwait(false);
     }
+
+    /// <summary>亡计内容异常隔离记录（域内决定：死亡必须完成——旧口径 "结算异常隔离、清理继续" 的承载点）。</summary>
+    private void RecordDeathrattleError(Exception ex)
+        => _engine.RootStream.WriteLog(
+            "亡计",
+            $"亡计内容执行异常（隔离，死亡流程继续）：{ex.Message}",
+            LogLevel.Error,
+            new[] { $"exception:{ex.GetType().Name}" },
+            new Dictionary<string, object?>
+            {
+                ["exceptionType"] = ex.GetType().FullName,
+                ["message"] = ex.Message,
+            });
 
     /// <inheritdoc />
     public async Task<CardBase?> CreateReturnInstanceAsync(UnitCard unit, CancellationToken ct = default)

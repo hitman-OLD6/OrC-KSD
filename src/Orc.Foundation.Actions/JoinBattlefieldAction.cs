@@ -1,8 +1,10 @@
-﻿using Orc.Cards;
+using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Board;
 using Orc.Game;
 using Orc.Game.Cards;
+using Orc.Game.Model;
 using Orc.Game.Players;
 using Orc.Game.Actions;
 
@@ -11,11 +13,10 @@ namespace Orc.Foundation.Actions;
 /// <summary>
 /// 加入战场动作实体（S9；有序列表模型）：**三个触发端**（部署／加入前线／加入支援阵线）＋恰一个**共享处理端**。
 /// <para>
-/// 部署触发端：<see cref="ActionTriggerBands.Initiate"/> 代价校验 → <see cref="ActionTriggerBands.Announce"/>
-/// 发 <c>card.played</c> → <see cref="ActionTriggerBands.Commit"/> 先跑部署词条（priority 50）→ 默认转发（priority 100）。
+/// 部署触发端（**自有边，声明序**）：代价校验 → 打出宣告（发 <c>card.played</c>）→ 部署词条 → 默认转发。
 /// </para>
 /// <para>
-/// 加入触发端（前线／支援阵线）：<see cref="ActionTriggerBands.Initiate"/> 前置 → <see cref="ActionTriggerBands.Commit"/> 直接转发。
+/// 加入触发端（前线／支援阵线）：前置校验 → 直接转发（同为自有边、声明序）。
 /// 落位规则＝显式序号 &gt; 守护（HQ 右侧，仅支援线）&gt; 默认最左；前线被敌方存活单位占据＝**报错**（Error 留痕＋失败）；
 /// 目标线已满＝**静默失败**（Warning 留痕＋失败）；两者均不抛异常。
 /// </para>
@@ -26,9 +27,6 @@ namespace Orc.Foundation.Actions;
 /// </summary>
 public sealed class JoinBattlefieldAction : IJoinBattlefieldAction
 {
-    /// <summary>部署词条在部署触发端 <c>Commit</c> 段的位置（默认转发在 100）。</summary>
-    private const int DeployKeywordPriority = 50;
-
     private const int DefaultPriority = 100;
 
     private const string FrontLineZone = "frontline";
@@ -48,45 +46,55 @@ public sealed class JoinBattlefieldAction : IJoinBattlefieldAction
         _engine = engine;
         _services = services;
 
-        Deploy = new Trigger<JoinBattlefieldTriggerView>(
-            "加入战场·部署触发器", bandType: typeof(ActionTriggerBands));
-        JoinFrontline = new Trigger<JoinBattlefieldTriggerView>(
-            "加入战场·加入前线触发器", bandType: typeof(ActionTriggerBands));
-        JoinSupportLine = new Trigger<JoinBattlefieldTriggerView>(
-            "加入战场·加入支援阵线触发器", bandType: typeof(ActionTriggerBands));
-        Handle = new Trigger<JoinBattlefieldHandleView>(
-            "加入战场处理触发器", bandType: typeof(ActionHandleBands));
+        // U3：四端＝引擎成员（地址由契约自报）；实例＝过渡期内部执行面。
+        Deploy = MemberAddress.Create(AddressScope.Engine, EngineProcesses.JoinDeploy);
+        JoinFrontline = MemberAddress.Create(AddressScope.Engine, EngineProcesses.JoinFrontline);
+        JoinSupportLine = MemberAddress.Create(AddressScope.Engine, EngineProcesses.JoinSupport);
+        Handle = MemberAddress.Create(AddressScope.Engine, EngineProcesses.JoinHandle);
 
-        // 部署触发端：代价校验（发起前）→ 宣告 → 部署词条（Commit 前部）→ 默认转发。
-        Deploy.Register("部署代价校验", ValidateDeployAsync, ActionTriggerBands.Initiate, DefaultPriority);
-        Deploy.Register("打出宣告", AnnounceAsync, ActionTriggerBands.Announce, DefaultPriority);
-        Deploy.Register("部署词条", HandleDeployKeywordsAsync, ActionTriggerBands.Commit, DeployKeywordPriority);
-        Deploy.Register("转发到处理端", ForwardAsync, ActionTriggerBands.Commit, DefaultPriority);
 
-        // 加入前线触发端：敌对占线门禁（发起前）→ 直接转发。
-        JoinFrontline.Register("前线敌对门禁", ValidateFrontlineAsync, ActionTriggerBands.Initiate, DefaultPriority);
-        JoinFrontline.Register("加入前置", ValidateJoinAsync, ActionTriggerBands.Initiate, DefaultPriority);
-        JoinFrontline.Register("转发到处理端", ForwardAsync, ActionTriggerBands.Commit, DefaultPriority);
+        // 部署触发端：代价校验 → 宣告 → 部署词条 → 默认转发（**自有边，按声明序**）。
+        // D2（U4）：词条先于转发由声明序表达——不再用 50/100 的数字差（R1i：不引入优先级数字）。
+        ActionEdges.Attach<JoinBattlefieldTriggerView>(_engine, EngineProcesses.JoinDeploy, ValidateDeployAsync);
+        ActionEdges.Attach<JoinBattlefieldTriggerView>(_engine, EngineProcesses.JoinDeploy, AnnounceAsync);
+        ActionEdges.Attach<JoinBattlefieldTriggerView>(_engine, EngineProcesses.JoinDeploy, HandleDeployKeywordsAsync);
+        ActionEdges.Attach<JoinBattlefieldTriggerView>(_engine, EngineProcesses.JoinDeploy, ForwardAsync);
 
-        // 加入支援阵线触发端：无宣称段 → 结构前置 → 直接转发。
-        JoinSupportLine.Register("加入前置", ValidateJoinAsync, ActionTriggerBands.Initiate, DefaultPriority);
-        JoinSupportLine.Register("转发到处理端", ForwardAsync, ActionTriggerBands.Commit, DefaultPriority);
+        // 加入前线触发端：敌对占线门禁 → 加入前置 → 直接转发。
+        ActionEdges.Attach<JoinBattlefieldTriggerView>(_engine, EngineProcesses.JoinFrontline, ValidateFrontlineAsync);
+        ActionEdges.Attach<JoinBattlefieldTriggerView>(_engine, EngineProcesses.JoinFrontline, ValidateJoinAsync);
+        ActionEdges.Attach<JoinBattlefieldTriggerView>(_engine, EngineProcesses.JoinFrontline, ForwardAsync);
+
+        // 加入支援阵线触发端：结构前置 → 直接转发。
+        ActionEdges.Attach<JoinBattlefieldTriggerView>(_engine, EngineProcesses.JoinSupport, ValidateJoinAsync);
+        ActionEdges.Attach<JoinBattlefieldTriggerView>(_engine, EngineProcesses.JoinSupport, ForwardAsync);
 
         // 共享处理端：单位化 + 插入阵线 + card.placed。
-        Handle.Register("单位化与落位", HandleApplyAsync, ActionHandleBands.Apply, DefaultPriority);
+        ActionEdges.Attach<JoinBattlefieldHandleView>(_engine, EngineProcesses.JoinHandle, HandleApplyAsync);
+
+        Ends = new[]
+        {
+            new ActionTriggerEnd("部署触发端", Deploy),
+            new ActionTriggerEnd("加入前线触发端", JoinFrontline),
+            new ActionTriggerEnd("加入支援阵线触发端", JoinSupportLine),
+            new ActionTriggerEnd(ActionTriggerEnd.HandleRole, Handle),
+        };
     }
 
-    /// <summary>部署**触发端**。</summary>
-    public Trigger<JoinBattlefieldTriggerView> Deploy { get; }
+    /// <inheritdoc />
+    public MemberAddress Deploy { get; }
 
-    /// <summary>加入前线**触发端**。</summary>
-    public Trigger<JoinBattlefieldTriggerView> JoinFrontline { get; }
+    /// <inheritdoc />
+    public MemberAddress JoinFrontline { get; }
 
-    /// <summary>加入支援阵线**触发端**。</summary>
-    public Trigger<JoinBattlefieldTriggerView> JoinSupportLine { get; }
+    /// <inheritdoc />
+    public MemberAddress JoinSupportLine { get; }
 
-    /// <summary>共享**处理端**（单位化 + 插入阵线 + <c>card.placed</c>）。</summary>
-    public Trigger<JoinBattlefieldHandleView> Handle { get; }
+    /// <inheritdoc />
+    public MemberAddress Handle { get; }
+
+    /// <inheritdoc />
+    public IReadOnlyList<ActionTriggerEnd> Ends { get; }
 
     /// <inheritdoc />
     public async Task<ActionResult> DeployAsync(
@@ -102,7 +110,7 @@ public sealed class JoinBattlefieldAction : IJoinBattlefieldAction
             return new ActionResult(ActionId.JoinBattlefield, result);
         }
 
-        await Deploy.InvokeAsync(_engine, BuildData(card, gap, player, triggerCard, result), ct)
+        await _engine.InvokeMemberAsync(EngineProcesses.JoinDeploy, new Context(BuildData(card, gap, player, triggerCard, result)), ct)
             .ConfigureAwait(false);
         return new ActionResult(ActionId.JoinBattlefield, result);
     }
@@ -130,8 +138,8 @@ public sealed class JoinBattlefieldAction : IJoinBattlefieldAction
             return new ActionResult(ActionId.JoinBattlefield, result);
         }
 
-        var trigger = ReferenceEquals(gap.Line, SupportLineOf(card)) ? JoinSupportLine : JoinFrontline;
-        await trigger.InvokeAsync(_engine, BuildData(card, gap, player: null, triggerCard, result), ct)
+        var member = ReferenceEquals(gap.Line, SupportLineOf(card)) ? EngineProcesses.JoinSupport : EngineProcesses.JoinFrontline;
+        await _engine.InvokeMemberAsync(member, new Context(BuildData(card, gap, player: null, triggerCard, result)), ct)
             .ConfigureAwait(false);
         return new ActionResult(ActionId.JoinBattlefield, result);
     }
@@ -164,8 +172,8 @@ public sealed class JoinBattlefieldAction : IJoinBattlefieldAction
             return new ActionResult(ActionId.JoinBattlefield, result);
         }
 
-        var trigger = zone == FrontLineZone ? JoinFrontline : JoinSupportLine;
-        await trigger.InvokeAsync(_engine, BuildData(card, gap, player: null, triggerCard, result), ct)
+        var member = zone == FrontLineZone ? EngineProcesses.JoinFrontline : EngineProcesses.JoinSupport;
+        await _engine.InvokeMemberAsync(member, new Context(BuildData(card, gap, player: null, triggerCard, result)), ct)
             .ConfigureAwait(false);
         return new ActionResult(ActionId.JoinBattlefield, result);
     }
@@ -300,7 +308,7 @@ public sealed class JoinBattlefieldAction : IJoinBattlefieldAction
             data[nameof(JoinBattlefieldHandleView.TriggerCard)] = view.TriggerCard;
         }
 
-        return Handle.InvokeAsync(_engine, data, ct);
+        return _engine.InvokeMemberAsync(EngineProcesses.JoinHandle, new Context(data), ct);
     }
 
     /// <summary>处理端默认落地（唯一调用动作服务面处）：单位化 + 插入阵线 + <c>card.placed</c>。</summary>

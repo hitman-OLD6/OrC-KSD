@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Orc.Core;
 
 namespace Orc.Packages;
@@ -69,6 +69,10 @@ public sealed record PackageAsset(
 /// **纯声明性**包依赖（包 ID 列表）：不参与依赖解析、不进 lock、不驱动装载顺序（D31 的核心意图不变）。
 /// 唯一用途是承载 R8「新建卡包必须给定期望依赖的包 ID」，供编辑器与诊断展示。
 /// </param>
+/// <param name="Required">
+/// **必需包**（S14 第 2 条；manifest 键 <c>required</c>，缺省 false）：必需包装载失败＝对局不开局（初始化上抛）；
+/// 可选包失败＝跳过该包、对局照常开始（跳过在报告与审查面可见）。缺省 false 让既有卡包保持"可选"语义。
+/// </param>
 public sealed record PackageManifest(
     PackageKind Kind,
     string Id,
@@ -79,7 +83,8 @@ public sealed record PackageManifest(
     string? Name = null,
     IReadOnlyList<string>? Metadata = null,
     int SchemaVersion = PackageManifest.CurrentSchemaVersion,
-    IReadOnlyList<string>? Requires = null)
+    IReadOnlyList<string>? Requires = null,
+    bool Required = false)
 {
     /// <summary>纯声明性包依赖（未声明＝空）。</summary>
     public IReadOnlyList<string> RequiredPackages => Requires ?? Array.Empty<string>();
@@ -160,7 +165,8 @@ public sealed record PackageManifest(
             ReadName(root),
             ReadMetadata(root),
             schemaVersion,
-            ReadRequires(root));
+            ReadRequires(root),
+            ReadRequired(root));
     }
 
     /// <summary>写出规范 manifest JSON（读宽写窄；v2 键序固定）。</summary>
@@ -184,6 +190,11 @@ public sealed record PackageManifest(
             }
 
             writer.WriteString("version", Version.ToString());
+
+            if (Required)
+            {
+                writer.WriteBoolean("required", true);
+            }
 
             writer.WriteStartArray("metadata");
             foreach (var sidecarPath in MetadataList)
@@ -267,6 +278,9 @@ public sealed record PackageManifest(
 
         return version;
     }
+
+    private static bool ReadRequired(JsonElement root)
+        => root.TryGetProperty("required", out var value) && value.ValueKind == JsonValueKind.True;
 
     private static string? ReadName(JsonElement root)
     {

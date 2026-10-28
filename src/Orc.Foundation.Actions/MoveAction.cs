@@ -1,8 +1,10 @@
 using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Actions;
 using Orc.Game.Board;
 using Orc.Game.Cards;
+using Orc.Game.Model;
 
 namespace Orc.Foundation.Actions;
 
@@ -69,25 +71,28 @@ public sealed class MoveAction : IMoveAction
         _engine = engine;
         _services = services;
 
-        Trigger = new Trigger<MoveActionView>("卡牌移动触发器", bandType: typeof(ActionTriggerBands));
-        Handle = new Trigger<MoveActionView>("卡牌移动处理触发器", bandType: typeof(ActionHandleBands));
+        // U3：两端＝引擎成员（地址由契约自报）；实例＝过渡期内部执行面。
+        Trigger = MemberAddress.Create(AddressScope.Engine, EngineProcesses.Move);
+        Handle = MemberAddress.Create(AddressScope.Engine, EngineProcesses.MoveHandle);
 
-        Trigger.Register("通用前置", ValidateAsync, ActionTriggerBands.Initiate, DefaultPriority);
-        Trigger.Register("转发到处理端", ForwardAsync, ActionTriggerBands.Commit, DefaultPriority);
-        Handle.Register("落地移动", HandleLandAsync, ActionHandleBands.Apply, DefaultPriority);
+
+        // 自有边（新模型：按声明序；旧 Initiate／Commit／Apply 段由位次表达）。
+        ActionEdges.Attach<MoveActionView>(_engine, EngineProcesses.Move, ValidateAsync);
+        ActionEdges.Attach<MoveActionView>(_engine, EngineProcesses.Move, ForwardAsync);
+        ActionEdges.Attach<MoveActionView>(_engine, EngineProcesses.MoveHandle, HandleLandAsync);
 
         Ends = new[]
         {
-            new ActionTriggerEnd("触发端", Trigger, (registry, layer) => registry.Register(Trigger, layer)),
-            new ActionTriggerEnd(ActionTriggerEnd.HandleRole, Handle, (registry, layer) => registry.Register(Handle, layer)),
+            new ActionTriggerEnd("触发端", Trigger),
+            new ActionTriggerEnd(ActionTriggerEnd.HandleRole, Handle),
         };
     }
 
-    /// <summary>移动**触发端**（<c>Initiate</c> 通用前置 → <c>Commit</c> 默认转发）。</summary>
-    public Trigger<MoveActionView> Trigger { get; }
+    /// <inheritdoc />
+    public MemberAddress Trigger { get; }
 
-    /// <summary>移动**处理端**（<c>Rewrite</c>/<c>Veto</c>/<c>Apply</c>；<c>Apply</c> 默认 handler 是唯一落地口）。</summary>
-    public Trigger<MoveActionView> Handle { get; }
+    /// <inheritdoc />
+    public MemberAddress Handle { get; }
 
     /// <inheritdoc />
     public IReadOnlyList<ActionTriggerEnd> Ends { get; }
@@ -134,7 +139,7 @@ public sealed class MoveAction : IMoveAction
             data[nameof(MoveActionView.TriggerCard)] = view.TriggerCard;
         }
 
-        return Handle.InvokeAsync(_engine, data, ct);
+        return _engine.InvokeMemberAsync(EngineProcesses.MoveHandle, new Context(data), ct);
     }
 
     /// <summary>处理端默认执行体（唯一调用动作服务面处）。</summary>
@@ -168,7 +173,7 @@ public sealed class MoveAction : IMoveAction
             data[TriggerPayloadKeys.TriggerCard] = triggerCard;
         }
 
-        await Trigger.InvokeAsync(_engine, data, ct).ConfigureAwait(false);
+        await _engine.InvokeMemberAsync(EngineProcesses.Move, new Context(data), ct).ConfigureAwait(false);
 
         if (result.Outcome == ActionOutcomeKind.Skipped)
         {

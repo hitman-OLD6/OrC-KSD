@@ -64,10 +64,10 @@ public interface IMatchPluginContext : IPluginRegistrationContext
 public interface IMatchBindingServices
 {
     /// <summary>
-    /// 按**动作目录**把八个动作的两端触发器（加入手牌／抽牌／伤害／死亡／攻击／移动／加入战场／指令）
-    /// 按给定分层登记到对局触发器注册表；不暴露目录本体。
+    /// 流程装配阶段的**就绪校验**（批次 7／§27）：端＝引擎成员，一条边接入即进账，
+    /// 因此本步骤只剩"动作目录已装配"这一条前置检查（不暴露目录本体、不产生第二本登记簿）。
     /// </summary>
-    void RegisterFlowTriggers(TriggerLayer layer);
+    void RegisterFlowTriggers();
 
     /// <summary>装配词条效果库（行为引用注册 ＋ 数据壳库装载 ＋ 绑定核验）。</summary>
     void AssembleKeywordEffectLibrary();
@@ -76,9 +76,25 @@ public interface IMatchBindingServices
 /// <summary>对局包激活结果。</summary>
 /// <param name="ActivatedPackages">已激活包（<c>id@version</c>；装配序）。</param>
 /// <param name="Failures">失败明细（隔离整包）。</param>
+/// <param name="Skipped">被跳过的包（S14：可选包失败＝跳过并留痕；必需包失败＝装配段上抛、对局不开局）。</param>
 public sealed record MatchPackageActivationResult(
     IReadOnlyList<string> ActivatedPackages,
-    IReadOnlyList<string> Failures);
+    IReadOnlyList<string> Failures,
+    IReadOnlyList<MatchPackageSkip>? Skipped = null)
+{
+    /// <summary>被跳过的包（未提供＝空）。</summary>
+    public IReadOnlyList<MatchPackageSkip> SkippedPackages => Skipped ?? Array.Empty<MatchPackageSkip>();
+
+    /// <summary>失败的必需包（非空＝对局不开局）。</summary>
+    public IReadOnlyList<MatchPackageSkip> RequiredFailures
+        => SkippedPackages.Where(static s => s.Required).ToArray();
+}
+
+/// <summary>被跳过的包（S14 第 3 条：包 id ＋ 必需/可选 ＋ 失败项；审查面与初始化报告都读它）。</summary>
+/// <param name="PackageId">包标签（<c>id@version</c>）。</param>
+/// <param name="Required">是否必需包。</param>
+/// <param name="Failures">失败项。</param>
+public sealed record MatchPackageSkip(string PackageId, bool Required, IReadOnlyList<string> Failures);
 
 /// <summary>
 /// 对局包激活面（**接口倒置**：游戏层不认识宿主工程 <c>Orc.Packages</c>，故以接口由宿主实现）。
@@ -97,6 +113,6 @@ public interface IMatchPackageActivator
         IMatchBindingServices? bindingServices,
         AssetServiceRegistry assetServices,
         JudicatorRegistry judicators,
-        PrefabManager prefabs,
+        SnapshotStore prefabs,
         IUiPluginServices? uiServices = null);
 }

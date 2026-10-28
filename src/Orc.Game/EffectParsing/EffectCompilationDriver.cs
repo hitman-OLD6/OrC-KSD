@@ -373,7 +373,7 @@ public sealed class EffectCompilationDriver
             return;
         }
 
-        if (EffectRuntime.FindMissingOp(dsl.Fills, bundle.Ops) is { } missingOp)
+        if (FindMissingOp(dsl.Fills, bundle.Ops) is { } missingOp)
         {
             outcome.FailureCategory = EffectCompilationFailureCategory.SourceMissing;
             outcome.FailureReason = $"op 语句模板 '{missingOp}' 缺失（来源未命中——op 资产缺失）。";
@@ -391,6 +391,26 @@ public sealed class EffectCompilationDriver
             outcome.FailureCategory = EffectCompilationFailureCategory.CompileFailed;
             outcome.FailureReason = $"DSL 编译失败（编译失败）：{ex.Message}";
         }
+    }
+
+    /// <summary>
+    /// 来源预检：fills 里第一个在 op 资产目录中缺失的 op 名（全在＝null）。
+    /// 原属动态效果 partial（<c>EffectRuntime.FindMissingOp</c>），随该 partial 删除迁到本驱动器（唯一消费方）。
+    /// </summary>
+    private static string? FindMissingOp(IReadOnlyDictionary<string, DslSlotFill> fills, OpTemplateCatalog ops)
+    {
+        foreach (var fill in fills.Values)
+        {
+            foreach (var op in fill.Ops)
+            {
+                if (!ops.Has(op.Op))
+                {
+                    return op.Op;
+                }
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

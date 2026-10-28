@@ -1,10 +1,18 @@
-using Orc.Cards;
+using Orc.Core;
+using Orc.Core.Model;
 using Orc.Packages;
 using Xunit;
 
 namespace Orc.Packages.Tests;
 
-/// <summary>铜墙铁壁系列卡包（samples/card-pack-bulwark）的数据面验收：清单/内容/预检/行为制品声明。</summary>
+/// <summary>
+/// 铜墙铁壁系列卡包（samples/card-pack-bulwark）的数据面验收：清单/内容/预检/行为制品声明。
+/// <para>
+/// v4-only（§23.8 第 1 项）后行为制品的**唯一来源**是 <c>effects-v4/*.component.json</c>：
+/// 本文件原来的旧预制体断言（<c>PrefabJson</c> ＋ <c>injects</c>／<c>judicatorWrappers</c>）改为等价的
+/// v4 组件声明断言（<c>mounts</c>／<c>judge-wraps</c>），观测面变化、被测意图不变。
+/// </para>
+/// </summary>
 public sealed class BulwarkCardPackTests
 {
     private static string PackRoot => Path.GetFullPath(
@@ -39,34 +47,37 @@ public sealed class BulwarkCardPackTests
         Assert.Contains(content.Keywords, k => k.Id == "抢修");
         Assert.All(content.Keywords, k => Assert.Single(k.Bindings));
 
-        Assert.NotNull(content.EffectsDirectory);
-        Assert.True(Directory.Exists(content.EffectsDirectory));
+        // v4-only：行为制品的装载目录是 components 目录（旧 effects 目录已退场，本包不再提供）。
+        Assert.NotNull(content.ComponentsDirectory);
+        Assert.True(Directory.Exists(content.ComponentsDirectory));
+        Assert.Null(content.EffectsDirectory);
     }
 
     [Fact]
-    public void 行为制品_可解析为预制体_且声明正确()
+    public void 行为制品_可解析为组件资产_且声明正确()
     {
         foreach (var id in new[] { "keyword.mobility", "keyword.entrench", "keyword.repair" })
         {
-            var snapshot = PrefabJson.Deserialize(
-                File.ReadAllText(Path.Combine(PackRoot, "effects", id + ".prefab.json")));
-            Assert.Equal(id, snapshot.Root.Id);
+            Assert.Equal(id, ReadComponent(id).Id);
         }
 
-        var mobility = PrefabJson.Deserialize(
-            File.ReadAllText(Path.Combine(PackRoot, "effects", "keyword.mobility.prefab.json")));
-        var inject = Assert.Single(mobility.Root.Injects);
-        Assert.Equal("行动额度触发器", inject.TargetTriggerName);
-        Assert.Equal("onQuota", inject.EventId);
+        // 机动：挂到行动额度成员上（旧 injects → 新 mounts，二者语义等价：设计端编排）。
+        var mobility = ReadComponent("keyword.mobility");
+        var mount = Assert.Single(mobility.Mounts);
+        Assert.Equal("engine#action-budget", mount.Target);
+        Assert.Equal("onQuota", mount.Member);
 
-        var entrench = PrefabJson.Deserialize(
-            File.ReadAllText(Path.Combine(PackRoot, "effects", "keyword.entrench.prefab.json")));
-        Assert.Equal(2, entrench.Root.JudicatorWrappers.Count);
-        var moveWrapper = entrench.Root.JudicatorWrappers.Single(w => w.JudicatorName == "move.leg.eligibility");
-        Assert.Equal("after", moveWrapper.Phase);
-        Assert.False(string.IsNullOrWhiteSpace(moveWrapper.Handler.CsxSource));
-        Assert.Contains(
-            entrench.Root.JudicatorWrappers,
-            w => w.JudicatorName == "inhibit.leg.eligibility");
+        // 固守：两条判定器包装（旧 judicatorWrappers → 新 judge-wraps，语义等价）。
+        var entrench = ReadComponent("keyword.entrench");
+        Assert.Equal(2, entrench.JudgeWraps.Count);
+        var moveWrapper = entrench.JudgeWraps.Single(w => w.Judicator == "move.leg.eligibility");
+        Assert.Equal(WrapperPhase.After, moveWrapper.Phase);
+        Assert.False(string.IsNullOrWhiteSpace(moveWrapper.Script));
+        Assert.Contains(entrench.JudgeWraps, w => w.Judicator == "inhibit.leg.eligibility");
     }
+
+    private static ComponentAsset ReadComponent(string id)
+        => AssetSchema.Read(
+            File.ReadAllText(Path.Combine(PackRoot, "effects-v4", id + ".component.json")),
+            id + ".component.json");
 }

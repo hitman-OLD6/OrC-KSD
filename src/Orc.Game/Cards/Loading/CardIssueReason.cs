@@ -1,8 +1,12 @@
 namespace Orc.Game.Cards.Loading;
 
 /// <summary>
-/// 字段/资产问题的**原因枚举**（I10 冻结：报告 <c>fields[].reason</c> 只允许取这里的十个值，
+/// 字段/资产问题的**原因枚举**（I10 冻结：报告 <c>fields[].reason</c> 只允许取下表所列值，
 /// **禁止自由文本**——自动补全（D44/D45）以本枚举为稳定输入契约）。
+/// <para>
+/// **加值而非改值**：新增原因＝在表尾追加（旧 token 仍然合法，报告 <c>schemaVersion</c> 不动）；
+/// 既有值的名字与 token 一律不得改（否则旧报告无法解析）。
+/// </para>
 /// </summary>
 public enum CardIssueReason
 {
@@ -38,6 +42,9 @@ public enum CardIssueReason
 
     /// <summary>资产 GUID 重复声明/重复注册（结构性）。</summary>
     DuplicateGuid = 9,
+
+    /// <summary>组件脚本（csx）无法在 v4 承载视图下编译——该卡的效果永远不可能生效。</summary>
+    ScriptCompileFailed = 10,
 }
 
 /// <summary>原因 token（**冻结契约**：camelCase 字面值，报告序列化与工具面共用）。</summary>
@@ -57,6 +64,7 @@ public static class CardIssueReasonTokens
         CardIssueReason.LoaderUnregistered => "loaderUnregistered",
         CardIssueReason.Conflict => "conflict",
         CardIssueReason.DuplicateGuid => "duplicateGuid",
+        CardIssueReason.ScriptCompileFailed => "scriptCompileFailed",
         _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, "未定义的问题原因。"),
     };
 

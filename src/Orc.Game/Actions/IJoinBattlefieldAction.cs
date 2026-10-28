@@ -1,5 +1,6 @@
 ﻿using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Board;
 using Orc.Game.Cards;
 using Orc.Game.Players;
@@ -12,20 +13,27 @@ namespace Orc.Game.Actions;
 /// 处理端只做「单位化（单位数据／指挥组件／插入阵线／跑链）→ <c>card.placed</c>」，天然无入口类型分支；
 /// <c>unit.deployed</c>／<c>unit.joined</c>、扣部署费、离手、<c>OnDeployChainFinalized</c> 属**入口收尾**。
 /// </para>
+/// <para>
+/// **两端是引擎成员（S13／U3）**：公开面只给成员地址；旧身份实例随 <see cref="Ends"/> 交给宿主装配，
+/// 随旧类型在 U5 退役（<c>EffectRuntime</c> 的触发端访问面亦经 <c>ActionEnds</c> 按地址取回）。
+/// </para>
 /// </summary>
 public interface IJoinBattlefieldAction
 {
-    /// <summary>部署**触发端**（打出链）。</summary>
-    Trigger<JoinBattlefieldTriggerView> Deploy { get; }
+    /// <summary>部署**触发端**的成员地址（<c>engine#join.deploy</c>；打出链）。</summary>
+    MemberAddress Deploy { get; }
 
-    /// <summary>加入前线**触发端**（效果侧）：前线存在存活敌方单位＝拒绝（Error 留痕）。</summary>
-    Trigger<JoinBattlefieldTriggerView> JoinFrontline { get; }
+    /// <summary>加入前线**触发端**的成员地址（<c>engine#join.frontline</c>；前线存在存活敌方单位＝拒绝）。</summary>
+    MemberAddress JoinFrontline { get; }
 
-    /// <summary>加入支援阵线**触发端**（效果侧）。</summary>
-    Trigger<JoinBattlefieldTriggerView> JoinSupportLine { get; }
+    /// <summary>加入支援阵线**触发端**的成员地址（<c>engine#join.support</c>）。</summary>
+    MemberAddress JoinSupportLine { get; }
 
-    /// <summary>共享**处理端**（单位化 + 插入阵线 + <c>card.placed</c>）。</summary>
-    Trigger<JoinBattlefieldHandleView> Handle { get; }
+    /// <summary>共享**处理端**的成员地址（<c>engine#join.handle</c>；单位化 + 插入阵线 + <c>card.placed</c>）。</summary>
+    MemberAddress Handle { get; }
+
+    /// <summary>四端登记项（三触发端＋共享处理端）。</summary>
+    IReadOnlyList<ActionTriggerEnd> Ends { get; }
 
     /// <summary>部署入口（代价校验 → <c>card.played</c> → 部署词条 → 共享处理端）。</summary>
     Task<ActionResult> DeployAsync(

@@ -9,6 +9,15 @@ namespace Orc.Script;
 public sealed class CSharpScriptSecurityOptions
 {
     /// <summary>默认允许的程序集简单名（引用白名单；实际取自已加载程序集）。</summary>
+    /// <remarks>
+    /// <c>Microsoft.CSharp</c> 与 <c>System.Linq.Expressions</c> 为编排实体化（S5／W-15）**显式加入**：
+    /// 承载视图以 <c>dynamic</c> 暴露（<c>Func&lt;dynamic, Context, CancellationToken, Task&gt;</c>），
+    /// <c>dynamic</c> 既需要 DLR 绑定器程序集（<c>Microsoft.CSharp</c>），也需要
+    /// <c>System.Runtime.CompilerServices.DynamicAttribute</c> 所在的 <c>System.Linq.Expressions</c>。
+    /// 判据（记录，避免以后被当作安全回退）：它只提供绑定能力，**不扩大类型可见面**——白名单内的
+    /// <c>Orc</c>／<c>Orc.Game</c> 类型本就可直接访问其公开成员；关键字过滤是文本级过滤，<c>dynamic</c> 不绕过它；
+    /// 因此实际增量只是"编译期成员检查"，而这项检查已按 R1a 换成**装载期静态语法检查**（<see cref="ViewBindingAnalyzer"/>）。
+    /// </remarks>
     public static readonly IReadOnlyList<string> DefaultAllowedAssemblies = new[]
     {
         "System.Private.CoreLib",
@@ -17,6 +26,8 @@ public sealed class CSharpScriptSecurityOptions
         "System.Linq",
         "System.Text",
         "System.Threading.Tasks",
+        "Microsoft.CSharp",
+        "System.Linq.Expressions",
         "Orc",
         "Orc.Game",
     };

@@ -20,24 +20,6 @@
       "kind": "card",
       "id": "pack/orc.bulwark/bulwark.mobile-infantry",
       "version": "1.0.0"
-    },
-    {
-      "guid": "e0b405fb-d320-def7-a9b0-06069a6cbabd",
-      "kind": "effect",
-      "id": "pack/orc.bulwark/keyword.entrench",
-      "version": "1.0.0"
-    },
-    {
-      "guid": "331eb0c0-c9e3-82d2-3f3f-ff17bfc07552",
-      "kind": "effect",
-      "id": "pack/orc.bulwark/keyword.mobility",
-      "version": "1.0.0"
-    },
-    {
-      "guid": "e1c5787b-5eb8-e708-448f-ea6a9f688188",
-      "kind": "effect",
-      "id": "pack/orc.bulwark/keyword.repair",
-      "version": "1.0.0"
     }
   ]
 }

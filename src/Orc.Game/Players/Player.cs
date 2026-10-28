@@ -216,26 +216,6 @@ public sealed class Player
         ResourceManager = manager;
     }
 
-    /// <summary>
-    /// 对局级具名触发器注册表（E1-27；internal）：装配期注入——供效果预制体 <c>injects</c> 在宿主卡未命中时回退解析
-    /// （如对局级流程触发器「单位攻击触发器」）。
-    /// </summary>
-    internal Orc.Game.Cards.MatchNamedTriggers? MatchTriggers { get; private set; }
-
-    /// <summary>装配期注入对局级具名触发器注册表（E1-27；一次性注入、重复拒绝）。</summary>
-    /// <exception cref="ArgumentNullException">registry 为 null。</exception>
-    /// <exception cref="InvalidOperationException">已注入。</exception>
-    internal void ConfigureMatchTriggers(Orc.Game.Cards.MatchNamedTriggers registry)
-    {
-        ArgumentNullException.ThrowIfNull(registry);
-        if (MatchTriggers is not null)
-        {
-            throw new InvalidOperationException("玩家对局级具名触发器注册表已注入（重复注入被拒绝）。");
-        }
-
-        MatchTriggers = registry;
-    }
-
     // ---------- 玩家构筑配置（S10「G12补」加性面：主国/盟国——卡组构筑配置的读取承载） ----------
 
     /// <summary>

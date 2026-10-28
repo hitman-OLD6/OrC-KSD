@@ -81,6 +81,8 @@ public sealed partial class McpService
             OpeningHandSizeFirstPlayer = 0,      // 起手 0 张（占位卡不进手牌）
             OpeningHandSizeSecondPlayer = 0,
             SandboxAuthorized = Options.Mode == McpServiceMode.Authoring,
+            // R2c：沙盒可显式开启随机取样（生产 play 路径不开启）。
+            AllowRandomTargeting = Options.Mode == McpServiceMode.Authoring,
         };
 
         // 资产快照须**同时**含内置核心包与 UI 包：前者提供判定器/词条/组件注册面，

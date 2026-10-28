@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 4,
+  "asset": {
+    "kind": "component",
+    "id": "keyword.armor",
+    "requires-host": "any",
+    "active-when": "loaded",
+    "one-shot": false,
+    "private-fields": [],
+    "members": [
+      {
+        "name": "重甲减伤",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Source",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Target",
+              "type": "entity",
+              "writable": false,
+              "required": true
+            },
+            {
+              "name": "Amount",
+              "type": "number",
+              "writable": true,
+              "required": true
+            },
+            {
+              "name": "Kind",
+              "type": "string",
+              "writable": false,
+              "required": false
+            }
+          ]
+        },
+        "handler": {
+          "id": "keyword.armor#重甲减伤",
+          "entry": "HandleAsync",
+          "script": "Func<dynamic, Context, CancellationToken, Task> HandleAsync = (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Cards.Card host) { return Task.CompletedTask; }\n\n    // 参值运行期读取（每次伤害结算时读当前值——改写后随动；null／0＝无减伤）。\n    var armor = Orc.Game.Cards.KeywordRules.GetKeywordValue(host, Orc.Game.Cards.KeywordIds.Armor);\n    if (armor is null || armor <= 0) { return Task.CompletedTask; }\n\n    // 只减「打在本卡身上」的那一向（反击方向是另一次结算，Target 同样指向本卡）。\n    if (!object.ReferenceEquals(view.Target, host)) { return Task.CompletedTask; }\n\n    // 判定读点：攻击者侧「无视重甲」——默认不无视（ArmorRules 单源）。\n    if (view.Source is Orc.Game.Cards.UnitCard attacker\n        && Orc.Game.Cards.ArmorRules.IgnoresArmor(attacker))\n    {\n        return Task.CompletedTask;\n    }\n\n    view.Amount = Math.Max(0, ((int)view.Amount) - armor.Value);\n    return Task.CompletedTask;\n};\n"
+        }
+      }
+    ],
+    "mounts": [],
+    "wraps": [
+      {
+        "target": "engine#combat-damage",
+        "phase": "before",
+        "handler": "keyword.armor#重甲减伤"
+      }
+    ]
+  }
+}

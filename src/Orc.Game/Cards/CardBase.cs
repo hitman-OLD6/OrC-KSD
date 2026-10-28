@@ -1,5 +1,9 @@
-using Orc.Core;
+﻿using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Cards.Data;
+using Orc.Game.Cards.Data.Components;
+using Orc.Game.Cards.Loading;
+using Orc.Game.Model;
 using Orc.Game.Players;
 
 namespace Orc.Game.Cards;
@@ -18,6 +22,9 @@ namespace Orc.Game.Cards;
 /// ④修饰器组件（W2a G3 加性）：所有卡类构造期常驻持有 <see cref="Modifiers"/>（轻量伴生容器——非数据组件、不进
 ///   装配/加载/快照语义；空状态零行为负担）；挂载/注销由效果装载链托管属后续批次（W2c）、本单先提供机制与装配接口。
 /// 加载失败（未注册 id、加载模板异常等）＝初始化 fail-fast（不进入进行态、明确上抛——加载路径保证）。
+/// 卡牌装载模板自身判定的失败（<see cref="CardLoadFailedException"/>，如效果 csx 编译不过）由装载链收下：
+/// 写入卡牌加载报告的卡位/条目（<c>CardLoadReport.slots[]</c>／<c>items[].fields</c>，reason＝<c>scriptCompileFailed</c>）
+/// 后再决定处置（卡组装载＝该卡不产生、其余照常）。
 /// </summary>
 public abstract class CardBase : Orc.Cards.Card
 {
@@ -47,6 +54,263 @@ public abstract class CardBase : Orc.Cards.Card
     public CardDefinition Definition { get; }
 
     /// <summary>
+    /// 卡牌成员表（S8：成员清单由**类型预制体**声明，卡牌类只做绑定）。
+    /// 构造期由子类经 <see cref="BindMembers"/> 填入；成员集合＝类型预制体的成员表（<c>card.base</c> → <c>card.unit</c> 等）。
+    /// </summary>
+    public CardMemberTable MemberTable { get; private set; } = null!;
+
+    /// <summary>
+    /// 绑定类型预制体并物化成员（构造期调用；唯一改动点 A＝各卡牌类的宿主种类）。
+    /// 两条实例化路径（直接构造／<c>typeCategory</c>）共用同一张表，不一致＝装载期拒绝。
+    /// </summary>
+    /// <exception cref="ArgumentNullException">engine 为 null。</exception>
+    /// <exception cref="Orc.Core.Model.PrefabLoadException">绑定或成员物化失败。</exception>
+    protected CardMemberTable BindMembers(
+        LogicEngine engine, HostKind host, Func<string, JudicatorBinding>? validationJudicatorResolver)
+    {
+        ModelHostKind = host;
+        MemberTable = CardTypeBinder.Bind(
+            this, host, engine, Definition, validationJudicatorResolver);
+        return MemberTable;
+    }
+
+    /// <summary>本卡的宿主种类（构造期由 <see cref="BindMembers"/> 写入；未绑定＝null）。</summary>
+    internal HostKind? ModelHostKind { get; private set; }
+
+    /// <summary>
+    /// 本卡的编排实体（**卡牌 ↔ OrchestrationEntity 桥**；加载期创建，销毁时撤销）。
+    /// <para>
+    /// 实体承载本卡（<see cref="OrchestrationEntity.Bound"/>＝this）：卡数据里声明的效果＝该实体上的组件
+    /// （A-3：一条声明＝一个组件实例，声明序＝装配序）。未装配编排运行时（独立构造／单测）＝null——纯加性，
+    /// 旧执行面（<c>CardEffectLoader</c> 装载的 <c>Effect</c> 链）不受影响。
+    /// </para>
+    /// </summary>
+    public OrchestrationEntity? ModelEntity { get; private set; }
+
+    /// <summary>加载期创建承载实体（幂等；无运行时／无宿主种类＝null——不阻断加载）。</summary>
+    private OrchestrationEntity? EnsureModelEntity()
+    {
+        if (ModelEntity is not null)
+        {
+            return ModelEntity;
+        }
+
+        var runtime = _engine.Model;
+        if (runtime is null || ModelHostKind is not { } host)
+        {
+            return null;
+        }
+
+        try
+        {
+            // 实体名带对局内卡 id（同名卡可同时在场；审查面按名建节点时不会相互顶掉）。
+            var entityName = MatchCardId is { } cardId ? $"{Name}#{cardId}" : Name;
+            var entity = runtime.CreateEntity(CardTypeBinder.PrefabIdFor(host), entityName);
+            entity.Bound = this; // 卡牌↔实体桥的绑定点（R1h/R3d：实体销毁不回写卡；由卡销毁驱动实体销毁）
+            ModelEntity = entity;
+            FlushPendingEdges(entity);
+            return entity;
+        }
+        catch (Exception ex) when (ex is KeyNotFoundException or Orc.Core.Model.PrefabLoadException or InvalidOperationException)
+        {
+            // 装配性错误只留痕、不阻断卡加载（模型面是加性观测面，旧执行面仍是唯一行为源）。
+            _engine.RootStream.WriteLog(
+                "编排实体",
+                $"卡牌 '{Name}' 的编排实体创建失败（隔离：该卡无实体）：{ex.Message}",
+                LogLevel.Error,
+                new[] { "model", "entity", "error" });
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 加载期装配本卡的效果组件（v4 唯一路径）。
+    /// <para>
+    /// 两条来源，装载面一致、**互不重叠**（同一 prefab id 只装一次）：
+    /// </para>
+    /// <list type="number">
+    /// <item>数据面直引：<c>effects.prefabs</c> 里的 id → 编排目录（<c>runtime.Catalog</c>）按 id 直取；</item>
+    /// <item>代码声明面：<c>CardEffectRegistry.DeclarePrefab</c> 声明的 id → 目录无该 id 时取
+    ///   <see cref="Orc.Cards.SnapshotStore"/> 里的旧效果快照，经 <c>LegacySnapshotComponentBinder</c> 现场转成
+    ///   v4 组件后装配（零新序列化：复用落盘文本 ＋ 资产迁移器）。</item>
+    /// </list>
+    /// <para>
+    /// 单条失败＝隔离留痕、跳过，不阻断卡加载；旧链已不存在，**不再有回退**——无法承载的旧来源
+    /// （<c>assemblyKey</c> 成员）一律写 Error 日志并跳过该条。
+    /// </para>
+    /// <para>
+    /// **例外（§33）**：csx 在承载视图下**编译不过**＝该效果永远不可能生效 ⇒ 判**卡牌加载失败**
+    /// （<see cref="CardLoadFailedException"/>），不按隔离处理——否则症状（效果没发生）与原因（编译失败）隔两层。
+    /// </para>
+    /// </summary>
+    private (int Declared, int Mounted) LoadModelComponents()
+    {
+        if (ModelEntity is not { } entity)
+        {
+            return (0, 0);
+        }
+
+        var declared = 0;
+        var mounted = 0;
+        var mountedIds = new HashSet<string>(StringComparer.Ordinal);
+
+        // ① 数据面直引（effects.prefabs → 编排目录）。
+        foreach (var definition in Definition.Components)
+        {
+            if (definition is not EffectsDefinition effects)
+            {
+                continue;
+            }
+
+            foreach (var assetId in effects.Prefabs)
+            {
+                if (!mountedIds.Add(assetId))
+                {
+                    continue; // 同一 id 重复声明：只装一次（幂等）
+                }
+
+                declared++;
+                if (MountComponent(entity, assetId, assetId))
+                {
+                    mounted++;
+                }
+            }
+        }
+
+        // ② 代码声明面（DeclarePrefab）：目录里没有的 id 走"旧快照 → v4 组件"。
+        var context = EffectLoadContextProvider?.Invoke();
+        if (context is not null)
+        {
+            foreach (var prefabId in context.PrefabDeclarations)
+            {
+                if (!mountedIds.Add(prefabId))
+                {
+                    continue; // 数据面已装（或声明内重复）：不重复装
+                }
+
+                declared++;
+                if (MountDeclaredComponent(entity, prefabId))
+                {
+                    mounted++;
+                }
+            }
+        }
+
+        return (declared, mounted);
+    }
+
+    /// <summary>按目录 id 装配一个组件（失败＝隔离留痕；不抛）。</summary>
+    private bool MountComponent(OrchestrationEntity entity, string assetId, string instanceName)
+    {
+        var runtime = entity.Runtime;
+        if (!runtime.Catalog.Contains(assetId))
+        {
+            _engine.RootStream.WriteLog(
+                "编排组件",
+                $"卡牌 '{Name}' 的组件 '{assetId}' 不在编排目录中（隔离：该组件不生效）。",
+                LogLevel.Error,
+                new[] { "model", "component", "error", assetId });
+            return false;
+        }
+
+        try
+        {
+            runtime.AddComponent(entity, assetId, instanceName);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _engine.RootStream.WriteLog(
+                "编排组件",
+                $"卡牌 '{Name}' 的组件 '{assetId}' 装配失败（隔离：该组件不生效）：{ex.Message}",
+                LogLevel.Error,
+                new[] { "model", "component", "error", assetId });
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 按声明 id 装配一个组件：目录已含＝直取；否则取旧快照转 v4 组件。
+    /// 旧来源无法转（assemblyKey／转换期其他异常）＝Error 留痕并跳过，**不回退旧链**（旧链已删除）；
+    /// csx 编译不过＝**抛出**（判卡牌加载失败——见 <see cref="LoadModelComponents"/>）。
+    /// </summary>
+    /// <exception cref="CardLoadFailedException">效果 csx 在承载视图下编译不过（卡牌加载失败）。</exception>
+    private bool MountDeclaredComponent(OrchestrationEntity entity, string prefabId)
+    {
+        var runtime = entity.Runtime;
+        if (runtime.Catalog.Contains(prefabId))
+        {
+            return MountComponent(entity, prefabId, prefabId);
+        }
+
+        if (!_engine.Prefabs.TryGetPrefab(prefabId, out var snapshot))
+        {
+            _engine.RootStream.WriteLog(
+                "编排组件",
+                $"卡牌 '{Name}' 声明的效果 '{prefabId}' 既不在编排目录、也没有效果快照（隔离：该效果不生效）。",
+                LogLevel.Error,
+                new[] { "model", "component", "error", prefabId });
+            return false;
+        }
+
+        string assetId;
+        try
+        {
+            assetId = LegacySnapshotComponentBinder.Register(
+                runtime, snapshot, _engine.ScriptEvaluator, _engine.SyncScriptEvaluator);
+        }
+        catch (LegacySnapshotComponentBinder.LegacyScriptUnsupportedException ex)
+        {
+            // csx 在 v4 承载视图（dynamic）下**编译不过**：该效果永远不可能生效（旧链已删、无回退可走）。
+            // 这不是"少一条可选效果"——卡的能力已经不可信 ⇒ **判卡牌加载失败**（§33，用户口径）。
+            // 留痕进卡牌加载报告（由装载链补卡库键、宿主回填报告），并上抛：处置（摘除该卡／整局不开）归装载链。
+            _engine.RootStream.WriteLog(
+                "编排组件",
+                $"卡牌 '{Name}' 的效果 '{prefabId}' 的 csx 在承载视图下编译失败（卡牌加载失败）：{ex.Message}",
+                LogLevel.Error,
+                new[] { "model", "component", "script-compile", prefabId });
+            throw new CardLoadFailedException(
+                Name, MatchCardId, prefabId, CardIssueReason.ScriptCompileFailed, ex.Message, ex);
+        }
+        catch (LegacySnapshotComponentBinder.LegacyAssemblyKeyNotSupportedException ex)
+        {
+            // assemblyKey 成员（C# 委托来源）不在 v4 覆盖面内：暂按原口径隔离（用户口径只点名"编译不过"）。
+            // 旧链已删除，无回退可走——明确拒绝 + 日志（不静默）。
+            _engine.RootStream.WriteLog(
+                "编排组件",
+                $"卡牌 '{Name}' 的效果 '{prefabId}' 是旧来源，v4 不承载（已跳过——需改写成 csx）：{ex.Message}",
+                LogLevel.Error,
+                new[] { "model", "component", "legacy-unsupported", prefabId });
+            return false;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _engine.RootStream.WriteLog(
+                "编排组件",
+                $"卡牌 '{Name}' 的效果 '{prefabId}' 转 v4 装配失败（隔离：该效果不生效）：{ex.Message}",
+                LogLevel.Error,
+                new[] { "model", "component", "error", prefabId });
+            return false;
+        }
+
+        return MountComponent(entity, assetId, prefabId);
+    }
+
+    /// <summary>销毁：先撤销本卡的编排实体（卸载组件 → 撤销它创建的边与包装），再走既有卡销毁链。</summary>
+    public override void Destroy()
+    {
+        var entity = ModelEntity;
+        ModelEntity = null;
+        if (entity is not null)
+        {
+            entity.Bound = null;
+            entity.Destroy();
+        }
+
+        base.Destroy();
+    }
+
+    /// <summary>
     /// 资产域（R14/D20/S6）：实例**随身携带**的域标记——由加载段（<see cref="CardLibrary.Instantiate"/> 经
     /// <see cref="CardLibrary.DomainOf"/>）写入，未归域的独立构造默认正式域。
     /// <para>
@@ -59,20 +323,72 @@ public abstract class CardBase : Orc.Cards.Card
     /// <summary>是否为测试资产（域的诊断/展示读面；同样**不得**用于玩法判定）。</summary>
     public bool IsTestAsset => AssetDomain == Orc.Core.AssetDomain.Test;
 
-    private readonly NamedTriggerTable _namedTriggers = new();
+    /// <summary>待接入的成员边（构造期登记、实体创建后落到宿主实体上；顺序＝接入序）。</summary>
+    private readonly List<(string Member, OwnedEdge Edge)> _pendingEdges = new();
 
-    /// <summary>登记具名触发器（S5；子类构造期调用）：供效果预制体 <c>injects</c> 声明按名解析注入目标。</summary>
-    /// <exception cref="ArgumentException">name 为 null/空白。</exception>
-    /// <exception cref="ArgumentNullException">trigger 或 viewType 为 null。</exception>
-    protected void RegisterNamedTrigger(string name, object trigger, Type viewType)
-        => _namedTriggers.Register(name, trigger, viewType);
+    /// <summary>
+    /// 给本卡宿主的某成员接一条**自有边**（构造期调用；实体尚未创建时先挂起，创建后按序落表）。
+    /// <para>
+    /// 位次＝该成员声明的自有边组内（声明序 → 接入序）；卡的默认链就是自有边，
+    /// 因此"守卫边先、链后"由接入顺序表达，与旧 <c>Register</c> 的注册序同构。
+    /// </para>
+    /// </summary>
+    /// <param name="memberName">成员名（<see cref="Orc.Game.Model.CardProcesses"/> 常量）。</param>
+    /// <param name="edge">边体。</param>
+    /// <exception cref="ArgumentNullException">memberName／edge 为 null。</exception>
+    protected internal void AttachMemberEdge(string memberName, OwnedEdge edge)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(memberName);
+        ArgumentNullException.ThrowIfNull(edge);
 
-    /// <summary>按名查找具名触发器（S5 注入目标解析；未登记＝false）。</summary>
-    public bool TryFindNamedTrigger(
-        string name,
-        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out object? trigger,
-        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Type? viewType)
-        => _namedTriggers.TryFind(name, out trigger, out viewType);
+        // 构造期就声明驱动：未声明成员＝立即失败（不要等到打出的那一刻才发现拼错）。
+        _ = MemberTable.Member(memberName);
+
+        if (ModelEntity is { } entity)
+        {
+            entity.AttachOwnedEdge(memberName, edge);
+            return;
+        }
+
+        _pendingEdges.Add((memberName, edge));
+    }
+
+    /// <summary>把挂起的边落到刚创建的宿主实体上（幂等：清空挂起表）。</summary>
+    private void FlushPendingEdges(OrchestrationEntity entity)
+    {
+        foreach (var (member, edge) in _pendingEdges)
+        {
+            entity.AttachOwnedEdge(member, edge);
+        }
+
+        _pendingEdges.Clear();
+    }
+
+    /// <summary>
+    /// 执行本卡宿主的某成员（<c>host#&lt;成员&gt;</c>）：数据面沿调用方上下文（写回可读）。
+    /// </summary>
+    /// <param name="memberName">成员名（须由类型预制体声明）。</param>
+    /// <param name="ctx">调用方上下文（同一份数据面）。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <exception cref="InvalidOperationException">本卡没有编排实体（未加载／引擎未装配编排运行时）。</exception>
+    public Task<MemberExecutionResult> InvokeMemberAsync(
+        string memberName, Context ctx, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(memberName);
+        ArgumentNullException.ThrowIfNull(ctx);
+
+        if (ModelEntity is null || _engine.Model is not { } runtime)
+        {
+            throw new InvalidOperationException(
+                $"卡牌 '{Name}' 没有编排实体（未加载或引擎未装配编排运行时）：成员 '{memberName}' 无法执行。");
+        }
+
+        return runtime.RunMemberAsync(ModelEntity, memberName, ctx, _engine, ct);
+    }
+
+    /// <summary>成员的宿主地址（<c>host#&lt;成员名&gt;</c>）。</summary>
+    /// <param name="memberName">成员名。</param>
+    public MemberAddress AddressOf(string memberName) => MemberTable.AddressOf(memberName);
 
     /// <summary>
     /// 卡侧修饰器组件（W2a G3 修饰机制）：每实例构造期常驻的专用轻量容器
@@ -192,14 +508,16 @@ public abstract class CardBase : Orc.Cards.Card
     /// 加载路径保证每卡恰一次调用；失败直接上抛（初始化 fail-fast）。
     /// </summary>
     /// <exception cref="ArgumentNullException">owner 为 null。</exception>
+    /// <exception cref="CardLoadFailedException">卡牌装载模板判定该卡加载失败（§33：效果 csx 编译不过等）。</exception>
     public async Task LoadAsync(Player owner, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(owner);
 
         Owner = owner;
         LoadMatchCardId();
+        EnsureModelEntity(); // ① 卡牌↔实体桥（无运行时＝null，不阻断）
         await LoadComponentPhaseAsync(ct); // 两段式：第一段＝内置注册序；第二段＝扩展／社区组件按数据体声明序
-        await LoadEffectsAsync(ct);
+        LoadModelComponents(); // ② 效果组件（数据面直引 ＋ 代码声明面；唯一装配路径）
         await GameUpdates.EmitCardLoad(_engine, owner, this, ct);
     }
 
@@ -335,19 +653,6 @@ public abstract class CardBase : Orc.Cards.Card
             new[] { "component", "error" });
     }
 
-
-
-    /// <summary>
-    /// 效果装载（X2；加载时＝与 card.load 同时完成「声明解析＋构造＋登记＋装载」）：
-    /// 经效果装载链（<see cref="CardEffectLoader"/>）执行——声明校验与工厂解析 fail-fast（未知标识/工厂返回 null 上抛）、
-    /// 构造执行异常隔离（跳过该效果）、被动效果装载（挂主触发器＋OnMount——含监听 handler 注册；失败回滚、不阻断）、
-    /// 托管登记（卸载自动按来源撤销修饰器）；无装配源（独立构造）＝整链跳过、不抛错、加载不失败；无声明卡＝无副作用。
-    /// </summary>
-    private async Task LoadEffectsAsync(CancellationToken ct)
-    {
-        var context = EffectLoadContextProvider?.Invoke();
-        await CardEffectLoader.LoadAsync(this, _engine, context, ct);
-    }
 
 
     private static string DefinitionName(CardDefinition definition)

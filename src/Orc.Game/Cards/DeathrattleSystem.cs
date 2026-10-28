@@ -1,164 +1,115 @@
-using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 
 namespace Orc.Game.Cards;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 第 2 批·A4 亡计体系（口径依据《需求文档（A4）》Q&A-1/2/6）：
-// 亡计词条组件（内容型：内部效果＝死亡结算动作〔复用 Effect 体系〕；「获得亡计」＝挂载词条、内容经内嵌效果通道）；
-// 亡计内容效果（动作型：执行面直接驱动——不经订阅面）；统一执行上下文（宿主卡＋引擎引用）；
-// 亡计执行面（单源：死亡结算与再触发共用同一执行面——解析宿主卡亡计词条 → 驱动其内部效果动作一次）。
-// 「亡计结算」步＝统一死亡流程（CommandManager.ProcessDeathAsync）置毁之后、词条死亡注销之前（插入点定稿见 Q&A-1）。
+// 第 2 批·A4 亡计体系（口径依据《需求文档（A4）》Q&A-1/2/6；§29 起内容改由 v4 组件承载）：
+// 亡计词条组件（标记型：只表达"这张卡有亡计"，内容不在这里）；
+// 亡计内容＝**卡实体上的一个 v4 组件**（`one-shot: true` ＋ 成员 `settle` ＋ `mounts: engine#card.dying`）；
+// 亡计执行面（单源：死亡结算与再触发都驱动**同一个成员**，见 DeathrattleRules）。
+// 「亡计结算」步＝统一死亡流程（CommandManager.ProcessDeathAsync）置毁之后、词条死亡注销之前。
 // 再触发（发布/接收/驱动）与部署重放见 RetriggerSystem.cs；部署逻辑登记/生成面见 DeploymentLogicData.cs。
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// 亡计词条组件（内容型；A4）：内部效果＝死亡结算动作（内嵌效果通道承载——授予装载/移除卸载/授予失败回滚，
-/// 生命周期全部继承内嵌效果既有口径）。
-/// 内容载荷只经运行时授予通道提供（「内容装载点」注入——<see cref="KeywordManager.GrantWithContentAsync"/>；
-/// 定义期声明面与亡计内容无关）；空内容（声明或授予）＝合法静默（结算时无操作）。
-/// 行为面：无主动运行逻辑（Mount/Unmount 不覆写）；触发由执行面驱动（<see cref="DeathrattleRules.ExecuteAsync"/>——
-/// 死亡结算/再触发共用），不经订阅面。参值位无语义（内容型词条）；不打对战词条标。
+/// 亡计词条组件（标记型）。
+/// <para>
+/// **不再承载内容**：旧形态的内容＝<c>DeathrattleEffect</c>（<c>PassiveEffect</c> 子类，随 <c>Effect</c> 家族删除）。
+/// 本组件只保留标识与生命周期（授予/移除/死亡注销仍走统一词条链）；内容改由卡实体上的 v4 组件承载——
+/// 组件成员是唯一执行体，因此"授予／撤销"与"内容生灭"解耦为两件事（内容随组件挂载而生、随组件卸载而灭）。
+/// </para>
 /// </summary>
 public sealed class DeathrattleKeywordComponent : KeywordComponent
 {
-    /// <summary>创建亡计词条组件（空内容形态——内容经授予通道的「内容装载点」注入）。</summary>
+    /// <summary>创建亡计词条组件（无内容形态）。</summary>
     public DeathrattleKeywordComponent()
         : base(KeywordIds.Deathrattle)
     {
     }
-
-    /// <inheritdoc />
-    internal override void AttachContent(Effect? content)
-    {
-        if (content is not null)
-        {
-            EmbedEffect(content); // 内容＝死亡结算动作（实例为基准；装载/卸载随词条组件生灭）
-        }
-    }
 }
 
 /// <summary>
-/// 亡计内容效果（动作型；A4）：内部效果的约定基类——自含「死亡结算动作」（<see cref="OnExecuteAsync"/>），
-/// 由亡计执行面在死亡结算/再触发时驱动一次（<see cref="ExecuteAsync"/>——独立于订阅面；不自设订阅自触发）。
-/// 按效果体系装载（继承 <see cref="PassiveEffect"/>：被动装载语境——挂生命周期触发器＋托管登记，由内嵌效果通道自动完成）。
-/// 动作约定：无交互、可同步完成（越界使用由效果作者承担——机制不设专用防护）。
-/// 宿主状态随语境：死亡结算＝已置毁、位置字段可读（清理前结算）；再触发＝该卡当前（存活）状态。
-/// </summary>
-public abstract class DeathrattleEffect : PassiveEffect
-{
-    /// <summary>创建亡计内容效果（动作型；被动装载语境——生命周期完整）。</summary>
-    protected DeathrattleEffect(string name)
-        : base(name)
-    {
-    }
-
-    /// <summary>
-    /// 亡计动作（作者覆写；执行面在死亡结算/再触发时驱动一次）：接收统一上下文（宿主卡＋引擎引用）。
-    /// 约定无交互、可同步完成；异常由执行面隔离记录（不中断死亡流程/不中断遍历）。
-    /// </summary>
-    protected abstract Task OnExecuteAsync(DeathrattleContext context, CancellationToken ct);
-
-    /// <summary>动作入口（执行面调用；框架面——作者覆写 <see cref="OnExecuteAsync"/>）。</summary>
-    internal Task ExecuteAsync(DeathrattleContext context, CancellationToken ct)
-        => OnExecuteAsync(context, ct);
-}
-
-/// <summary>
-/// 亡计统一执行上下文（A4；执行面向内部效果提供的可见信息——两条路径同构）：
-/// 宿主卡引用（<see cref="Unit"/>——死亡结算＝已置毁/位置字段可读；再触发＝存活状态）＋引擎引用（<see cref="Engine"/>，写效果所需）。
-/// 由执行面在驱动内容效果时构造（每次执行独立实例）。
-/// </summary>
-public sealed class DeathrattleContext
-{
-    internal DeathrattleContext(UnitCard unit, LogicEngine engine)
-    {
-        Unit = unit;
-        Engine = engine;
-    }
-
-    /// <summary>宿主单位卡（本次执行所属；状态随语境——死亡结算/再触发）。</summary>
-    public UnitCard Unit { get; }
-
-    /// <summary>引擎引用（写效果所需：发射更新 / 触发子触发器）。</summary>
-    public LogicEngine Engine { get; }
-}
-
-/// <summary>
-/// 亡计规则服务（A4）：授予面（「获得亡计」）＋亡计执行面（单源共享——死亡结算与再触发）。
+/// 亡计规则服务（A4）：亡计执行面（单源共享——死亡结算与再触发）。
+/// <para>
+/// **内容承载形态（§29 起）**：卡实体上的一个 v4 组件，约定三件事——
+/// </para>
+/// <list type="number">
+/// <item>成员名＝<see cref="ContentMember"/>（<c>settle</c>）：结算执行体就是它，没有第二份 C# 实现；</item>
+/// <item>挂载声明＝<c>mounts: engine#card.dying</c>（<see cref="ContentSignal"/>）：死亡流程在
+///   **置毁之后、词条注销之前**发射该信号，因此内容天然"在清理前结算"；</item>
+/// <item><c>one-shot: true</c>：信号路径与再触发路径都驱动同一成员，一次性额度保证**恰一次**。</item>
+/// </list>
+/// <para>
+/// 为什么不是 <c>engine#card.destroyed</c>（原交接建议）：<c>card.destroyed</c> 是"卡对象被销毁"（弃置／爆牌／
+/// 回库回收）的更新，**单位死亡链并不发射它**（死亡链发 <c>card.dying</c> / <c>card.died</c>）；挂在它上面的内容
+/// 在战斗致死与防御归零两条路径上都不会触发，正是"边在图上、行为消失"的那类静默失效。结算时点必须是
+/// <c>card.dying</c>：它是死亡链里唯一"置毁已置、清理未做"的可挂载信号。
+/// </para>
 /// </summary>
 public static class DeathrattleRules
 {
-    /// <summary>
-    /// 获得亡计（授予路径）：挂载「亡计」词条（携带内容载荷＝死亡结算动作；经内嵌效果通道）。
-    /// 空内容＝合法（空内容授予——结算时无操作）；重复授予＝幂等（无操作、返回 false——既有词条口径）；
-    /// 对已死亡卡＝拒绝（明确异常）。内容生命周期随词条组件生灭（授予装载/移除卸载/授予失败回滚无残留）。
-    /// 授予对象＝卡牌（<see cref="CardBase"/>——单位卡为实际语义承载；纯内核卡无词条面）。
-    /// </summary>
-    /// <exception cref="ArgumentNullException">card 为 null。</exception>
-    /// <exception cref="InvalidOperationException">对已死亡卡授予（终态拒绝）。</exception>
-    public static Task<bool> GrantAsync(CardBase card, DeathrattleEffect? content)
+    /// <summary>内容组件的结算成员名（约定；内容组件必须声明该成员）。</summary>
+    public const string ContentMember = "settle";
+
+    /// <summary>结算时点信号（＝<c>card.dying</c>；内容组件的挂载目标）。</summary>
+    public const string ContentSignal = GameUpdates.CardDying;
+
+    /// <summary>内容组件的标准挂载声明（作者在预制体里照抄即可）。</summary>
+    public static MountDeclaration ContentMount() => new($"engine#{ContentSignal}", ContentMember);
+
+    /// <summary>该卡是否承载亡计内容（卡实体上存在声明了 <see cref="ContentMember"/> 的组件实例）。</summary>
+    public static bool HasContent(UnitCard unit)
     {
-        ArgumentNullException.ThrowIfNull(card);
-        return card.Keywords.GrantWithContentAsync(KeywordIds.Deathrattle, content);
+        ArgumentNullException.ThrowIfNull(unit);
+        return ContentComponents(unit).Count > 0;
+    }
+
+    /// <summary>该卡的亡计内容组件实例（装配序；无实体／无内容＝空）。</summary>
+    public static IReadOnlyList<ComponentAttachment> ContentComponents(UnitCard unit)
+    {
+        ArgumentNullException.ThrowIfNull(unit);
+
+        if (unit.ModelEntity is not { } entity || unit.Engine.Model is not { } runtime)
+        {
+            return Array.Empty<ComponentAttachment>();
+        }
+
+        return runtime.ComponentsOf(entity)
+            .Where(static attachment => attachment.Component.FindMember(ContentMember) is not null)
+            .ToArray();
     }
 
     /// <summary>
-    /// 亡计执行面（单源；死亡结算与再触发共用）：解析宿主卡亡计词条（行为态——死亡注销后不可见、天然跳过）→
-    /// 驱动其内部效果动作一次。
-    /// 无词条面/无亡计词条/行为态未在/空内容＝无操作（合法静默、零副作用）；内部效果逐条异常隔离
-    /// （记录并继续——对齐死亡链/部署链健壮性口径；取消类异常穿透）。
-    /// 单源化（硬性口径）：两路径行为一致——同一内容不因触发源不同而执行差异。
+    /// 亡计执行面（单源；死亡结算的兜底驱动 ＋ 再触发）：
+    /// 在宿主卡的内容组件上执行 <see cref="ContentMember"/> 一次，返回是否**真的执行了**。
+    /// <para>
+    /// 死亡链的主驱动是 <c>engine#card.dying</c> 上的那条边（组件成员同样是它）；本方法服务两个场景：
+    /// ①再触发（<c>RetriggerRules.RequestDeathrattleAsync</c>——不发链级信号，直接驱动内容）；
+    /// ②内容组件**没有**声明 <c>card.dying</c> 挂载时的兜底（死亡链在清理前调用）。
+    /// 两条路径驱动的是同一个成员，且 <c>one-shot</c> 让"已经结算过"的实例在这里零副作用——
+    /// 恰一次由组件的一次性额度保证，不由调用点的次序保证。
+    /// </para>
     /// </summary>
-    /// <returns>true＝至少驱动一个内容效果动作；false＝无操作（静默跳过）。</returns>
+    /// <returns>true＝至少执行了一次（false＝无内容，或已消费一次性额度）。</returns>
+    /// <exception cref="ArgumentNullException">unit／engine 为 null。</exception>
     internal static async Task<bool> ExecuteAsync(UnitCard unit, LogicEngine engine, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(unit);
         ArgumentNullException.ThrowIfNull(engine);
 
-        if (KeywordRules.TryGetKeywordManager(unit) is not { } keywords
-            || !keywords.TryGetActiveComponent<DeathrattleKeywordComponent>(KeywordIds.Deathrattle, out var rattle))
+        if (engine.Model is not { } runtime)
         {
-            return false; // 无词条面/无亡计词条/行为态未在（如死亡注销后）：静默跳过
+            return false; // 未装配编排运行时（独立构造）：无内容执行面
         }
 
-        var content = rattle.EmbeddedEffects;
-        if (content.Count == 0)
-        {
-            return false; // 空内容＝合法静默（结算时无操作）
-        }
-
-        var context = new DeathrattleContext(unit, engine);
         var executed = false;
-        foreach (var effect in content)
+        foreach (var attachment in ContentComponents(unit))
         {
-            if (effect is not DeathrattleEffect action)
-            {
-                engine.RootStream.WriteLog(
-                    "亡计",
-                    $"内容效果 '{effect.Name}' 非动作型（约定：内容＝动作型效果；越界使用由效果作者承担）——跳过驱动。",
-                    LogLevel.Warning,
-                    new[] { "deathrattle", "content-skip" });
-                continue;
-            }
-
-            try
-            {
-                await action.ExecuteAsync(context, ct);
-                executed = true;
-            }
-            catch (OperationCanceledException)
-            {
-                throw; // 取消类异常不隔离（沿用引擎口径）
-            }
-            catch (Exception ex)
-            {
-                engine.RootStream.WriteLog(
-                    "亡计",
-                    $"亡计动作执行异常（隔离：继续结算/遍历）：'{effect.Name}'——{ex.Message}",
-                    LogLevel.Error,
-                    new[] { "deathrattle", "error", $"exception:{ex.GetType().Name}" });
-            }
+            var result = await runtime
+                .RunMemberAsync(attachment.Component, ContentMember, new Context(), engine, ct)
+                .ConfigureAwait(false);
+            executed |= result.Executed;
         }
 
         return executed;

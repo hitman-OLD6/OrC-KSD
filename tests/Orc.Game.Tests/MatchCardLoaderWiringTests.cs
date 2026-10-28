@@ -50,7 +50,7 @@ public class MatchCardLoaderWiringTests
         /// <summary>关闭后任何装载调用即抛（用于证明实例化路径不经过装载面）。</summary>
         internal bool Closed { get; set; }
 
-        public void Attach(CardLibrary library, TriggerRegistry triggers)
+        public void Attach(CardLibrary library)
         {
             AttachCount++;
             foreach (var (id, definition) in _definitions)

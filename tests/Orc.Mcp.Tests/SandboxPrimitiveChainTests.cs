@@ -16,7 +16,14 @@ namespace Orc.Mcp.Tests;
 /// </summary>
 public class SandboxPrimitiveChainTests
 {
-    /// <summary>指令卡：打出时抽 1 张（主动效果可观测＝手牌 +1）。</summary>
+    /// <summary>指令卡：打出时抽 1 张（主动效果可观测＝手牌 +1）。
+    /// <para>
+    /// v4 随改：csx 改为 **dynamic 安全**写法。v4 的组件 handler 由装载期预编译、承载视图是 <c>dynamic</c>，
+    /// 旧的 <c>view.Card is not T x || use(x)</c> 单行组合在 dynamic 下触发 CS0165（模式变量在 <c>||</c>
+    /// 右操作数上失去明确赋值）⇒ <c>LegacySnapshotComponentBinder</c> 判为「旧来源不承载」、整条效果被隔离。
+    /// 拆成两段判空＋显式转换后语义完全一致（照样要求 view.Card 是宿主本身）。
+    /// </para>
+    /// </summary>
     private const string DrawOrderCardJson = """
 {
   "schemaVersion": 1,
@@ -46,7 +53,7 @@ public class SandboxPrimitiveChainTests
                 {
                   "id": "onPlayed",
                   "entry": "HandleAsync",
-                  "csx": "Func<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n    if (view.Card is not Orc.Cards.Card played || !object.ReferenceEquals(played, view.Host))\n    {\n        return;\n    }\n\n    var runtime = Orc.Game.Effects.EffectRuntime.ResolveFor(played);\n    if (runtime is null)\n    {\n        return;\n    }\n\n    await runtime.DrawAsync(played, 1, ct, played);\n};\n",
+                  "csx": "Func<Orc.Cards.CardEventView, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n    if (view.Card is not Orc.Cards.Card)\n    {\n        return;\n    }\n\n    var played = (Orc.Cards.Card)view.Card;\n    if (!object.ReferenceEquals(played, view.Host))\n    {\n        return;\n    }\n\n    var runtime = Orc.Game.Effects.EffectRuntime.ResolveFor(played);\n    if (runtime is null)\n    {\n        return;\n    }\n\n    await runtime.DrawAsync(played, 1, ct, played);\n};\n",
                   "version": 1
                 }
               ],

@@ -109,7 +109,7 @@ public sealed record CardDistributionValidationReport(
 /// ② 同一目录重复传入＝校验器自行去重（不产生假重复）；③ 显式传入目录不存在＝Error（报告式、不抛）；
 /// ④ 空目录＝零错误；⑤ 部分失败不早退（报告式全收集）；⑥ 同目录内差异＝读面事实（照实汇入）、
 /// 跨目录/跨来源＝本器新增判定（按注册面冲突基准）；⑦ 不启动对局、不注册进引擎实例、不修改任何数据
-/// （库侧读取经 <see cref="PrefabJson"/> 静态反序列化，不经 <c>PrefabManager</c> 实例）。
+/// （库侧读取经 <see cref="PrefabJson"/> 静态反序列化，不经 <c>SnapshotStore</c> 实例）。
 /// </summary>
 public static class CardDistributionValidator
 {
@@ -176,12 +176,22 @@ public static class CardDistributionValidator
             }
         }
 
-        // ── ③ 库侧静态装载（PrefabJson 静态反序列化、不经 PrefabManager 实例；单文件失败隔离；文件序显式排序）──
-        var librarySnapshots = new List<(string Directory, string File, EffectSnapshot Snapshot)>();
+        // ── ③ v4 组件资产（同目录）：行为的**唯一**制品来源（v4-only 后旧格式 *.prefab.json 不再支持）──
+        // 旧 prefab 扫描段已删除（`PrefabJson.Deserialize` 随旧装载链移除）——预检的"可解析 id"集合只由
+        // *.component.json 与卡内联构成。
+        //
+        // **「效果引用可解析」的 v4 判据（§29 第 4 项，唯一口径）**：
+        //   目录里存在一个 `*.component.json`（`AssetSchema.FilePattern`），且能经 `AssetSchema.Read` 通过
+        //   ——即 `schemaVersion = 4`、`asset.kind = component`、字段集合封闭（旧字段名如 `mainTrigger`/`hooks`
+        //   一律拒绝）。命中即该 `asset.id` 进入可解析集合；文件存在但解析失败＝**库侧导入 Error**，且不贡献 id
+        //   （引用方随后按"未解析"告警，两条记录都保留：装载会失败、引用也没着落，都该看得见）。
+        //   旧格式 `*.prefab.json` 不走任何一条通道（v4-only 装载链不读它）——留在目录里只是死文件，不算可解析。
+        //   与生产装载同源：`CardPackAssembler` 只装 `effects-v4/*.component.json`，因此"可解析"≡"进对局装得上"。
+        var componentAssets = new List<(string Directory, string File, string Id)>();
         foreach (var directory in existingLibraries)
         {
             var files = Directory
-                .EnumerateFiles(directory, PrefabManager.PrefabFilePattern, SearchOption.TopDirectoryOnly)
+                .EnumerateFiles(directory, Orc.Core.Model.AssetSchema.FilePattern, SearchOption.TopDirectoryOnly)
                 .OrderBy(file => file, StringComparer.Ordinal);
 
             foreach (var file in files)
@@ -198,22 +208,23 @@ public static class CardDistributionValidator
                     continue;
                 }
 
-                if (!PrefabJson.TryDeserialize(text, out var snapshot, out var error))
+                try
+                {
+                    var asset = Orc.Core.Model.AssetSchema.Read(text, Path.GetFileName(file));
+                    componentAssets.Add((directory, file, asset.Id));
+                }
+                catch (Orc.Core.Model.PrefabLoadException ex)
                 {
                     errors.Add(new CardDistributionValidationEntry(
-                        CardDistributionValidationCategory.LibrarySideImport, error ?? "效果快照载入失败。", File: file));
-                    continue;
+                        CardDistributionValidationCategory.LibrarySideImport, ex.Message, File: file));
                 }
-
-                librarySnapshots.Add((directory, file, snapshot!));
             }
         }
 
-        // ── ④ 库内重复（同库目录内两条 / 跨库目录）：静态读取下两个快照都会到达注册面——Error ──
+        // ── ④ 库内重复（同库目录内两条 / 跨库目录）：静态读取下两个资产都会到达注册面——Error ──
         var firstLibrarySource = new Dictionary<string, (string Directory, string File)>(StringComparer.Ordinal);
-        foreach (var (directory, file, snapshot) in librarySnapshots)
+        foreach (var (directory, file, id) in componentAssets)
         {
-            var id = snapshot.Root.Id;
             if (firstLibrarySource.TryGetValue(id, out var first))
             {
                 var scope = string.Equals(first.Directory, directory, StringComparison.Ordinal) ? "同库目录内" : "跨库目录";
@@ -274,9 +285,8 @@ public static class CardDistributionValidator
 
         // ── ⑦ 库×内联（跨来源冲突：同一 id 同时由效果库与卡内联提供——Error；每 id 一条） ──
         var reportedLibraryInline = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (_, file, snapshot) in librarySnapshots)
+        foreach (var (_, file, id) in componentAssets)
         {
-            var id = snapshot.Root.Id;
             if (inlineIds.Contains(id) && reportedLibraryInline.Add(id))
             {
                 errors.Add(new CardDistributionValidationEntry(
@@ -289,9 +299,9 @@ public static class CardDistributionValidator
 
         // ── ⑧ 引用未解析（解析集合＝〔效果库（全部库目录合并）∪ 全部卡成功内联并集〕；逐（卡 id，引用 id）一条）──
         var resolutionSet = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (_, _, snapshot) in librarySnapshots)
+        foreach (var (_, _, id) in componentAssets)
         {
-            resolutionSet.Add(snapshot.Root.Id);
+            resolutionSet.Add(id);
         }
 
         resolutionSet.UnionWith(inlineIds);
@@ -324,7 +334,8 @@ public static class CardDistributionValidator
             CardDirectories: cards,
             PrefabLibraryDirectories: libraries,
             SuccessfulCardCount: perDirectory.Sum(item => item.Result.Definitions.Count),
-            SuccessfulLibrarySnapshotCount: librarySnapshots.Count,
+            // 库成功装载数＝v4 组件条目数（旧格式快照条目已不再支持）。
+            SuccessfulLibrarySnapshotCount: componentAssets.Count,
             SuccessfulInlineSnapshotCount: perDirectory.Sum(item => item.Result.Prefabs.Count),
             UnresolvedReferenceCount: unresolvedCount,
             Errors: errors.ToArray(),

@@ -28,8 +28,9 @@ namespace Orc.Game.Cards;
 /// 指挥可用性/复验侧接线）；标记保留、经移除路径清除。解除＝「施加后首先到来的拥有者回合结束」时
 /// （剩余回合数以参值承载——默认 1；「额外压制一回」＝＋1）；「下一个回合」不含当前回合
 /// （施加时若处于拥有者回合，本回合结束不递减——装载时判定、skip 不进参值面）。
-/// 批 1 效果化：本组件收薄为壳（标识／参值／授予-移除／读取面）——状态管理（递减/自解除）由内嵌效果
-/// <see cref="SuppressionLifecycleEffect"/> 承载（订阅建立/撤销随效果生命周期；参值运行期读取、改写随动）。
+/// A2：本组件为**纯壳**（标识／参值／授予-移除／读取面）——状态管理（递减/自解除）由 v4 效果组件
+/// <c>keyword.suppression</c> 的 csx 成员承载（挂载 <c>engine#turn.end</c>；参值运行期读取、改写随动；
+/// 「施加当回合不递减」由组件私有字段 <c>firstOwnerTurnEnd</c> 承担）。
 /// </summary>
 public sealed class SuppressedKeywordComponent : KeywordComponent
 {
@@ -37,7 +38,6 @@ public sealed class SuppressedKeywordComponent : KeywordComponent
     public SuppressedKeywordComponent(int? value = null)
         : base(KeywordIds.Suppressed, value)
     {
-        EmbedEffect(new SuppressionLifecycleEffect()); // 批 1：状态管理行为（递减/自解除）迁效果承载
     }
 }
 
@@ -108,9 +108,9 @@ public sealed class PincerKeywordComponent : KeywordComponent
 /// <summary>
 /// 重甲（参值型；Q&A-7 口径）：受到的对战伤害 -X（攻击伤害与反击伤害均含；指令伤害不减免）。
 /// 参值域：下限 0、上限 3（「每张卡最多为 3」＝值封顶——构造/参值改写均在组件侧钳制）。
-/// 批 2 效果化：本组件收薄为壳（标识／参值／钳制／授予-移除／读取面）——减伤行为（handler 注册/撤销与
-/// 减伤登记）由内嵌效果 <see cref="ArmorReductionEffect"/> 承载（参值运行期读取——改写后减伤量随动；
-/// 装载/卸载随词条生灭）。判定读点（承载面）：①攻击者侧「无视重甲」（默认不无视——读点经
+/// A2：本组件为**纯壳**（标识／参值／钳制／授予-移除／读取面）——减伤行为由 v4 效果组件 <c>keyword.armor</c>
+/// 的 csx 成员承载（包装 <c>engine#combat-damage</c> before；参值运行期读取——改写后减伤量随动；
+/// 装配/卸载随词条生灭）。判定读点（承载面）：①攻击者侧「无视重甲」（默认不无视——读点经
 /// <see cref="ArmorRules.IgnoresArmor"/>，不动）；②指令伤害域（<see cref="AppliesToCommandDamage"/>——公开面保留、
 /// 默认关闭、本批不接线）。「+1 重甲」＝当前值 +1（经 <see cref="ArmorRules.AddArmorAsync"/>）。
 /// </summary>
@@ -126,7 +126,6 @@ public sealed class ArmorKeywordComponent : KeywordComponent
     public ArmorKeywordComponent(int? value = null)
         : base(KeywordIds.Armor, Clamp(value))
     {
-        EmbedEffect(new ArmorReductionEffect()); // 批 2：减伤行为（注册/撤销与减伤登记）迁效果承载
     }
 
     /// <summary>是否作用于指令伤害（域扩展开关；默认 false＝仅对战伤害）——内容层效果将来经设置开启（本批承载面就位）。</summary>
@@ -144,8 +143,8 @@ public sealed class ArmorKeywordComponent : KeywordComponent
 /// （card.played 时点接线；推断口径、官方规则文本未直述）；「情报执行」（明牌 X 张）因 G18 明牌系统未就绪
 /// ＝待办环节（<see cref="IntelligenceRules"/>——触发点调用明确待办、申报待接线）。
 /// 参值域：下限 0、上限 3（词条层钳制——「每张卡最多为 3」＝值封顶）。
-/// 批 1 效果化：本组件收薄为壳（标识／参值／授予-移除／读取面）——「被使用时触发」结构由内嵌效果
-/// <see cref="IntelligenceTriggerEffect"/> 承载（执行面契约与待办环节保持、参值运行期读取）。
+/// A2：本组件为**纯壳**（标识／参值／授予-移除／读取面）——「被使用时触发」结构由 v4 效果组件
+/// <c>keyword.intelligence</c> 的 csx 成员承载（挂载 <c>engine#card.played</c>；执行面契约与待办环节保持、参值运行期读取）。
 /// </summary>
 public sealed class IntelligenceKeywordComponent : KeywordComponent
 {
@@ -159,7 +158,6 @@ public sealed class IntelligenceKeywordComponent : KeywordComponent
     public IntelligenceKeywordComponent(int? value = null)
         : base(KeywordIds.Intelligence, Clamp(value))
     {
-        EmbedEffect(new IntelligenceTriggerEffect()); // 批 1：「被使用时触发」结构迁效果承载
     }
 
     /// <summary>参值钳制（写入/增改均受上限约束——词条层校验/封顶）。</summary>
@@ -171,19 +169,51 @@ public sealed class IntelligenceKeywordComponent : KeywordComponent
 
 /// <summary>
 /// 免疫（能力型；Q&A-9 口径）：不会受到伤害——伤害归零（不限制索敌：目标候选/校验不查免疫；非伤害效果照常）。
-/// 批 2 效果化：本组件收薄为壳（标识／授予-移除／读取面）——归零行为由内嵌效果
-/// <see cref="ImmuneZeroingEffect"/> 承载（单位侧＝「造成攻击伤害」handler 注册/撤销随效果生灭；
-/// HQ 侧＝HQ 伤害路径改写段挂「归零改写器」——HQ 宿主即挂、不依赖装载上下文；机制同一、接入点各按路径对齐）。
+/// A2：本组件收薄为壳（标识／授予-移除／读取面）——归零行为由 v4 效果组件 <c>keyword.immune</c> 的 csx 成员
+/// 承载（单位侧＝包装 <c>engine#damage-apply</c> before，装配/卸载随词条生灭）；
+/// **HQ 侧例外**：HQ 无编排实体（不是 <c>CardBase</c>），其伤害走自己的数值管线（<see cref="Hq.AddDamageRewriter"/>）
+/// 而非 <c>damage.apply</c>——故 HQ 宿主在 <see cref="Mount"/> 直接挂「归零改写器」（机制同一、接入点各按路径对齐；
+/// 来源标记＝本组件实例）。这一处是 v4 化后唯一保留在 C# 的词条行为，见 PROGRESS「二十」节。
 /// 归零后按「0 伤害」正常走（净伤害＝0 不算「受到伤害」——动员等消费自然一致）。「全部来源」：本批伤害通道＝
 /// 对战结算（单位）与 HQ 数值路径（HQ）；非对战路径（指令/效果伤害）接入随统一伤害路径批次对齐（申报）。
 /// 期限/清除走施加物机制。
 /// </summary>
 public sealed class ImmuneKeywordComponent : KeywordComponent
 {
+    private Hq? _hq;
+    private HqDamageRewriter? _hqRewriter;
+
     /// <summary>创建免疫词条组件。</summary>
     public ImmuneKeywordComponent()
         : base(KeywordIds.Immune)
     {
-        EmbedEffect(new ImmuneZeroingEffect()); // 批 2：归零行为（单位侧注册/撤销与 HQ 侧改写器）迁效果承载
+    }
+
+    /// <inheritdoc />
+    internal override void Mount(Card card, KeywordLoadContext? context)
+    {
+        // HQ 侧：宿主即挂归零改写器（不依赖装载上下文——「HQ 宿主上下文依赖差异」逐条保持；
+        // HQ 伤害路径不经过 engine#damage-apply，v4 组件无法覆盖该接入点）。
+        if (card is not Hq hq)
+        {
+            return; // 单位/其它卡：归零由 v4 组件 keyword.immune 承载
+        }
+
+        _hq = hq;
+        _hqRewriter = new HqDamageRewriter(this, static _ => 0);
+        hq.AddDamageRewriter(_hqRewriter);
+    }
+
+    /// <inheritdoc />
+    internal override void Unmount()
+    {
+        var hq = _hq;
+        var rewriter = _hqRewriter;
+        _hq = null;
+        _hqRewriter = null;
+        if (hq is not null && rewriter is not null)
+        {
+            hq.RemoveDamageRewriter(rewriter); // 幂等（未挂载＝无操作、不抛错）
+        }
     }
 }

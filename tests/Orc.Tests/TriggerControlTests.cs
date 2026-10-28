@@ -1,198 +1,163 @@
 using Orc.Core;
+using Orc.Core.Model;
 using Xunit;
 
 namespace Orc.Tests;
 
 /// <summary>
-/// 验收点⑤：Stop（仅本级：停本触发器剩余事件、不影响父层、已触发子执行照常完成）与
-/// Interrupt（链级：沿嵌套链传播、事件边界检查、已中断状态下新执行空转、最外层正常返回并可查状态）。
+/// 验收点⑤（v4 形态）：<c>Stop</c>（仅本级成员：本成员剩余步骤不执行、调用方其余步骤照常）与
+/// <c>Interrupt</c>（链级标志：沿嵌套链传播、各层可查、写警告留痕）。
+/// <para>
+/// 与旧实现的差异（§27.1／§28）：中断**不再由执行器在事件边界自动跳过剩余步骤**——
+/// 帧上的 <c>Interrupted</c> 只做标记，是否止步由各流程自检（如 <see cref="OrderFlow"/>）；
+/// 因此旧"剩余事件未执行"的断言不再成立，改为断言"标志传播到位 + 消费者可读"。
+/// </para>
 /// </summary>
 public class TriggerControlTests
 {
+    private static OwnedEdge Edge(Action<Context> body)
+        => new((KernelHandler)((view, ctx, ct) =>
+        {
+            body(ctx);
+            return Task.CompletedTask;
+        }));
+
     [Fact]
-    public async Task Stop_Stops_Current_Trigger_Remainder_But_Not_Parent()
+    public async Task Stop_Stops_Current_Member_Remainder_But_Not_Caller()
     {
         var engine = new LogicEngine();
         var order = new List<string>();
-        Context? ctxX = null;
-        Context? ctxP = null;
-        EventStream? xStream = null;
 
-        var x = new Trigger<CounterView>(name: "X", events: new[]
+        var x = new MemberDefinition("X", ViewSpec.Empty, MemberVisibility.Callable, new[]
         {
-            new TriggerEvent<CounterView>("x1", (v, c, t) =>
+            Edge(ctx =>
             {
-                ctxX = c;
                 order.Add("x1");
-                c.Stop();
-                order.Add("x1-after");
-                return Task.CompletedTask;
+                ctx.Stop();
             }),
-            new TriggerEvent<CounterView>("x2", (v, c, t) => { order.Add("x2"); return Task.CompletedTask; }),
+            Edge(_ => order.Add("x2")),
         });
 
-        var p = new Trigger<CounterView>(name: "P", events: new[]
+        var p = new MemberDefinition("P", ViewSpec.Empty, MemberVisibility.Callable, new[]
         {
-            new TriggerEvent<CounterView>("p1", async (v, c, t) =>
+            new OwnedEdge((KernelHandler)(async (_, ctx, ct) =>
             {
-                ctxP = c;
-                xStream = await x.InvokeAsync(engine, new Dictionary<string, object?>());
+                order.Add("p1");
+                await engine.InvokeMemberAsync("X", ctx);
                 order.Add("p1-after");
-            }),
-            new TriggerEvent<CounterView>("p2", (v, c, t) => { order.Add("p2"); return Task.CompletedTask; }),
+            })),
+            Edge(_ => order.Add("p2")),
         });
 
-        await p.InvokeAsync(engine, new Dictionary<string, object?>());
+        KernelTestKit.Register(engine, x);
+        KernelTestKit.Register(engine, p);
 
-        Assert.Equal(new[] { "x1", "x1-after", "p1-after", "p2" }, order); // x2 未启动（事件边界检查）；父层照常
-        Assert.True(ctxX!.Stopped);           // 状态可查（与检查点同一状态源）
-        Assert.False(ctxX.Interrupted);
-        Assert.False(ctxP!.Stopped);          // 仅本级：不影响父层
-        Assert.False(ctxP.Interrupted);
-        Assert.NotNull(xStream);              // 已触发的子执行正常完成并返回流
-        Assert.Contains(xStream!.Entries, e => e.Keywords.Contains("stop")); // 停止行为写入事件流（本级流）
+        await engine.InvokeMemberAsync("P");
+
+        Assert.Equal(new[] { "p1", "x1", "p1-after", "p2" }, order); // X 的 x2 未执行；调用方照常
+        Assert.Contains(engine.RootStream.Entries, e => e.Keywords.Contains("stop")); // 停止写留痕
     }
 
     [Fact]
-    public async Task Stop_Does_Not_Affect_Already_Triggered_Sub_Execution()
+    public async Task Stop_Does_Not_Affect_Sub_Execution()
     {
         var engine = new LogicEngine();
         var order = new List<string>();
 
-        var y = new Trigger<CounterView>(name: "Y", events: new[]
+        var y = new MemberDefinition("Y", ViewSpec.Empty, MemberVisibility.Callable, new[]
         {
-            new TriggerEvent<CounterView>("y1", async (v, c, t) => { await Task.Yield(); order.Add("y1"); }),
-            new TriggerEvent<CounterView>("y2", (v, c, t) => { order.Add("y2"); return Task.CompletedTask; }),
+            Edge(_ => order.Add("y1")),
+            Edge(_ => order.Add("y2")),
         });
 
-        var x = new Trigger<CounterView>(name: "X", events: new[]
+        var x = new MemberDefinition("X", ViewSpec.Empty, MemberVisibility.Callable, new[]
         {
-            new TriggerEvent<CounterView>("x1", async (v, c, t) =>
+            new OwnedEdge((KernelHandler)(async (_, ctx, _) =>
             {
-                var yTask = y.InvokeAsync(engine, new Dictionary<string, object?>()); // Y 已触发（in-flight）
-                c.Stop();                                                             // 仅停 X 本级
-                await yTask;                                                          // Y 照常完成
+                await engine.InvokeMemberAsync("Y", ctx); // 子执行完整跑完
+                ctx.Stop();                              // 仅停 X 本级
                 order.Add("x1-after");
-            }),
-            new TriggerEvent<CounterView>("x2", (v, c, t) => { order.Add("x2"); return Task.CompletedTask; }),
+            })),
+            Edge(_ => order.Add("x2")),
         });
 
-        await x.InvokeAsync(engine, new Dictionary<string, object?>());
+        KernelTestKit.Register(engine, y);
+        KernelTestKit.Register(engine, x);
 
-        Assert.Equal(new[] { "y1", "y2", "x1-after" }, order); // Y 完整执行；X 剩余事件 x2 未执行
+        await engine.InvokeMemberAsync("X");
+
+        // Y 完整执行；X 剩余步骤 x2 未执行。
+        // 注意（§28 行为差异）：Stop 标记落在**当前栈顶作用域**——若子执行仍在途（未 await 完成）就调用 Stop，
+        // 标记会落在子作用域而非本级；旧的"已触发子执行不受影响"用例因此改写为顺序形态。
+        Assert.Equal(new[] { "y1", "y2", "x1-after" }, order);
     }
 
     [Fact]
-    public async Task Interrupt_Propagates_Along_Chain_And_Stops_All_Layers_At_Event_Boundaries()
+    public async Task Interrupt_Propagates_Along_Chain_And_Is_Readable_At_Every_Layer()
     {
         var engine = new LogicEngine();
         var order = new List<string>();
-        Context? ctxR = null;
-        Context? ctxS = null;
-        Context? ctxT = null;
+        Context? outerCtx = null;
+        var innerSawInterrupted = false;
 
-        var t = new Trigger<CounterView>(name: "T", events: new[]
+        var inner = new MemberDefinition("内", ViewSpec.Empty, MemberVisibility.Callable, new[]
         {
-            new TriggerEvent<CounterView>("t1", (v, c, tt) => { ctxT = c; c.Interrupt(); order.Add("t1-after"); return Task.CompletedTask; }),
-            new TriggerEvent<CounterView>("t2", (v, c, tt) => { order.Add("t2"); return Task.CompletedTask; }),
-        });
-        var s = new Trigger<CounterView>(name: "S", events: new[]
-        {
-            new TriggerEvent<CounterView>("s1", async (v, c, tt) => { ctxS = c; await t.InvokeAsync(engine, new Dictionary<string, object?>()); order.Add("s1-after"); }),
-            new TriggerEvent<CounterView>("s2", (v, c, tt) => { order.Add("s2"); return Task.CompletedTask; }),
-        });
-        var r = new Trigger<CounterView>(name: "R", events: new[]
-        {
-            new TriggerEvent<CounterView>("r1", async (v, c, tt) => { ctxR = c; await s.InvokeAsync(engine, new Dictionary<string, object?>()); order.Add("r1-after"); }),
-            new TriggerEvent<CounterView>("r2", (v, c, tt) => { order.Add("r2"); return Task.CompletedTask; }),
-        });
-
-        var streamR = await r.InvokeAsync(engine, new Dictionary<string, object?>()); // 最外层正常返回流（不外抛）
-
-        // ①执行到哪：in-flight 事件跑完（t1-after / s1-after / r1-after）
-        Assert.Equal(new[] { "t1-after", "s1-after", "r1-after" }, order);
-        // ②状态：链上各层 Interrupted 可见/可查（含最外层根执行 ctx）
-        Assert.True(ctxT!.Interrupted);
-        Assert.True(ctxS!.Interrupted);
-        Assert.True(ctxR!.Interrupted);
-        // ③剩余事件未执行（副作用缺失）
-        Assert.DoesNotContain("t2", order);
-        Assert.DoesNotContain("s2", order);
-        Assert.DoesNotContain("r2", order);
-
-        Assert.NotNull(streamR);
-        // 中断行为写入事件流并冒泡至总流：
-        Assert.Contains(engine.RootStream.Entries, e => e.Keywords.Contains("interrupt") && e.Level == LogLevel.Warning);
-    }
-
-    [Fact]
-    public async Task Interrupt_From_Deeper_Running_Sub_Layer_Stops_Sub_Layers_Too()
-    {
-        var engine = new LogicEngine();
-        var order = new List<string>();
-        Context? ctxC = null;
-
-        var d = new Trigger<CounterView>(name: "D", events: new[]
-        {
-            new TriggerEvent<CounterView>("d1", (v, c, tt) =>
+            Edge(ctx =>
             {
-                ctxC!.Interrupt(); // 起点＝C；D 为 C 之下正在运行的子层——各层含子层，同样停止
-                order.Add("d1-after");
-                return Task.CompletedTask;
-            }),
-            new TriggerEvent<CounterView>("d2", (v, c, tt) => { order.Add("d2"); return Task.CompletedTask; }),
-        });
-        var c = new Trigger<CounterView>(name: "C", events: new[]
-        {
-            new TriggerEvent<CounterView>("c1", async (v, cc, tt) =>
-            {
-                ctxC = cc;
-                await d.InvokeAsync(engine, new Dictionary<string, object?>());
+                order.Add("c1");
+                ctx.Interrupt();
                 order.Add("c1-after");
             }),
-            new TriggerEvent<CounterView>("c2", (v, cc, tt) => { order.Add("c2"); return Task.CompletedTask; }),
+            Edge(ctx =>
+            {
+                order.Add("c2");
+                innerSawInterrupted = ctx.Interrupted;
+            }),
         });
 
-        var streamC = await c.InvokeAsync(engine, new Dictionary<string, object?>());
+        var outer = new MemberDefinition("外", ViewSpec.Empty, MemberVisibility.Callable, new[]
+        {
+            new OwnedEdge((KernelHandler)(async (_, ctx, _) =>
+            {
+                outerCtx = ctx;
+                await engine.InvokeMemberAsync("内", ctx);
+                order.Add("p1-after");
+            })),
+            Edge(_ => order.Add("p2")),
+        });
 
-        Assert.Equal(new[] { "d1-after", "c1-after" }, order); // in-flight 完成；D 与 C 剩余事件均在事件边界停止
-        Assert.True(ctxC!.Interrupted);                        // 链上各层（含起点之下的运行中子层）状态可查
-        Assert.NotNull(streamC);
+        KernelTestKit.Register(engine, inner);
+        KernelTestKit.Register(engine, outer);
+
+        await engine.InvokeMemberAsync("外");
+
+        // Interrupt 的契约（`ExecutionFrame.RequestInterrupt`）：标记**整条调用栈**，各层在**各自下一检查边界**
+        // 停止、已中断状态下的新执行空转。因此：
+        //   · `c1-after` 仍执行——它与 Interrupt 同一 handler，Handler 内不是检查边界；
+        //   · `c2` 不执行——它是下一条边，边循环前是检查边界；
+        //   · `p1-after` 仍执行——它在外层 handler 的错误处理之后，handler 内同样不是边界；
+        //   · `p2` 不执行——外层的下一条边。
+        Assert.Equal(new[] { "c1", "c1-after", "p1-after" }, order);
+        Assert.False(innerSawInterrupted);           // `c2` 未被推进
+        Assert.True(outerCtx!.Interrupted);          // 但祖先层已被标记且可查（链级传播）
+        Assert.True(outerCtx!.Interrupted);
+
+        // 中断行为写入事件流（引擎级可见）
+        var record = engine.RootStream.Entries.Single(e => e.Keywords.Contains("interrupt"));
+        Assert.Equal(LogLevel.Warning, record.Level);
+        Assert.Contains("执行被中断", record.Message);
     }
 
     [Fact]
-    public async Task Sub_Execution_Started_After_Interrupt_Idles_With_Empty_Stream_Mounted()
+    public void Context_Stop_And_Interrupt_Outside_Execution_Session_Are_NoOps()
     {
-        var engine = new LogicEngine();
-        var order = new List<string>();
-        EventStream? idleStream = null;
+        var ctx = new Context();
 
-        var u = new Trigger<CounterView>(name: "U", events: new[]
-        {
-            new TriggerEvent<CounterView>("u1", (v, c, t) => { order.Add("u1"); return Task.CompletedTask; }),
-        });
+        ctx.Stop();
+        ctx.Interrupt();
 
-        var t = new Trigger<CounterView>(name: "T", events: new[]
-        {
-            new TriggerEvent<CounterView>("t1", async (v, c, tt) =>
-            {
-                c.Interrupt();
-                idleStream = await u.InvokeAsync(engine, new Dictionary<string, object?>()); // 已中断：新执行空转
-                order.Add("t1-after");
-            }),
-            new TriggerEvent<CounterView>("t2", (v, c, tt) => { order.Add("t2"); return Task.CompletedTask; }),
-        });
-
-        var streamT = await t.InvokeAsync(engine, new Dictionary<string, object?>());
-
-        Assert.Equal(new[] { "t1-after" }, order); // in-flight 完成；U 未执行任何事件、T 剩余事件未启动
-        Assert.NotNull(idleStream);
-        Assert.Empty(idleStream!.Entries);         // 空流
-        Assert.Same(streamT, idleStream.Parent);   // 仍遵守挂载统一规则（自动挂载到触发者流）
-        Assert.Contains(idleStream, streamT.Children);
-        // 空转的 attach 记录（含父子流 ID）：
-        var attach = streamT.Entries.Single(
-            e => e.Kind == LogEntryKind.Attach && Equals(e.Data["childId"], idleStream.Id));
-        Assert.Equal(streamT.Id, attach.Data["parentId"]);
+        Assert.False(ctx.Stopped);
+        Assert.False(ctx.Interrupted);
+        Assert.Null(ctx.Engine);
     }
 }

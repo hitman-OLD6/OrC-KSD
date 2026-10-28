@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 4,
+  "asset": {
+    "kind": "component",
+    "id": "keyword.immune",
+    "requires-host": "any",
+    "active-when": "loaded",
+    "one-shot": false,
+    "private-fields": [],
+    "members": [
+      {
+        "name": "免疫归零",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Source",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Target",
+              "type": "entity",
+              "writable": false,
+              "required": true
+            },
+            {
+              "name": "Amount",
+              "type": "number",
+              "writable": true,
+              "required": true
+            },
+            {
+              "name": "Kind",
+              "type": "string",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "IsZeroed",
+              "type": "boolean",
+              "writable": true,
+              "required": true
+            }
+          ]
+        },
+        "handler": {
+          "id": "keyword.immune#免疫归零",
+          "entry": "HandleAsync",
+          "script": "Func<dynamic, Context, CancellationToken, Task> HandleAsync = (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Cards.Card host) { return Task.CompletedTask; }\n    if (!object.ReferenceEquals(view.Target, host)) { return Task.CompletedTask; }\n\n    // 不会受到伤害：归零（置位＝处理端不扣数值；净伤害 0 不算「受到伤害」）。\n    view.IsZeroed = true;\n    view.Amount = 0;\n    return Task.CompletedTask;\n};\n"
+        }
+      }
+    ],
+    "mounts": [],
+    "wraps": [
+      {
+        "target": "engine#damage-apply",
+        "phase": "before",
+        "handler": "keyword.immune#免疫归零"
+      }
+    ]
+  }
+}

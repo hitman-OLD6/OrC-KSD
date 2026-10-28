@@ -99,7 +99,7 @@ public sealed class AssetRegistry
 
     /// <summary>
     /// **卡牌加载器声明面**（S6；进程级信任边界的挂载点）：sidecar 的 <c>loader</c> 只能引用此处已注册的名字。
-    /// 与对局级 <c>TriggerRegistry(layer=LowLevel)</c>（仅记账）**不是同一层**，不得混用。
+    /// 与对局级登记面（旧触发器簿；批次 7 已删除）**不是同一层**，不得混用。
     /// </summary>
     public CardLoaderRegistry CardLoaders { get; } = new();
 

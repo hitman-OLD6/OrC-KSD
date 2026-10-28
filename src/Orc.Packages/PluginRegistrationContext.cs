@@ -16,7 +16,7 @@ namespace Orc.Packages;
 public sealed record PluginRegistrationTargets(
     AssetServiceRegistry AssetServices,
     JudicatorRegistry Judicators,
-    PrefabManager Prefabs,
+    SnapshotStore Prefabs,
     IMatchServices? Match = null,
     IMatchBindingServices? Binding = null,
     Orc.Game.Ui.IUiPluginServices? Ui = null);

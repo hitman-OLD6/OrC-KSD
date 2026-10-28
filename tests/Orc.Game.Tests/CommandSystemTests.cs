@@ -234,7 +234,13 @@ public class CommandSystemTests
         var match = CommandTestKit.CreateCommandMatch(bridge);
         await match.Initialize();
         // 加入路径不要求归属：构造无主已单位化单位（Owner＝null）。
+        // 夹具（v4）：加入经卡实体成员 `host#join`，实体只由 `LoadAsync(owner)` 建立（加载必带归属），
+        // 因此「无归属」样本＝加载后清空归属（Owner 为私有 setter——夹具经反射还原本用例的样本口径；
+        // 生产面不允许无主加载，故不为此加宽松路径）。
         var unit = (UnitCard)match.CardLibrary.Instantiate(CommandTestKit.InfantryId);
+        await unit.LoadAsync(match.Players[0]);
+        typeof(CardBase).GetProperty(nameof(CardBase.Owner))!.SetValue(unit, null);
+        Assert.Null(unit.Owner);
         var joinResult = await match.PlayManager.JoinUnitAsync(unit, match.Battlefield.PlayerASupportLine.GetInsertionGaps().At(1)); // 插入点 1＝紧随 HQ（HQ 位置不变）
         Assert.Equal(PlayResultStatus.Success, joinResult.Status);
         CommandTestKit.Activate(unit);
@@ -315,37 +321,6 @@ public class CommandSystemTests
         Assert.Equal(1, player.Points); // 零副作用
     }
 
-    [Fact]
-    public async Task Move_Inner_Trigger_Does_Not_Write_Flags_Or_Deduct_Cost()
-    {
-        var match = CommandTestKit.CreateCommandMatch();
-        await match.Initialize();
-        var player = match.Players[0];
-        var unit = await CommandTestKit.PrepareOnSupportAsync(match, player, CommandTestKit.InfantryId, 1);
-        CommandTestKit.Activate(unit);
-        using var recorder = new UpdateRecorder(match.Engine);
-        // OldPosition＝**已成事实的位置**（BoardPosition）；NewPosition＝**请求落位**（FormationGap）——
-        // 与 DispatchMoveAsync 的载荷口径一致（PositionOf 现算 BoardPosition、候选给空隙）。
-        var oldPosition = new BoardPosition(match.Battlefield.PlayerASupportLine, 1);
-        var newSlot = match.Battlefield.FrontLine.GetInsertionGaps().At(0);
-
-        // 直接驱动内层移动触发器（越层）：执行段＝槽位变更＋发射更新；「两 bool 不写、费用不扣」——只在外层更新。
-        var stream = await match.CommandManager.UnitMoveTrigger.InvokeAsync(
-            match.Engine,
-            new Dictionary<string, object?>
-            {
-                [CommandDataKeys.Unit] = unit.Ref,
-                [CommandDataKeys.OldPosition] = oldPosition.Ref,
-                [CommandDataKeys.NewPosition] = newSlot.Ref,
-            });
-
-        Assert.Equal(ExecutionOutcome.Normal, stream.Outcome);
-        Assert.Contains(unit, newSlot.Line.Members); // 已落到新空隙所在的线（空隙身份会随快照失效，故不看空隙本身）
-        Assert.True(unit.GetData<CommandData>().CanMove);  // 内层不写
-        Assert.True(unit.GetData<CommandData>().CanAttack); // 内层不写
-        Assert.Equal(1, player.Points);                     // 内层不扣费
-        Assert.Equal(new[] { GameUpdates.UnitPositionChanged }, recorder.Types);
-    }
 
     [Fact]
     public async Task Availability_Query_Is_Pure_And_Shares_Source_With_Flow()

@@ -3,18 +3,12 @@
   "id": "diy",
   "guid": "9d13d84b-4760-6c24-a0aa-a5e9241832f8",
   "kind": "cardpack",
-  "version": "9b317f2647e2398d0c356a427c0278f2",
+  "version": "61ba8ed9447ccb3716a8daf5f258be4f",
   "metadata": [
     "cards/diy.adjacent-cover.card.json.meta.json",
     "cards/diy.field-rescue.card.json.meta.json",
     "cards/diy.fire-support.card.json.meta.json",
     "cards/diy.memorial.card.json.meta.json",
-    "cards/diy.volley.card.json.meta.json",
-    "effects/diy.adjacent-cover.aura.prefab.json.meta.json",
-    "effects/diy.adjacent-cover.mitigation.prefab.json.meta.json",
-    "effects/diy.field-rescue.effect.prefab.json.meta.json",
-    "effects/diy.fire-support.effect.prefab.json.meta.json",
-    "effects/diy.memorial.effect.prefab.json.meta.json",
-    "effects/diy.volley.effect.prefab.json.meta.json"
+    "cards/diy.volley.card.json.meta.json"
   ]
 }

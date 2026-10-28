@@ -1,6 +1,8 @@
-﻿using Orc.Cards;
+using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Cards;
+using Orc.Game.Model;
 using Orc.Game.Actions;
 
 namespace Orc.Foundation.Actions;
@@ -8,8 +10,8 @@ namespace Orc.Foundation.Actions;
 /// <summary>
 /// 死亡动作实体（S8）：一个**触发端** ＋ 恰一个**处理端**。
 /// <para>
-/// 两个旧的并列取消口（外部拦截器布尔 + 词条程序 <c>death.cancel</c>）都收敛为处理端
-/// <see cref="ActionHandleBands.Rewrite"/> 段的 handler；只有一个调用位置，按既有次序（拦截器先、词条后）
+/// 两个旧的并列取消口（外部拦截器布尔 + 词条程序 <c>death.cancel</c>）都收敛为处理端的
+/// **同一条外来挂载边**（在自有边〔免死守卫 → 死亡链〕之前执行）；只有一个调用位置，按既有次序（拦截器先、词条后）
 /// 由注册优先级表达。
 /// </para>
 /// <para>
@@ -40,20 +42,32 @@ public sealed class DeathAction : IDeathAction
         _services = services;
         _addToHand = addToHand;
 
-        Trigger = new Trigger<DeathTriggerView>("卡牌死亡触发器", bandType: typeof(ActionTriggerBands));
-        Handle = new Trigger<DeathHandleView>("死亡处理触发器", bandType: typeof(ActionHandleBands));
+        // U5-a：两端＝引擎成员；实例＝过渡期内部执行面（挂接点经 ActionEnds 取回）。
+        Trigger = MemberAddress.Create(AddressScope.Engine, EngineProcesses.Death);
+        Handle = MemberAddress.Create(AddressScope.Engine, EngineProcesses.DeathHandle);
 
-        Trigger.Register("通用前置", ValidateAsync, ActionTriggerBands.Initiate, DefaultPriority);
-        Trigger.Register("转发到处理端", ForwardAsync, ActionTriggerBands.Commit, DefaultPriority);
-        Handle.Register("免死守卫", GuardAsync, ActionHandleBands.Veto, DefaultPriority);
-        Handle.Register("执行死亡链", HandleApplyAsync, ActionHandleBands.Apply, DefaultPriority);
+
+        // 自有边：触发端前置／转发；处理端免死守卫 → 死亡链（声明序＝旧 Veto／Apply 段次序）。
+        ActionEdges.Attach<DeathTriggerView>(_engine, EngineProcesses.Death, ValidateAsync);
+        ActionEdges.Attach<DeathTriggerView>(_engine, EngineProcesses.Death, ForwardAsync);
+        ActionEdges.Attach<DeathHandleView>(_engine, EngineProcesses.DeathHandle, GuardAsync);
+        ActionEdges.Attach<DeathHandleView>(_engine, EngineProcesses.DeathHandle, HandleApplyAsync);
+
+        Ends = new[]
+        {
+            new ActionTriggerEnd("触发端", Trigger),
+            new ActionTriggerEnd(ActionTriggerEnd.HandleRole, Handle),
+        };
     }
 
-    /// <summary>死亡**触发端**。</summary>
-    public Trigger<DeathTriggerView> Trigger { get; }
+    /// <inheritdoc />
+    public MemberAddress Trigger { get; }
 
-    /// <summary>死亡**处理端**（<c>Rewrite</c> 单改写位 / <c>Veto</c> 免死守卫 / <c>Apply</c> 死亡链）。</summary>
-    public Trigger<DeathHandleView> Handle { get; }
+    /// <inheritdoc />
+    public MemberAddress Handle { get; }
+
+    /// <inheritdoc />
+    public IReadOnlyList<ActionTriggerEnd> Ends { get; }
 
     /// <inheritdoc />
     public async Task<ActionResult> ExecuteAsync(
@@ -84,7 +98,7 @@ public sealed class DeathAction : IDeathAction
             data[TriggerPayloadKeys.TriggerCard] = triggerCard;
         }
 
-        await Trigger.InvokeAsync(_engine, data, ct).ConfigureAwait(false);
+        await _engine.InvokeMemberAsync(EngineProcesses.Death, new Context(data), ct).ConfigureAwait(false);
 
         if (result.Outcome == ActionOutcomeKind.Skipped)
         {
@@ -139,7 +153,7 @@ public sealed class DeathAction : IDeathAction
             data[nameof(DeathHandleView.TriggerCard)] = view.TriggerCard;
         }
 
-        return Handle.InvokeAsync(_engine, data, ct);
+        return _engine.InvokeMemberAsync(EngineProcesses.DeathHandle, new Context(data), ct);
     }
 
     /// <summary>

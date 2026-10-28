@@ -127,12 +127,8 @@ public class SkeletonTests
             return Task.CompletedTask;
         });
 
-        // 非 Emit 活动（触发器直接执行、卡牌创建、快照导出）：不引入额外触发源（桥/回调不被调用）
-        var trigger = new Trigger<CounterView>(name: "直调", events: new[]
-        {
-            new TriggerEvent<CounterView>("事件", (v, c, t) => Task.CompletedTask),
-        });
-        await trigger.InvokeAsync(engine, new Dictionary<string, object?>());
+        // 非 Emit 活动（成员直接执行、卡牌创建、快照导出）：不引入额外触发源（桥/回调不被调用）
+        await engine.InvokeMemberAsync(Updates.CardPlaced);
         _ = new Card(engine, "静默卡");
         _ = SnapshotJson.SerializeAll(engine);
 

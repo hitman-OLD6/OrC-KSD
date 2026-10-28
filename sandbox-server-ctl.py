@@ -42,7 +42,7 @@ import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent
-MANAGER_DLL = REPO_ROOT / "src" / "Orc.Manager" / "bin" / "Debug" / "net8.0" / "Orc.Manager.dll"
+MANAGER_DLL = REPO_ROOT / "artifacts" / "slot" / "bin" / "Orc.Manager" / "debug" / "Orc.Manager.dll"
 SERVER_DLL = REPO_ROOT / "src" / "Orc.Server" / "bin" / "Debug" / "net8.0" / "Orc.Server.dll"
 DEFAULT_RUN_DIR = REPO_ROOT / "outputs" / "agent-match" / "mcp-run"
 DEFAULT_PACKS = REPO_ROOT / "samples" / "card-pack-demo"

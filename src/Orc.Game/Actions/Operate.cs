@@ -1,6 +1,7 @@
 using Orc.Core;
 using Orc.Game.Cards;
 using Orc.Game.Commanding;
+using Orc.Game.Model;
 
 namespace Orc.Game.Actions;
 
@@ -86,14 +87,11 @@ internal sealed class OperateFinalizer
 internal sealed class OperateEntryServices : IOperateEntryServices
 {
     private readonly LogicEngine _engine;
-    private readonly Trigger<ActionQuotaView> _quotaTrigger;
 
-    internal OperateEntryServices(LogicEngine engine, Trigger<ActionQuotaView> quotaTrigger)
+    internal OperateEntryServices(LogicEngine engine)
     {
         ArgumentNullException.ThrowIfNull(engine);
-        ArgumentNullException.ThrowIfNull(quotaTrigger);
         _engine = engine;
-        _quotaTrigger = quotaTrigger;
     }
 
     /// <inheritdoc />
@@ -118,10 +116,14 @@ internal sealed class OperateEntryServices : IOperateEntryServices
             ["MoveDelta"] = moveDelta,
             ["AttackDelta"] = attackDelta,
         };
-        await _quotaTrigger.InvokeAsync(_engine, data, ct).ConfigureAwait(false);
 
-        var finalMove = data.TryGetValue("MoveDelta", out var move) && move is int moved ? moved : moveDelta;
-        var finalAttack = data.TryGetValue("AttackDelta", out var attack) && attack is int attacked ? attacked : attackDelta;
+        // 额度消耗的可改写点＝引擎成员 <c>engine#action-budget</c>：成员边（v4 组件形态的「机动」等）就地改写
+        // delta，调用方从**同一份数据面**读回（b4 起就是这条通路，§27 后不再有第二条旧触发器路径）。
+        var ctx = new Context(data);
+        await _engine.InvokeMemberAsync(EngineProcesses.ActionBudget, ctx, ct).ConfigureAwait(false);
+
+        var finalMove = ctx.TryGet("MoveDelta", out var move) && move is int moved ? moved : moveDelta;
+        var finalAttack = ctx.TryGet("AttackDelta", out var attack) && attack is int attacked ? attacked : attackDelta;
         command.SetMoveQuota(command.MoveQuota + finalMove);
         command.SetAttackQuota(command.AttackQuota + finalAttack);
 

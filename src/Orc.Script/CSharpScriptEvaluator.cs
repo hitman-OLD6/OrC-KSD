@@ -41,22 +41,43 @@ public sealed class CSharpScriptEvaluator : IScriptEvaluator
         var timeoutMs = request.TimeoutMs > 0 ? request.TimeoutMs : _options.TimeoutMs;
         var key = $"{request.ViewType.AssemblyQualifiedName}|{request.EntryName}|{timeoutMs}|{StableHash.Fnv1a64(request.Source):x16}";
 
-        if (_cache.TryGetValue(key, out var cached))
+        // 视图静态语法检查**不进缓存**：它依赖本次请求声明的视图字段（同一源码可被不同视图声明的成员引用），
+        // 而缓存键按 S5 定稿只含「承载视图类型 + 入口名 + 超时 + 源码哈希」，不再按形状分桶。
+        var analysis = request.View is null
+            ? null
+            : ViewBindingAnalyzer.Analyze(
+                request.Source, request.View, request.OwnerMembers ?? Array.Empty<string>());
+
+        if (analysis is not null && !analysis.IsValid)
         {
-            return cached;
+            return ScriptEvaluationResult.Fail(ScriptErrorCategories.Binding, analysis.Describe(), analysis);
         }
 
-        var result = EvaluateCore(request, timeoutMs);
+        if (_cache.TryGetValue(key, out var cached))
+        {
+            if (analysis is null)
+            {
+                return cached; // 旧路径：不做静态检查，直接复用缓存实例（含引用同一性）
+            }
+
+            // 缓存项只承载"编译 + 入口取用"的结果；静态检查结论总是按本次视图声明重算。
+            return cached.Success
+                ? ScriptEvaluationResult.Ok(cached.Handler!, analysis)
+                : ScriptEvaluationResult.Fail(cached.ErrorCategory!, cached.Error!, analysis);
+        }
+
+        var result = EvaluateCore(request, timeoutMs, analysis);
         _cache[key] = result;
         return result;
     }
 
-    private ScriptEvaluationResult EvaluateCore(ScriptRequest request, int timeoutMs)
+    private ScriptEvaluationResult EvaluateCore(
+        ScriptRequest request, int timeoutMs, Orc.Core.Model.ViewBindingAnalysis? analysis)
     {
         var violation = FindViolation(request.Source);
         if (violation is not null)
         {
-            return ScriptEvaluationResult.Fail("sandbox", violation);
+            return ScriptEvaluationResult.Fail(ScriptErrorCategories.Sandbox, violation, analysis);
         }
 
         Script<object> script;
@@ -66,13 +87,14 @@ public sealed class CSharpScriptEvaluator : IScriptEvaluator
         }
         catch (Exception ex)
         {
-            return ScriptEvaluationResult.Fail("compile", ex.Message);
+            return ScriptEvaluationResult.Fail(ScriptErrorCategories.Compile, ex.Message, analysis);
         }
 
         var errors = script.Compile().Where(d => d.Severity == DiagnosticSeverity.Error).ToArray();
         if (errors.Length > 0)
         {
-            return ScriptEvaluationResult.Fail("compile", string.Join("; ", errors.Select(e => e.GetMessage())));
+            return ScriptEvaluationResult.Fail(
+                ScriptErrorCategories.Compile, string.Join("; ", errors.Select(e => e.GetMessage())), analysis);
         }
 
         ScriptState<object>? state;
@@ -82,46 +104,68 @@ public sealed class CSharpScriptEvaluator : IScriptEvaluator
             if (!run.Wait(timeoutMs))
             {
                 // 说明：同进程内无法真正终止脚本——超时＝逻辑中断（尽力而为；强隔离须进程级）。
-                return ScriptEvaluationResult.Fail("timeout", $"脚本执行超过 {timeoutMs}ms（同进程尽力中断）。");
+                return ScriptEvaluationResult.Fail(
+                    ScriptErrorCategories.Timeout, $"脚本执行超过 {timeoutMs}ms（同进程尽力中断）。", analysis);
             }
 
             state = run.Result;
         }
         catch (AggregateException ex)
         {
-            return ScriptEvaluationResult.Fail("runtime", ex.InnerException?.Message ?? ex.Message);
+            return ScriptEvaluationResult.Fail(
+                ScriptErrorCategories.Runtime, ex.InnerException?.Message ?? ex.Message, analysis);
         }
         catch (Exception ex)
         {
-            return ScriptEvaluationResult.Fail("runtime", ex.Message);
+            return ScriptEvaluationResult.Fail(ScriptErrorCategories.Runtime, ex.Message, analysis);
         }
 
         if (state is null)
         {
-            return ScriptEvaluationResult.Fail("runtime", "脚本执行未产出状态。");
+            return ScriptEvaluationResult.Fail(
+                ScriptErrorCategories.Runtime, "脚本执行未产出状态。", analysis);
         }
 
         var entry = state.Variables.FirstOrDefault(v => string.Equals(v.Name, request.EntryName, StringComparison.Ordinal));
         if (entry is null)
         {
-            return ScriptEvaluationResult.Fail("entry-missing", $"脚本未定义入口 '{request.EntryName}'。");
+            return ScriptEvaluationResult.Fail(
+                "entry-missing", $"脚本未定义入口 '{request.EntryName}'。", analysis);
         }
 
         if (entry.Value is not Delegate handler)
         {
             return ScriptEvaluationResult.Fail(
-                "entry-missing", $"入口 '{request.EntryName}' 不是委托值（实际：{entry.Value?.GetType().Name ?? "null"}）。");
+                "entry-missing",
+                $"入口 '{request.EntryName}' 不是委托值（实际：{entry.Value?.GetType().Name ?? "null"}）。",
+                analysis);
+        }
+
+        // 承载视图路径（S5 第 4 条）：按"形状 + 首参可接收性"判定，不按类型名逐字相等。
+        if (request.ViewType == typeof(Orc.Core.Model.ViewCarrier))
+        {
+            var kernelHandler = Orc.Core.Model.HandlerSignature.TryBindCarrier(handler);
+            if (kernelHandler is null)
+            {
+                return ScriptEvaluationResult.Fail(
+                    ScriptErrorCategories.Signature,
+                    $"入口 '{request.EntryName}' 签名不符：{Orc.Core.Model.HandlerSignature.Describe(handler.GetType())}",
+                    analysis);
+            }
+
+            return ScriptEvaluationResult.Ok((Delegate)kernelHandler, analysis);
         }
 
         var bound = ScriptHandlerAdapter.TryBind(request.ViewType, handler);
         if (bound is null)
         {
             return ScriptEvaluationResult.Fail(
-                "signature",
-                $"入口 '{request.EntryName}' 签名不符（期望 Func<{request.ViewType.Name}, Context, CancellationToken, Task>）。");
+                ScriptErrorCategories.Signature,
+                $"入口 '{request.EntryName}' 签名不符（期望 Func<{request.ViewType.Name}, Context, CancellationToken, Task>）。",
+                analysis);
         }
 
-        return ScriptEvaluationResult.Ok((Delegate)bound);
+        return ScriptEvaluationResult.Ok((Delegate)bound, analysis);
     }
 
     /// <summary>关键字过滤（文本级；命中＝沙箱拒绝。文档注明可被绕过，非安全边界）。</summary>
@@ -143,6 +187,25 @@ public sealed class CSharpScriptEvaluator : IScriptEvaluator
     {
         var allowed = new HashSet<string>(_options.AllowedAssemblies, StringComparer.OrdinalIgnoreCase);
         var references = new List<MetadataReference>();
+
+        // dynamic（承载视图）需要 DLR 绑定器程序集；它未必已被进程加载——白名单含它时显式触发一次加载，
+        // 否则引用集里没有它，csx 里写 dynamic 会直接编译失败（S5／W-15）。
+        foreach (var required in new[] { "Microsoft.CSharp", "System.Linq.Expressions" })
+        {
+            if (!allowed.Contains(required))
+            {
+                continue;
+            }
+
+            try
+            {
+                _ = System.Reflection.Assembly.Load(required);
+            }
+            catch (Exception)
+            {
+                // 加载失败＝引用集里没有它；后面的编译会给出 compile 失败（不静默吞掉结果）。
+            }
+        }
 
         foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
         {

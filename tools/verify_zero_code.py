@@ -15,7 +15,7 @@ import subprocess
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DLL = os.path.join(REPO, "src", "Orc.Manager", "bin", "Debug", "net8.0", "Orc.Manager.dll")
+DLL = os.path.join(REPO, "artifacts", "slot", "bin", "Orc.Manager", "debug", "Orc.Manager.dll")
 PACK = os.path.join(REPO, "samples", "card-pack-ai")
 PORT = 51999
 

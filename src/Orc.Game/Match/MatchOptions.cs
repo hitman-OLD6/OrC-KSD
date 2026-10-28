@@ -45,4 +45,16 @@ public sealed class MatchOptions
     /// <c>play</c> 路径不开启。
     /// </summary>
     public bool SandboxAuthorized { get; init; }
+
+    // ---------- R2c 加性（随机选择器的使用限制） ----------
+
+    /// <summary>
+    /// 允许效果选择器使用 <c>random</c> 取样（缺省 <c>false</c＝生产对局禁止）。
+    /// <para>
+    /// 语义（R2c，A-5）：<c>random</c> 归**引擎随机服务**（种子可复现、不产生 targeter）；但生产对局不得使用随机取样，
+    /// 只有测试／沙盒／简单 AI 场景显式开启。关闭时执行到 <c>random</c> 选择器＝**明确错误**（不静默降级为"取首个"）。
+    /// 开关落在对局配置而非资产域——同一卡包既要服务人类对局，也要服务 AI 测试。
+    /// </para>
+    /// </summary>
+    public bool AllowRandomTargeting { get; init; }
 }

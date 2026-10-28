@@ -1,4 +1,4 @@
-﻿using Orc.Cards;
+using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Board;
 using Orc.Game.Commanding;
@@ -153,7 +153,6 @@ public sealed class KeywordLoadContext
 {
     internal KeywordLoadContext(
         LogicEngine engine,
-        Trigger<AttackDamageTriggerView> attackDamageTrigger,
         TargeterManager? targeterManager = null,
         Battlefield? battlefield = null,
         PincerRegistry? pincerRegistry = null,
@@ -162,11 +161,10 @@ public sealed class KeywordLoadContext
         Func<UnitCard, UnitCard, bool>? ambushCondition = null,
         Action? keywordChangeObserver = null,
         KeywordSnapshot? keywordSnapshot = null,
-        Orc.Game.Actions.IDamageAction? damageAction = null,
+        Orc.Game.Damage.DamagePipeline? damageAction = null,
         Orc.Game.Actions.IDeathAction? deathAction = null)
     {
         Engine = engine;
-        AttackDamageTrigger = attackDamageTrigger;
         TargeterManager = targeterManager;
         Battlefield = battlefield;
         PincerRegistry = pincerRegistry;
@@ -188,9 +186,6 @@ public sealed class KeywordLoadContext
     /// 独立构造（无对局）＝null ＝回退进程级静态面（既有行为）。
     /// </summary>
     public KeywordSnapshot? Keywords { get; }
-
-    /// <summary>「造成攻击伤害」共享流程触发器（伏击/免疫/重甲效果的改写注册口；引擎侧创建、与对局同生）。</summary>
-    public Trigger<AttackDamageTriggerView> AttackDamageTrigger { get; }
 
     /// <summary>目标选择管理器（A2 加性；钳击同伴选择交互的承载——既有单选交互形态；可空＝无对局服务）。</summary>
     public TargeterManager? TargeterManager { get; }
@@ -221,10 +216,15 @@ public sealed class KeywordLoadContext
     public Action? KeywordChangeObserver { get; }
 
     /// <summary>
-    /// 伤害动作（R11/P5b 接口化）：重甲挂 <c>combat.damage</c>、免疫单位侧挂 <c>damage.apply</c>；
-    /// 可空＝无对局伤害面（独立构造）＝不注册（防御、不抛错）。
+    /// 伤害**管道门面**（R11/P5b；U3 起类型＝<see cref="Orc.Game.Damage.DamagePipeline"/>）：重甲挂 <c>combat.damage</c>、
+    /// 免疫单位侧挂 <c>damage.apply</c>；可空＝无对局伤害面（独立构造）＝不注册（防御、不抛错）。
+    /// <para>
+    /// **为什么是门面而不是动作契约（U3）**：动作契约的两端已加宽为成员句柄（<c>engine#damage-apply</c>），
+    /// 不再交出触发器实例；band 挂接点（<c>KeywordEffects</c> 的重甲／免疫）仍按实例注册，
+    /// 因此经门面按地址取回**同一份**实例——挂接点与段语义零改动（band 下线属 U5）。
+    /// </para>
     /// </summary>
-    public Orc.Game.Actions.IDamageAction? DamageAction { get; }
+    public Orc.Game.Damage.DamagePipeline? DamageAction { get; }
 
     /// <summary>
     /// 死亡动作（S11 加性）：伏击改写经它走**完整两端**（触发端 → 处理端）执行「以死代伤」；

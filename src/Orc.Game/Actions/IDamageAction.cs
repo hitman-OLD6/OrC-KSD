@@ -1,5 +1,6 @@
 ﻿using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Damage;
 
 namespace Orc.Game.Actions;
@@ -10,20 +11,28 @@ namespace Orc.Game.Actions;
 /// 触发端只改写 <c>Amount</c> 或加条件，不得扣数值；处理端只经
 /// <see cref="IDamageActionServices.ApplyDamageAsync"/> 落地（唯一数值门户调用点）。
 /// </para>
+/// <para>
+/// **两端是引擎成员（S13／U3）**：公开面只给成员地址；旧身份实例随 <see cref="Ends"/> 交给
+/// <see cref="DamagePipeline"/> 与宿主装配（重甲／免疫的 band 挂接点经门面按地址取回同一份实例），
+/// 随旧类型在 U5 退役。
+/// </para>
 /// </summary>
 public interface IDamageAction
 {
-    /// <summary>卡牌对战伤害**触发端**（<c>combat.damage</c>；重甲只挂这里）。</summary>
-    Trigger<DamageEventView> CombatDamage { get; }
+    /// <summary>卡牌对战伤害**触发端**的成员地址（<c>engine#combat-damage</c>；重甲只挂这里）。</summary>
+    MemberAddress CombatDamage { get; }
 
-    /// <summary>效果伤害**触发端**（<c>effect.damage</c>）。</summary>
-    Trigger<DamageEventView> EffectDamage { get; }
+    /// <summary>效果伤害**触发端**的成员地址（<c>engine#effect-damage</c>）。</summary>
+    MemberAddress EffectDamage { get; }
 
-    /// <summary>战斗伤害**触发端**（<c>battle.damage</c>）。</summary>
-    Trigger<DamageEventView> BattleDamage { get; }
+    /// <summary>战斗伤害**触发端**的成员地址（<c>engine#battle-damage</c>）。</summary>
+    MemberAddress BattleDamage { get; }
 
-    /// <summary>伤害**处理端**（<c>damage.apply</c>；唯一调用数值门户）。</summary>
-    Trigger<DamageApplyView> Apply { get; }
+    /// <summary>伤害**处理端**的成员地址（<c>engine#damage-apply</c>；唯一调用数值门户）。</summary>
+    MemberAddress Apply { get; }
+
+    /// <summary>四端登记项（三触发端＋处理端）。</summary>
+    IReadOnlyList<ActionTriggerEnd> Ends { get; }
 
     /// <summary>卡牌对战伤害（<c>combat.damage</c>；重甲只减这一类）。</summary>
     Task<ActionResult> CombatAsync(

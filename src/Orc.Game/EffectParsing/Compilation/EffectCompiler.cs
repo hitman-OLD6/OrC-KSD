@@ -363,7 +363,7 @@ public sealed class EffectCompiler
         return new TriggerPrefab(
             trigger.Id,
             trigger.StableKey,
-            trigger.Kind,
+            trigger.IsPassive,
             trigger.Hooks,
             events,
             viewTypeName: trigger.ViewTypeName);

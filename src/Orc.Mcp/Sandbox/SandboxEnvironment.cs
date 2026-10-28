@@ -97,7 +97,11 @@ public sealed class SandboxEnvironment
     {
         Directory.CreateDirectory(PackRoot);
         Directory.CreateDirectory(CardsDirectory);
-        Directory.CreateDirectory(EffectsDirectory);
+
+        // v4-only（§23.8 第 1 项）：旧格式 `effects/` 已随旧装载链删除，装配器遇到它会把**整包**判非法
+        // （`CardPackAssembler`：「旧格式效果库目录已不再支持（v4-only）」）。脚手架本身不产效果资产，
+        // 所以这里**不创建**该目录——建了就等于把自己的沙盒包判成非法，表现为服务端开局全部失败
+        // （19 条房间/重连/卡池集成用例连锁红，且报错只指向一个空目录，极难从症状反推）。
 
         var createdManifest = false;
         if (!File.Exists(ManifestFile))

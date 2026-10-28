@@ -174,31 +174,6 @@ public class CardTagDataTests
         Assert.Throws<ArgumentNullException>(() => data.RemoveTag(null!));
     }
 
-    [Fact]
-    public void TagSlot_Rejects_Undefined_Enum_Values_And_Accepts_All_Registered_Values()
-    {
-        Assert.Throws<ArgumentOutOfRangeException>(() => new TagSlot<TriggerLayer>((TriggerLayer)99));
-        Assert.Throws<ArgumentOutOfRangeException>(() => new TagSlot<CardComponentPhase>((CardComponentPhase)(-1)));
-
-        // 泛型槽位机制：枚举值域全量入槽覆盖
-        // （资产化 S4／批次 4 随改注：国籍／稀有度／卡类别均由枚举改为 string 常量类〔真源＝资产服务〕，
-        // 不再是枚举、不能入 TagSlot；本段以仍为枚举的 TriggerLayer／CardComponentPhase 承载
-        // 「任意枚举值域可入槽、未定义值拒绝」的机制覆盖——不随承载迁移而消失）。
-        foreach (var layer in Enum.GetValues<TriggerLayer>())
-        {
-            Assert.Equal(layer, new TagSlot<TriggerLayer>(layer).Value);
-        }
-
-        foreach (var phase in Enum.GetValues<CardComponentPhase>())
-        {
-            Assert.Equal(phase, new TagSlot<CardComponentPhase>(phase).Value);
-        }
-
-        Assert.Equal(2, Enum.GetValues<TriggerLayer>().Length);
-        Assert.Equal(
-            new[] { CardComponentPhase.Construction, CardComponentPhase.Load },
-            Enum.GetValues<CardComponentPhase>());
-    }
 
     // ==========================================================
     // B. 定义期声明（fail-fast）

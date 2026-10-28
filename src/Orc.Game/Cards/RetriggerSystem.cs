@@ -1,5 +1,6 @@
 using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Players;
 using Orc.Game.Triggers;
 
@@ -66,7 +67,6 @@ public sealed class RetriggerSystem
 
     private readonly LogicEngine _engine;
     private readonly MatchLifecycle? _lifecycle;
-    private readonly Trigger<RetriggerRequestView> _requestTrigger;
     private readonly HashSet<UnitCard> _deployExecuting = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<UnitCard> _deathrattleExecuting = new(ReferenceEqualityComparer.Instance);
 
@@ -82,18 +82,17 @@ public sealed class RetriggerSystem
         _engine = engine;
         _lifecycle = lifecycle;
 
-        // 「包装底层触发器」：请求以一条（内部）更新/请求消息发布 → 触发器接收 → 解析参数 → 驱动对应执行面
-        // （保留总线模型的统一性——顺序化、可留痕、与既有触发体系一致）。
-        _requestTrigger = new Trigger<RetriggerRequestView>(
+        // 请求以一条（内部）更新/请求消息发布 → 信号成员上的边接收 → 解析参数 → 驱动对应执行面
+        // （顺序化、可留痕；§27 后不再有独立触发器实例）。
+        _engine.SubscribeMember(
+            RequestUpdate,
             "再触发接收触发器",
-            TriggerKind.Passive,
-            events: new[] { new TriggerEvent<RetriggerRequestView>("再触发接收", HandleRequestAsync) },
-            hooks: new[] { RequestUpdate });
-        _engine.Bus.Mount(_requestTrigger);
+            this,
+            MemberEdges.For<RetriggerRequestView>(HandleRequestAsync));
     }
 
-    /// <summary>接收触发器（包装底层触发器；公开只读——寻址/诊断面）。</summary>
-    public Trigger<RetriggerRequestView> RequestTrigger => _requestTrigger;
+    /// <summary>接收面身份（信号成员地址 <c>engine#retrigger.request</c>；诊断读面）。</summary>
+    public MemberAddress RequestTrigger => MemberAddress.Create(AddressScope.Engine, RequestUpdate);
 
     /// <summary>
     /// 卡 → 再触发服务解析（读取路径「卡 → 玩家 → 服务」的收敛点；与随机服务/环境解析同构）：

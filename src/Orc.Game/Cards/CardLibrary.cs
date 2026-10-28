@@ -1,5 +1,6 @@
 using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Players;
 
 namespace Orc.Game.Cards;
@@ -189,11 +190,18 @@ public sealed class CardLibrary
     public CardBase Instantiate(string id)
     {
         var definition = Get(id);
-        CardBase card = definition.Category switch
+
+        // S8（批次 3）：**数据驱动路径按 typeCategory 自动绑定类型预制体**，再由同一张映射表决定承载类
+        // （与直接构造共用 `CardTypeBinder` 的 4 条映射；两条路径的一致性在构造期交叉校验）。
+        // 兼容构造的代码注册定义不带 typeCategory 组件（＝无数据体），退回其 Category 读面。
+        var host = Orc.Game.Model.CardTypeBinder.HostOfDefinition(definition)
+            ?? Orc.Game.Model.CardTypeBinder.HostOfCategory(definition.Category);
+
+        CardBase card = host switch
         {
-            CardCategory.Unit => new UnitCard(_engine, definition, _validationJudicatorResolver),
-            CardCategory.Command => new OrderCard(_engine, definition, _validationJudicatorResolver),
-            CardCategory.Counter => new CounterCard(_engine, definition, _validationJudicatorResolver),
+            HostKind.Unit => new UnitCard(_engine, definition, _validationJudicatorResolver),
+            HostKind.Order => new OrderCard(_engine, definition, _validationJudicatorResolver),
+            HostKind.Counter => new CounterCard(_engine, definition, _validationJudicatorResolver),
             _ => throw new InvalidOperationException($"卡牌 '{id}' 的类别 '{definition.Category}' 未支持（实例化被拒绝）。"),
         };
 

@@ -129,6 +129,7 @@ public sealed class MatchCardService
     private readonly Func<MatchState>? _stateProvider;
     private readonly Func<IAddToHandAction?>? _addToHandActionProvider;
     private readonly IMatchCardLoader? _cardLoader;
+    private readonly Action<IReadOnlyList<CardComponentFailureData>>? _componentFailureSink;
     private readonly HashSet<string> _runtimeRegistered = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -145,6 +146,10 @@ public sealed class MatchCardService
     /// 卡牌加载器端口（S7：局内新增卡——token／升级／老兵——走**单卡 <c>LoadBatchAsync</c>**（一元清单），
     /// 并同步更新中间层；缺省＝null＝独立构造路径——按卡库既有条目直接实例化）。
     /// </param>
+    /// <param name="componentFailureSink">
+    /// 卡级装载失败出口（§34；对局装配＝转发到 <see cref="Match.ComponentFailureSink"/>，宿主据此回填卡牌加载报告）。
+    /// 缺省＝null＝独立构造路径——失败只留引擎日志与异常。
+    /// </param>
     /// <exception cref="ArgumentNullException">engine / library 为 null。</exception>
     public MatchCardService(
         LogicEngine engine,
@@ -155,7 +160,8 @@ public sealed class MatchCardService
         Func<MatchState>? stateProvider = null,
         CardEffectRegistry? effectRegistry = null,
         Func<IAddToHandAction?>? addToHandActionProvider = null,
-        IMatchCardLoader? cardLoader = null)
+        IMatchCardLoader? cardLoader = null,
+        Action<IReadOnlyList<CardComponentFailureData>>? componentFailureSink = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(library);
@@ -169,6 +175,7 @@ public sealed class MatchCardService
         _effectRegistry = effectRegistry;
         _addToHandActionProvider = addToHandActionProvider;
         _cardLoader = cardLoader;
+        _componentFailureSink = componentFailureSink;
     }
 
     /// <summary>加入手牌动作面（对局路径＝装配链注入的同一实例；独立构造＝经动作目录查询面按默认实现集创建并登记）。</summary>
@@ -236,7 +243,30 @@ public sealed class MatchCardService
         var libraryKey = await LoadSingleAsync(definitionId, owner, ct).ConfigureAwait(false);
 
         var card = _library.Instantiate(libraryKey); // 未注册＝明确失败（KeyNotFoundException——先于任何状态变更、无残留）
-        await card.LoadAsync(owner, ct);
+        try
+        {
+            await card.LoadAsync(owner, ct);
+        }
+        catch (CardLoadFailedException ex)
+        {
+            // 卡级装载失败（§33/§34）：先把失败事实交给报告面（运行期单卡创建没有"跳过该卡"的余地，
+            // 异常照旧上抛给调用方）——报告是判据，避免"创建失败"与"为什么失败"隔两层。
+            _componentFailureSink?.Invoke(new[]
+            {
+                new CardComponentFailureData(
+                    libraryKey,
+                    AssetGuid: null,
+                    Issues: new[] { CardFieldIssue.Invalid(ex.AssetId, "component", null, ex.Reason) }),
+            });
+            _engine.RootStream.WriteLog(
+                "卡牌加载",
+                $"卡牌 '{libraryKey}'（{ex.CardName}）创建失败——该卡不产生：{ex.Message}",
+                LogLevel.Error,
+                new[] { "card", "load", "error", libraryKey });
+            card.Destroy(); // 半加载实例不留在引擎注册面上
+            throw;
+        }
+
         return card;
     }
 

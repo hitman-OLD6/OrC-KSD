@@ -1,5 +1,6 @@
 using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Actions;
 using Orc.Game.Cards;
 using Orc.Game.Targeting;
@@ -44,11 +45,14 @@ public sealed class HandCardPick
 /// </summary>
 public sealed partial class EffectRuntime
 {
-    /// <summary>「加入前线」触发端（供 C# 侧注册/改写；未装配＝null）。</summary>
-    public Trigger<JoinBattlefieldTriggerView>? JoinFrontlineTrigger => ResolveJoinAction()?.JoinFrontline;
+    /// <summary>「加入前线」成员地址（<c>engine#join.frontline</c>；未装配动作＝null）。</summary>
+    /// <remarks>批次 7（§27）：端＝引擎成员，调用方持地址（执行体＝成员上的边）。</remarks>
+    public MemberAddress? JoinFrontlineTrigger
+        => ResolveJoinAction()?.JoinFrontline;
 
-    /// <summary>「加入支援阵线」触发端（供 C# 侧注册/改写；未装配＝null）。</summary>
-    public Trigger<JoinBattlefieldTriggerView>? JoinSupportLineTrigger => ResolveJoinAction()?.JoinSupportLine;
+    /// <summary>「加入支援阵线」成员地址（<c>engine#join.support</c>；未装配动作＝null）。</summary>
+    public MemberAddress? JoinSupportLineTrigger
+        => ResolveJoinAction()?.JoinSupportLine;
 
     /// <summary>把单位加入**前线**（不扣费、不走部署词条；发 <c>unit.joined</c>）。</summary>
     /// <param name="host">效果宿主（作为触发者卡写入信号来源）。</param>

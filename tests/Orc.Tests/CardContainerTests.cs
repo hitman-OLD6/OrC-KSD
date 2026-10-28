@@ -5,8 +5,12 @@ using Xunit;
 namespace Orc.Tests;
 
 /// <summary>
-/// 验收 C（容器）：数据组件正常存取（同实例）、多类型共存、缺失抛明确异常、重复 Add 拒绝；
-/// 逻辑组件（Effects 读面、Add/Remove、重复 Add 同一实例拒绝、移除后重新 Add）；null 防御。
+/// 验收 C（容器）：数据组件正常存取（同实例）、多类型共存、缺失抛明确异常、重复 Add 拒绝；null 防御。
+/// <para>
+/// **逻辑组件段已删除**（§28）：卡不再持有 <c>Effect</c> 列表（<c>Effects</c>／<c>AddEffect</c>／<c>RemoveEffect</c>
+/// 随 <c>Effect</c> 家族一并删除），逻辑组件改由编排实体上的组件实例承载；
+/// 对应的"卡内容器语义"（添加序／重复拒绝／移除后复装）在组件面上不存在同类概念。
+/// </para>
 /// </summary>
 public class CardContainerTests
 {
@@ -80,67 +84,6 @@ public class CardContainerTests
         var engine = new LogicEngine();
         var card = new Card(engine, "战士");
         Assert.Throws<ArgumentNullException>(() => card.AddData(null!));
-    }
-
-    // ---------- 逻辑组件（Effects 读面） ----------
-
-    [Fact]
-    public void Effects_ReadFace_Add_Remove_And_Order()
-    {
-        var engine = new LogicEngine();
-        var card = new Card(engine, "战士");
-        var e1 = new RecordingPassiveEffect("一", "e1", new List<string>());
-        var e2 = new RecordingPassiveEffect("二", "e2", new List<string>());
-
-        Assert.Empty(card.Effects);
-
-        card.AddEffect(e1);
-        card.AddEffect(e2);
-        Assert.Equal(new Effect[] { e1, e2 }, card.Effects); // 顺序＝添加序
-
-        card.RemoveEffect(e1);
-        Assert.Equal(new Effect[] { e2 }, card.Effects);     // 容器读面与运行态一致
-    }
-
-    [Fact]
-    public void AddEffect_Duplicate_Same_Instance_Rejected_Then_ReAdd_After_Remove()
-    {
-        var engine = new LogicEngine();
-        var card = new Card(engine, "战士");
-        var e = new RecordingPassiveEffect("一", "e1", new List<string>());
-
-        card.AddEffect(e);
-        Assert.Throws<InvalidOperationException>(() => card.AddEffect(e)); // 同一实例重复添加被拒绝
-
-        card.RemoveEffect(e);
-        card.AddEffect(e); // 先移除再添加＝允许（复装）
-        Assert.Equal(new Effect[] { e }, card.Effects);
-    }
-
-    [Fact]
-    public void AddEffect_Already_Owned_By_Another_Card_Rejected()
-    {
-        var engine = new LogicEngine();
-        var a = new Card(engine, "甲");
-        var b = new Card(engine, "乙");
-        var e = new RecordingPassiveEffect("一", "e1", new List<string>());
-
-        a.AddEffect(e);
-        Assert.Throws<InvalidOperationException>(() => b.AddEffect(e)); // 已属另一卡牌 → 拒绝
-
-        a.RemoveEffect(e);
-        b.AddEffect(e); // 移除（引用清理）后可转移
-        Assert.Equal(new Effect[] { e }, b.Effects);
-    }
-
-    [Fact]
-    public void AddEffect_RemoveEffect_Null_Rejected()
-    {
-        var engine = new LogicEngine();
-        var card = new Card(engine, "战士");
-
-        Assert.Throws<ArgumentNullException>(() => card.AddEffect(null!));
-        Assert.Throws<ArgumentNullException>(() => card.RemoveEffect(null!));
     }
 
     [Fact]

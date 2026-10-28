@@ -42,7 +42,7 @@ public class EffectParsingTests
         Assert.Equal(31, result.Templates.Count);
 
         var template = Assert.Single(result.Templates, item => item.Id == "deploy_basic");
-        Assert.Equal(TriggerKind.Passive, template.Root.MainTrigger.Kind);
+        Assert.True(template.Root.MainTrigger.IsPassive);
         Assert.Contains("unit.deployed", template.Root.MainTrigger.Hooks);
         Assert.Equal(ActorFrom.EventCard, template.ActorFrom);
         Assert.Single(template.Slots);
@@ -240,7 +240,7 @@ public class EffectParsingTests
 
         Assert.Equal(EffectSnapshot.SchemaVersion, snapshot.Version);
         Assert.Equal("effect.deploy.demo", snapshot.Root.Id);
-        Assert.Equal(TriggerKind.Passive, snapshot.Root.MainTrigger.Kind);
+        Assert.True(snapshot.Root.MainTrigger.IsPassive);
         Assert.Equal("tpl.deploy_basic.main", snapshot.Root.MainTrigger.StableKey);
         Assert.Contains("unit.deployed", snapshot.Root.MainTrigger.Hooks);
 

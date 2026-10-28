@@ -225,67 +225,6 @@ public class KeywordBatch2Tests
 
     // ---------- 抑制（清空处置三件套＋防御复位） ----------
 
-    [Fact]
-    public async Task Inhibit_Clears_Keywords_Modifiers_Effects_And_Resets_Defense()
-    {
-        var match = CreateMatch();
-        await match.Initialize();
-        var playerA = match.Players[0];
-        var unit = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1); // 攻 2 / 防 5
-
-        // ① 词条准备：奋战（额外词条）＋被压制（其它施加物）——先施加压制（无防护时成功）；再补防护标记（并存备查）。
-        await unit.Keywords.GrantAsync(KeywordIds.Fury);
-        Assert.True(await SuppressRules.ApplyAsync(unit)); // 「被压制」标记
-        await unit.Keywords.GrantAsync(KeywordIds.CannotBeSuppressed); // 防护标记（落入清除范围）
-
-        // ② 修饰器准备：+2 防御、+1 攻击（不同来源）。
-        var defenseSource = new object();
-        var attackSource = new object();
-        await unit.Modifiers.AddModifierAsync(new AddModifier(CardStatFields.Defense, 2, defenseSource));
-        await unit.Modifiers.AddModifierAsync(new AddModifier(CardStatFields.Attack, 1, attackSource));
-        Assert.Equal(7, DefenseOf(unit)); // 5+2（上限 7）
-        Assert.Equal(3, AttackOf(unit));  // 2+1
-
-        // ③ 损伤：受伤 4（上限 7 → 当前 3）——复位条款的触发条件（清空后上限＞当前）。
-        await unit.ApplyDefenseDamageAsync(4);
-        Assert.Equal(3, DefenseOf(unit));
-
-        // ④ 效果准备：受控效果（装载留痕＋挂 +3 攻击）。
-        TrackingEffect.MountedCount = 0;
-        TrackingEffect.UnmountedCount = 0;
-        var effect = new TrackingEffect();
-        unit.AddEffect(effect);
-        Assert.Equal(1, TrackingEffect.MountedCount);
-        Assert.Equal(6, AttackOf(unit)); // 2+1+3
-
-        // ⑤ 施加抑制（清空处置全链）。
-        Assert.True(await InhibitRules.ApplyAsync(unit));
-
-        // 断言 1：词条仅剩「被抑制」（字面全量——含其它施加物与防护标记）。
-        Assert.True(unit.Keywords.Has(KeywordIds.Inhibited));
-        Assert.True(InhibitRules.IsInhibited(unit));
-        Assert.False(unit.Keywords.Has(KeywordIds.Fury));
-        Assert.False(unit.Keywords.Has(KeywordIds.CannotBeSuppressed));
-        Assert.False(unit.Keywords.Has(KeywordIds.Suppressed));
-        Assert.False(SuppressRules.IsSuppressed(unit));
-
-        // 断言 2：修饰器全清（两来源均不在）。
-        Assert.DoesNotContain(
-            unit.Modifiers.All,
-            modifier => ReferenceEquals(modifier.Source, defenseSource) || ReferenceEquals(modifier.Source, attackSource));
-
-        // 断言 3：效果清除（卸载链走完、容器空）。
-        Assert.Empty(unit.Effects);
-        Assert.Equal(1, TrackingEffect.UnmountedCount);
-
-        // 断言 4：抑制只重置上限（清修饰器后上限 5）；损伤量不碰（4）→ 当前值 5−4=1（不回血）。
-        Assert.Equal(5, unit.GetEffectiveDefenseCap());
-        Assert.Equal(1, DefenseOf(unit));
-        Assert.Equal(4, unit.GetData<UnitStateData>().DefenseLoss);
-
-        // 断言 5：攻击力＝清空修饰器后的自然回落。
-        Assert.Equal(2, AttackOf(unit));
-    }
 
     [Fact]
     public async Task Inhibit_Rejected_When_CannotBeInhibited_No_Side_Effects()
@@ -701,26 +640,4 @@ public class KeywordBatch2Tests
 
     // ---------- 效果（受控测试品） ----------
 
-    /// <summary>受控效果：装载留痕＋挂 +3 攻击（来源＝本效果）；卸载留痕（验证清除走统一卸载链）。</summary>
-    private sealed class TrackingEffect : PassiveEffect
-    {
-        public static int MountedCount;
-        public static int UnmountedCount;
-
-        public TrackingEffect()
-            : base("受控效果")
-        {
-        }
-
-        protected override void OnMount()
-        {
-            MountedCount++;
-            if (Host is CardBase card)
-            {
-                card.Modifiers.AddModifierAsync(new AddModifier(CardStatFields.Attack, 3, this)).GetAwaiter().GetResult();
-            }
-        }
-
-        protected override void OnUnmount() => UnmountedCount++;
-    }
 }

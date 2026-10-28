@@ -6,15 +6,15 @@ namespace Orc.Core;
 /// <summary>
 /// 逻辑引擎（S5 形态）。公开面按用途组织：
 /// ①事件流：<see cref="RootStream"/>（总流；树根，引擎域一切因果记录最终可达）与 <see cref="EventStreamJson"/>（树形 JSON 导出）；
-/// ②总线：<see cref="Bus"/>（S3；更新广播；一对一双向绑定）与 <see cref="Emit"/>（便捷转发）；
+/// ②信号：<see cref="Emit"/>（＝对 <c>engine#&lt;信号&gt;</c> 成员的调用）与 <see cref="InvokeMemberAsync(string, Context, CancellationToken)"/>
+/// （＝执行一个引擎成员）；总线门面已在 b5 删除，调用点一律走本类；
 /// ③流程：<see cref="OrderFlow"/>（S5；承载引擎级共享的施放检查位）。攻击／伤害流程类已删除（P5/S17），
 /// 动作级实现归游戏层动作实体；
 /// ④卡牌：<see cref="Cards"/>（S5 登记读面：创建即注册、销毁清理响应时移除）与 <see cref="DestroyCard"/>（一步式销毁辅助）；
 /// ⑤宿主集成（S5 骨架）：<see cref="Bridge"/>（编译期强类型桥）与 <see cref="Subscribe"/>（运行期回调）——两通道均在更新广播（Emit）时通知；
 /// ⑥快照：<see cref="SnapshotJson"/>（单实体/全量 JSON）；
-/// ⑦卡牌装载处理（S4 懒创建）：<see cref="CardPlacedTrigger"/> / <see cref="CardCleanupTrigger"/>（内置事件注册句柄供给面）。
-/// 允许并主张多实例（每实例独立总线、总流与卡牌登记）；无全局单例；链上执行恒随「调用时显式传入的引擎引用」。
-/// engine.Emit 为 <see cref="Bus.Emit"/> 的便捷转发（完全一致、纯转发：含入流目标流判定）。
+/// 允许并主张多实例（每实例独立信号端点、总流与卡牌登记）；无全局单例；链上执行恒随「调用时显式传入的引擎引用」。
+/// 发射面唯一：<see cref="Emit"/> → <see cref="SignalBridge"/> → 引擎成员。
 /// </summary>
 public sealed class LogicEngine
 {
@@ -25,17 +25,17 @@ public sealed class LogicEngine
     private readonly Queue<EventSegment> _segmentQueue = new();
     private static readonly AsyncLocal<ActionScope?> CurrentActionScope = new();
     private long _segmentSequence;
-    private readonly List<Action<Card, Effect>> _cardMountCompletedActions = new();
     private CardLoadoutProcessor? _cardLoadout;
-    private Orc.Cards.PrefabManager? _prefabs;
+    private Orc.Cards.SnapshotStore? _prefabs;
+    private readonly SignalBridge _signals;
 
     public LogicEngine()
     {
         RootStream = new EventStream();
         Hooks = new HookRegistry();
-        Bus = new Bus(this);
         Orchestration = new OrchestrationManager(this);
         OrderFlow = new OrderFlow(this);
+        _signals = new SignalBridge(this);
 
         // S-C1：内置更新字符串预登记（定义级词汇表基线；自由字符串仍可随时登记）。
         Hooks.Register(Updates.CardPlaced);
@@ -49,10 +49,7 @@ public sealed class LogicEngine
     /// <summary>总事件流（树根；顶层执行流自动挂载于其下，引擎域一切因果记录最终可达）。</summary>
     public EventStream RootStream { get; }
 
-    // ---------- ②总线 ----------
-
-    /// <summary>总线（S3；与所属引擎一对一绑定；公开只读、不可替换；多实例互不相通）。</summary>
-    public Bus Bus { get; }
+    // ---------- ②信号 ----------
 
     /// <summary>
     /// hook 标识注册表（S-C1；引擎级、引擎内维护）：hook 名 ↔ <see cref="HookId"/> 双向互转与登记；
@@ -83,9 +80,24 @@ public sealed class LogicEngine
     public JudicatorRegistry? Judicators { get; set; }
 
     /// <summary>
-    /// 预制体管理器（S-C7；引擎级、懒创建）：处理器与效果快照的注册、解析与本地明文目录加载。
+    /// 效果快照登记处（原「预制体管理器」；v4-only 后只剩注册面）：处理器与效果快照的登记与查询。
     /// </summary>
-    public Orc.Cards.PrefabManager Prefabs => _prefabs ??= new Orc.Cards.PrefabManager(this);
+    public Orc.Cards.SnapshotStore Prefabs => _prefabs ??= new Orc.Cards.SnapshotStore();
+
+    /// <summary>
+    /// 装载门报告（S14；引擎级、每局一份）：记录每一次包装载的结局（成功／可选包被跳过／必需包失败）。
+    /// <para>它是"哪些包没生效"的**唯一留痕载体**：审查导出（<c>packages</c> 段）与初始化报告都读这一份。</para>
+    /// </summary>
+    public LoadGateReport LoadGate { get; } = new();
+
+    /// <summary>
+    /// 本对局用到的**随机选择器**记录（R2c／R7 验收项；引擎级、每局一份）。
+    /// <para>
+    /// 只有显式开启随机（<c>MatchOptions.AllowRandomTargeting</c>）并真正执行了 <c>sel=random</c> 取样时才登记；
+    /// 审查导出（<c>randomSelectors</c> 段）读这一份，用来回答"本对局哪里用了随机"。
+    /// </para>
+    /// </summary>
+    public List<RandomSelectionRecord> RandomSelections { get; } = new();
 
     // ---------- ⑨审查链导出（S-C4） ----------
 
@@ -97,19 +109,179 @@ public sealed class LogicEngine
     public string ExportAuditChainText()
         => Orc.Output.AuditChainText.Serialize(Orchestration.BuildAuditChain());
 
-    /// <summary>导出以指定触发器种类为起点的声明期可达链 JSON（未登记起点＝空链）。</summary>
+    /// <summary>
+    /// 导出以指定触发器种类为起点的声明期可达链 JSON（未登记起点＝空链）。
+    /// </summary>
     public string ExportChainJson(TriggerId root, bool indented = false)
         => Orc.Output.AuditChainJson.Serialize(Orchestration.QueryChain(root), indented);
+
+    /// <summary>
+    /// 新模型的编排运行时（S10／批次 3；可空）：对局装配期挂上后，审查图可同时导出实体—成员—挂载边。
+    /// 未挂载（纯内核/独立构造场景）＝审查图只投影旧路径的边（能力不退化）。
+    /// <para>
+    /// 挂上时**接线发射通道**（<see cref="Orc.Core.Model.OrchestrationRuntime.SignalEmitter"/>）：组件卸载的
+    /// <c>effect.removed</c> 完成通知经本引擎的 <see cref="Emit"/> 发出（b4 泛化——组件卸载对订阅方可见）。
+    /// </para>
+    /// <para>
+    /// **身份不可互换（R6b 的引擎级推论）**：一个 <see cref="LogicEngine"/> 只有一个引擎实体。若内核兜底运行时
+    /// （<see cref="SignalRuntime"/> 的懒建分支）已经承载了边／运行期成员，再赋一个**不同**的运行时会让那些边
+    /// 挂在旧实体上——<c>Emit</c> 照常写更新条目，订阅者却一次都不执行（静默失效，最坏的一类退化）。
+    /// 因此此处**拒绝**这种替换并指出原因；装配方必须在首次发射／挂载之前完成赋值。无状态时允许替换
+    /// （纯折叠，不丢任何东西）。
+    /// </para>
+    /// </summary>
+    /// <exception cref="InvalidOperationException">内核兜底运行时已承载状态却要用另一个运行时替换。</exception>
+    public Orc.Core.Model.OrchestrationRuntime? Model
+    {
+        get => _model;
+        set
+        {
+            if (ReferenceEquals(_model, value))
+            {
+                return;
+            }
+
+            // 当前**生效**的运行时（可能来自外部赋值，也可能是内核兜底）——两者都可能是"已承载边"的那一个。
+            var current = _model ?? _kernelModel;
+            if (current is not null
+                && !ReferenceEquals(current, value)
+                && (current.Engine.HasRuntimeState || current.Components.Count > 0))
+            {
+                throw new InvalidOperationException(
+                    "编排运行时不可替换：本引擎当前生效的运行时已经承载了运行期状态"
+                    + $"（engine#{current.Engine.Name} 上的边／运行期成员／组件实例）。"
+                    + "换一个运行时（或解除）会让这些边挂在旧引擎实体上——Emit 照常写更新条目，订阅者却不再执行"
+                    + "（静默失效，R6b：一个 LogicEngine 只有一个引擎实体）。"
+                    + "请在首次 Emit／挂载之前完成 Model 装配；若当前实例只是探针，请先撤销它的边（句柄 Dispose）。");
+            }
+
+            _model = value;
+            if (value is not null)
+            {
+                value.SignalEmitter = Emit;
+                _kernelModel = null; // 身份已确定：兜底槽位不再有存在意义（无可丢状态才可能走到这里）
+            }
+        }
+    }
+
+    private Orc.Core.Model.OrchestrationRuntime? _model;
+
+    /// <summary>
+    /// 构建审查图（S10／R7）：实体—成员—挂载边。替代旧订阅查询读面（`GetSubscribers`／
+    /// <c>EnumerateHooks</c>）作为"谁订阅了什么"的唯一读面。
+    /// <para>只读、无副作用、可反复调用：每次调用取一次快照。</para>
+    /// <para>
+    /// 未挂载新模型运行时（独立构造的纯内核引擎）时，用**内核基础预制体**的运行时兜底——
+    /// 否则内核 4 个信号会被误判成"无对应信号的 hook"（图缺口），旧订阅读面的等价性就不成立了。
+    /// </para>
+    /// </summary>
+    public Orc.Core.Model.AuditGraph BuildAuditGraph()
+        => Orc.Core.Model.AuditGraphBuilder.Build(this, SignalRuntime);
+
+    private Orc.Core.Model.OrchestrationRuntime? _kernelModel;
+
+    /// <summary>
+    /// **实际生效的编排运行时**（A2 起是生产执行的唯一通路）：对局装配期挂上的 <see cref="Model"/>；
+    /// 未挂载（纯内核／独立构造场景）＝内核基础预制体的运行时（内核 4 个信号）。
+    /// <para>懒创建：只有真的发射／挂载／导出审查图时才物化（不影响零使用场景）。</para>
+    /// <para>
+    /// **物化即定身份**：懒建出的兜底运行时一旦承载了边／运行期成员，就不再允许被 <see cref="Model"/> 替换
+    /// （见该属性的异常说明）——否则 <c>Emit</c> 与 <c>Subscribe</c> 会落在两个不同的引擎实体上。
+    /// </para>
+    /// </summary>
+    internal Orc.Core.Model.OrchestrationRuntime SignalRuntime
+        => Model ?? (_kernelModel ??= new Orc.Core.Model.OrchestrationRuntime(
+            Orc.Core.Model.KernelSignals.CreateCatalog(), new Orc.Core.Model.HandlerRegistry()));
 
     // ---------- ③流程 ----------
 
     /// <summary>指令流程（S5；引擎级共享：反制检查 → 施放结算（执行指令施放链）→ 收尾；承载反制类效果接入的具名检查位）。</summary>
     public OrderFlow OrderFlow { get; }
 
-    /// <summary>更新广播便捷转发（与 <see cref="Bus.Emit"/> 行为完全一致）。</summary>
+    /// <summary>
+    /// 更新广播（A2：**经引擎实体的信号成员**发射——<c>engine#&lt;updateType&gt;</c>）。
+    /// 行为与旧总线逐项等价（更新条目→外部观察者→订阅者顺序、载荷副本、异常隔离、取消穿透）：
+    /// 差异只在于"订阅者"现在是该信号成员上的**边**，不再是总线订阅表。
+    /// 未声明的名字＝运行期注册（R1e）后立即发射（旧 API 的自由字符串由此收敛进成员表，不存在绕过成员表的通路）。
+    /// </summary>
     public Task Emit(
         string updateType, IReadOnlyDictionary<string, object?>? payload = null, CancellationToken ct = default)
-        => Bus.Emit(updateType, payload, ct);
+        => _signals.EmitAsync(updateType, payload, ct);
+
+    /// <summary>
+    /// 引擎成员的一次执行入口（<c>engine#&lt;成员名&gt;</c>）：沿用调用方的 <see cref="Context"/>
+    /// （数据面共享——组件对 <c>view.&lt;可写字段&gt;</c> 的写回能被调用方读回），并补建执行帧。
+    /// <para>
+    /// 这是**唯一**的成员调用面：动作端、卡牌成员、订阅体都经它执行；未声明的成员＝
+    /// <see cref="KeyNotFoundException"/>（fail-fast——成员名与预制体同源，不该在运行期才发现拼错）。
+    /// </para>
+    /// </summary>
+    /// <exception cref="ArgumentNullException">memberName／ctx 为 null。</exception>
+    /// <exception cref="KeyNotFoundException">引擎实体上没有该成员。</exception>
+    public Task<Orc.Core.Model.MemberExecutionResult> InvokeMemberAsync(
+        string memberName, Context ctx, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(memberName);
+        ArgumentNullException.ThrowIfNull(ctx);
+
+        var runtime = SignalRuntime;
+        return runtime.RunMemberAsync(runtime.Engine, memberName, ctx, this, ct);
+    }
+
+    /// <summary>
+    /// 引擎成员的一次执行入口（数据面形态）：以 <paramref name="data"/> 复制一份新 <see cref="Context"/>。
+    /// </summary>
+    /// <exception cref="ArgumentNullException">memberName 为 null。</exception>
+    /// <exception cref="KeyNotFoundException">引擎实体上没有该成员。</exception>
+    public Task<Orc.Core.Model.MemberExecutionResult> InvokeMemberAsync(
+        string memberName, IDictionary<string, object?>? data = null, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(memberName);
+        return InvokeMemberAsync(memberName, new Context(data), ct);
+    }
+
+    /// <summary>
+    /// 运行期注册信号（R1e）：自定义信号（沙盒／脚本的 <c>emit</c> 操作等）必须先经此进入 <c>engine</c> 命名空间，
+    /// 之后的挂载与发射都按正常信号走（不存在"任意字符串直接发射"的旁路）。同名幂等。
+    /// </summary>
+    /// <exception cref="ArgumentException">name 为空或纯空白。</exception>
+    /// <exception cref="Orc.Core.Model.SignalNotRegisteredException">同名成员已存在但不是信号。</exception>
+    public Orc.Core.Model.MemberDefinition RegisterSignal(string name)
+        => SignalRuntime.RegisterSignal(name);
+
+    /// <summary>信号端点（订阅序；审查面投影用：订阅者身份 → <c>engine#&lt;信号&gt;</c> 边）。</summary>
+    internal IReadOnlyList<SignalEndpointInfo> SignalEndpoints => _signals.Endpoints;
+
+    /// <summary>
+    /// 往**任意引擎成员**上挂一条外来边（信号＝订阅、流程成员＝检查位／守卫），返回撤销句柄。
+    /// <para>
+    /// 反制的使用检查＝<c>engine#order.cast</c> 上的一条外来边（该成员声明为 last 位次：外来边先跑、结算最后跑）；
+    /// 句柄 Dispose 即撤销——与旧实现"注册一个 Counter 段事件再 Unregister"逐项等价。
+    /// </para>
+    /// </summary>
+    /// <param name="memberName">目标成员名（<c>engine#&lt;成员名&gt;</c> 的成员名段）。</param>
+    /// <param name="displayName">来源名（留痕/审查用）。</param>
+    /// <param name="owner">所有者（引用相等卸载的依据；可为 null）。</param>
+    /// <param name="handler">边体。</param>
+    /// <param name="priority">位次优先级（同一位次内先小后大）。</param>
+    /// <exception cref="ArgumentException">memberName／displayName 为空。</exception>
+    /// <exception cref="ArgumentNullException">handler 为 null。</exception>
+    /// <summary>
+    /// 订阅一个**信号成员**（<c>engine#&lt;信号&gt;</c>）：建端点实体＋成员＋边，并把信号名登记进 hook 词汇表。
+    /// 与 <see cref="Subscribe(string, EngineUpdateCallback)"/>（宿主回调）不是一件事：那条只通知宿主，本方法进模型边图。
+    /// </summary>
+    /// <param name="signal">信号名（<c>engine#&lt;信号&gt;</c> 的成员名段）。</param>
+    /// <param name="displayName">订阅者名（留痕/审查用）。</param>
+    /// <param name="owner">所有者（引用相等卸载依据）。</param>
+    /// <param name="edge">订阅体（一条边）。</param>
+    /// <param name="priority">位次优先级（旧挂载优先级）。</param>
+    public void SubscribeMember(
+        string signal, string displayName, object? owner, Orc.Core.Model.OwnedEdge edge, int priority = UpdatePriorities.Normal)
+        => _signals.SubscribeSignal(signal, displayName, priority, owner, edge);
+
+    public IDisposable AttachMemberEdge(
+        string memberName, string displayName, object? owner, Orc.Core.Model.OwnedEdge edge, int priority = 0)
+        => _signals.Attach(memberName, displayName, priority, owner, edge);
 
     // ---------- ④卡牌 ----------
 
@@ -153,31 +325,6 @@ public sealed class LogicEngine
     }
 
     /// <summary>
-    /// 注册「卡牌效果装载完成动作」（S4 装载管线扩展点；加性面）：每次被动效果装载成功
-    /// （装载链完成「挂主触发器 → OnMount」）后，按注册序自动执行（P2 同步）。内核不感知具体语义——
-    /// 供宿主机制在装配期注册「装载后自动动作」（如游戏层「效果托管登记」：卸载时按来源撤销该效果施加的
-    /// 修饰器/光环声明；任何装载入口〔加载时点/放置驱动/Add 即时/词条内嵌〕统一生效、复装自动重建）。
-    /// 扩展点可缺省（未注册时装载照常）；动作异常＝归入装载失败口径（由装载链记录并回滚为未生效——本面不捕获）。
-    /// </summary>
-    /// <exception cref="ArgumentNullException">action 为 null。</exception>
-    public void RegisterCardMountCompletedAction(Action<Card, Effect> action)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-        _cardMountCompletedActions.Add(action);
-    }
-
-    /// <summary>
-    /// 「卡牌放置处理器」触发器（S4 装载链内置件；懒创建——首次创建卡牌时装配，null＝尚未创建）。
-    /// 用途：内置事件（「放置处理」）的寻址面——注册项句柄经 <see cref="Trigger{TView}.InitialRegistrations"/> 供给（moding（逻辑替换）/撤销等场景）。
-    /// </summary>
-    public Trigger<CardEventView>? CardPlacedTrigger => _cardLoadout?.PlacedTrigger;
-
-    /// <summary>
-    /// 「卡牌清理处理器」触发器（S4 装载链内置件；懒创建——首次创建卡牌时装配，null＝尚未创建）。
-    /// 用途：内置事件（「清理处理」）的寻址面——注册项句柄经 <see cref="Trigger{TView}.InitialRegistrations"/> 供给（moding（逻辑替换）/撤销等场景）。
-    /// </summary>
-    public Trigger<CardEventView>? CardCleanupTrigger => _cardLoadout?.CleanupTrigger;
-
     // ---------- ⑤宿主集成（S5 骨架） ----------
 
     /// <summary>
@@ -430,19 +577,7 @@ public sealed class LogicEngine
     // ---------- 内部机制 ----------
 
     /// <summary>
-    /// 执行「卡牌效果装载完成动作」（装载链内部调用；快照遍历——执行期间的新注册不影响本轮）。
-    /// 异常不拦截（由装载链按装载失败口径记录并回滚为未生效）；未注册＝无操作。
-    /// </summary>
-    internal void RunCardMountCompletedActions(Card card, Effect effect)
-    {
-        foreach (var action in _cardMountCompletedActions.ToArray())
-        {
-            action(card, effect);
-        }
-    }
-
-    /// <summary>
-    /// 确保卡牌装载链处理器已挂载（S4；首次创建卡牌时登记；幂等——每引擎至多两个处理器触发器：
+    /// 确保卡牌装载链处理器已挂载（S4；首次创建卡牌时登记；幂等——每引擎至多两个订阅：
     /// 「卡牌放置处理器」「卡牌清理处理器」）。
     /// S3 域行为不受影响：不使用卡牌的引擎不会挂载任何处理器。
     /// </summary>
@@ -522,3 +657,10 @@ public sealed class LogicEngine
         }
     }
 }
+
+/// <summary>
+/// 一次随机选择器取样（R2c 审查面）：谁用了随机、取样条件是什么。
+/// </summary>
+/// <param name="Viewer">发起取样的卡牌名（诊断定位用）。</param>
+/// <param name="Selector">选择器描述（sel/side/zone/type/keyword/count 的可读拼接）。</param>
+public sealed record RandomSelectionRecord(string Viewer, string Selector);

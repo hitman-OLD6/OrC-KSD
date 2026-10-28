@@ -11,7 +11,7 @@ public sealed record CardDataLoadFailure(string File, string Error);
 
 /// <summary>
 /// 卡牌数据体载入结果（S8；Q14/Q15/Q17）：**纯数据产出**——注册由宿主完成
-/// （定义集传给 <c>Match</c>；预制体经 <c>PrefabManager.RegisterPrefab</c>；效果声明经 <c>CardEffectRegistry.DeclarePrefab</c>）。
+/// （定义集传给 <c>Match</c>；预制体经 <c>SnapshotStore.RegisterPrefab</c>；效果声明经 <c>CardEffectRegistry.DeclarePrefab</c>）。
 /// </summary>
 /// <param name="Definitions">卡定义集（成功载入的卡）。</param>
 /// <param name="Prefabs">内联效果预制体（含 id——载入期注册用；显式 id 缺失＝该条隔离）。</param>
@@ -71,7 +71,7 @@ public sealed record CardDataFileLoad(
 
 /// <summary>
 /// 卡牌数据体载入器（S8）：扫描目录下的单卡数据体文件（<c>*.card.json</c>，Q14）、逐文件解析
-/// （**单文件失败隔离**、不阻断整批——对齐 <c>PrefabManager.LoadDirectory</c> 口径），
+/// （**单文件失败隔离**、不阻断整批——对齐 `SnapshotStore` 的逐文件登记口径），
 /// 产出"卡定义集 ＋ 预制体注册 ＋ 效果声明"三样数据（assembly 不动注册面——由宿主接线）。
 /// <para>
 /// 两个入口并存、语义分离（R5/D40）：

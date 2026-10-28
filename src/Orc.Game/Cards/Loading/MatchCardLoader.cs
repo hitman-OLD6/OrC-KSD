@@ -88,7 +88,7 @@ public interface IMatchCardLoader
     /// <param name="triggers">本局触发器注册表（加载器登记进 LowLevel 审计面——仅记账）。</param>
     /// <exception cref="ArgumentNullException">参数为 null。</exception>
     /// <exception cref="InvalidOperationException">重复接入；或装载链结构性失败。</exception>
-    void Attach(CardLibrary library, TriggerRegistry triggers);
+    void Attach(CardLibrary library);
 
     /// <summary>
     /// 整批装载（双方牌堆＝一次调用；局内新增卡＝一元清单）：返回与输入同序的卡位结局。

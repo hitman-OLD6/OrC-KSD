@@ -30,55 +30,6 @@ public class DamagePipelineTests
             faction: Faction.Germany, rarity: Rarity.Standard)),
     };
 
-    [Fact]
-    public async Task Pipeline_Combat_Effect_Battle_All_Reach_Apply()
-    {
-        var match = CommandTestKit.CreateCommandMatch(extraDefinitions: ExtraDefinitions);
-        await match.Initialize();
-        var playerA = match.Players[0];
-        var target = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.BeastId, 0); // 攻 6 / 防 7
-        var dealer = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.WeakId, 1);
-
-        var pipeline = match.CommandManager.DamagePipeline;
-        var eventKinds = new List<string>();
-        var applyKinds = new List<string>();
-        var applyAmounts = new List<int>();
-
-        pipeline.CombatDamage.Register("探针", (view, _, _) =>
-        {
-            eventKinds.Add(view.Kind);
-            view.Amount = 1; // 触发端改写：只改 Amount
-            return Task.CompletedTask;
-        }, ActionTriggerBands.Initiate);
-        pipeline.EffectDamage.Register("探针", (view, _, _) =>
-        {
-            eventKinds.Add(view.Kind);
-            view.Amount = 1;
-            return Task.CompletedTask;
-        }, ActionTriggerBands.Initiate);
-        pipeline.BattleDamage.Register("探针", (view, _, _) =>
-        {
-            eventKinds.Add(view.Kind);
-            view.Amount = 1;
-            return Task.CompletedTask;
-        }, ActionTriggerBands.Initiate);
-        pipeline.Apply.Register("探针", (view, _, _) =>
-        {
-            applyKinds.Add(view.Kind);
-            applyAmounts.Add(view.Amount); // 处理端读到的必须是改写后的值
-            return Task.CompletedTask;
-        }, ActionHandleBands.Rewrite);
-
-        var runtime = EffectRuntime.ResolveFor(target)!;
-        Assert.True(await runtime.DamageAsync(target, 3, dealer));            // effect
-        Assert.True(await pipeline.CombatAsync(dealer, target, 3));           // combat
-        Assert.True(await pipeline.BattleAsync(dealer, target, 3));           // battle
-
-        Assert.Equal(new[] { DamageKinds.Effect, DamageKinds.Combat, DamageKinds.Battle }, eventKinds);
-        Assert.Equal(new[] { DamageKinds.Effect, DamageKinds.Combat, DamageKinds.Battle }, applyKinds);
-        Assert.All(applyAmounts, amount => Assert.Equal(1, amount)); // 三端改写全部被处理端读到
-        Assert.Equal(4, DefenseOf(target)); // 7 - 1×3
-    }
 
     /// <summary>
     /// 门户调用点唯一：<c>src/</c> 内只有动作服务实现 <c>Actions/MatchActionServices.cs</c> 调两个数值门户

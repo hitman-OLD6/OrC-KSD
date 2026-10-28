@@ -175,7 +175,7 @@ public static class BuiltInPlugin
         var binding = context.Binding
             ?? throw new InvalidOperationException("内置插件（postCommand 相）需要对局绑定面（IMatchBindingServices）。");
 
-        binding.RegisterFlowTriggers(TriggerLayer.LowLevel);
+        binding.RegisterFlowTriggers();
         binding.AssembleKeywordEffectLibrary();
     }
 
@@ -217,15 +217,37 @@ public static class BuiltInPlugin
         KeywordRegistry.Register(KeywordIds.Guard, (_, _) => new PlainKeywordComponent(KeywordIds.Guard), isBattleKeyword: true);
         KeywordRegistry.Register(KeywordIds.Shock, (_, _) => new PlainKeywordComponent(KeywordIds.Shock), isBattleKeyword: true);
 
-        // 批 4 数据化：词条效果绑定声明（试点：闪击/动员）。
+        // 词条效果绑定声明（A2 决策门 A：7 个内建词条的行为＝v4 效果组件〔csx〕）——
+        // 标识指向内建组件库（Cards/KeywordPrefabs/*.component.json，Match 构造期装进编排运行时目录），
+        // 不再指向 *.prefab.json 数据壳；绑定只承载「词条 → 组件」关联，行为在组件成员的 csx 里。
         KeywordRegistry.DeclareEffectBindings(KeywordIds.Blitz, new[]
         {
-            new KeywordEffectBinding(KeywordEffectAssembly.BlitzDeploySetPrefabId, KeywordEffectAssembly.BlitzDeploySetEffectName),
+            new KeywordEffectBinding(KeywordEffectAssembly.BlitzDeploySetComponentId, KeywordEffectAssembly.BlitzDeploySetEffectName),
         });
         KeywordRegistry.DeclareEffectBindings(KeywordIds.Mobilize, new[]
         {
-            new KeywordEffectBinding(KeywordEffectAssembly.MobilizeAccrualPrefabId, KeywordEffectAssembly.MobilizeAccrualEffectName),
-            new KeywordEffectBinding(KeywordEffectAssembly.MobilizeLossPrefabId, KeywordEffectAssembly.MobilizeLossEffectName),
+            new KeywordEffectBinding(KeywordEffectAssembly.MobilizeAccrualComponentId, KeywordEffectAssembly.MobilizeAccrualEffectName),
+            new KeywordEffectBinding(KeywordEffectAssembly.MobilizeLossComponentId, KeywordEffectAssembly.MobilizeLossEffectName),
+        });
+        KeywordRegistry.DeclareEffectBindings(KeywordIds.Armor, new[]
+        {
+            new KeywordEffectBinding(KeywordEffectAssembly.ArmorComponentId, KeywordEffectAssembly.ArmorEffectName),
+        });
+        KeywordRegistry.DeclareEffectBindings(KeywordIds.Immune, new[]
+        {
+            new KeywordEffectBinding(KeywordEffectAssembly.ImmuneComponentId, KeywordEffectAssembly.ImmuneEffectName),
+        });
+        KeywordRegistry.DeclareEffectBindings(KeywordIds.Ambush, new[]
+        {
+            new KeywordEffectBinding(KeywordEffectAssembly.AmbushComponentId, KeywordEffectAssembly.AmbushEffectName),
+        });
+        KeywordRegistry.DeclareEffectBindings(KeywordIds.Suppressed, new[]
+        {
+            new KeywordEffectBinding(KeywordEffectAssembly.SuppressionComponentId, KeywordEffectAssembly.SuppressionEffectName),
+        });
+        KeywordRegistry.DeclareEffectBindings(KeywordIds.Intelligence, new[]
+        {
+            new KeywordEffectBinding(KeywordEffectAssembly.IntelligenceComponentId, KeywordEffectAssembly.IntelligenceEffectName),
         });
 
         RegisterBuiltInCardComponents();

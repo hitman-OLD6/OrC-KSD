@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 4,
+  "asset": {
+    "kind": "component",
+    "id": "atp.rapid-landing.effect",
+    "requires-host": "any",
+    "active-when": "loaded",
+    "one-shot": false,
+    "private-fields": [],
+    "members": [
+      {
+        "name": "onEvent",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Card",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Effect",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Unit",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Player",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Killer",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Source",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "TriggerCard",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            }
+          ]
+        },
+        "handler": {
+          "id": "atp.rapid-landing.effect#onEvent",
+          "entry": "HandleAsync",
+          "script": "Func<dynamic, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n\n    if (view.Host is not Orc.Cards.Card self || view.Card is not Orc.Cards.Card played) { return; }\n    if (!object.ReferenceEquals(played, self)) { return; }\n\n    var runtime = Orc.Game.Effects.EffectRuntime.ResolveFor(self);\n    var random = Orc.Game.MatchRandomService.ResolveFor(self);\n    var engine = ctx.Engine;\n    if (runtime is null || random is null || engine is null) { return; }\n\n    Func<Orc.Cards.Card, Orc.Game.Players.Player?> ownerOf = c =>\n    {\n        if (c is Orc.Game.Players.Hq hq) { return hq.Owner; }\n        if (c is Orc.Game.Cards.CardBase cb) { return cb.Owner; }\n        return null;\n    };\n\n    Func<Orc.Game.Cards.UnitCard, bool> onField = u =>\n        u.TryGetData<Orc.Game.Cards.UnitStateData>(out var st) && !st.IsDestroyed && st.Line is not null;\n\n    Func<Orc.Game.Cards.UnitCard, bool> isInfantry = u =>\n    {\n        foreach (var t in u.Definition.UnitTypes)\n        {\n            if (string.Equals(t, \"infantry\", System.StringComparison.OrdinalIgnoreCase)) { return true; }\n        }\n        return false;\n    };\n\n    Func<Orc.Game.Cards.UnitCard, bool> onFrontLine = u =>\n    {\n        if (!u.TryGetData<Orc.Game.Cards.UnitStateData>(out var st) || st.IsDestroyed || st.Line is null)\n        {\n            return false;\n        }\n        return st.Line.Name.Contains(\"前线\", System.StringComparison.Ordinal);\n    };\n\n    var owner = ownerOf(self);\n    if (owner is null) { return; }\n\n    var enemyIndex = 1 - owner.Index;\n\n    // 本回合监听：友方单位部署/加入 -> 随机 1 个敌方目标 1 点伤害；回合结束自注销。\n    System.IDisposable? subscription = null;\n    subscription = engine.Subscribe(async (kind, payload, token) =>\n    {\n        if (string.Equals(kind, Orc.Game.GameUpdates.TurnEnd, System.StringComparison.Ordinal))\n        {\n            if (subscription is not null) { subscription.Dispose(); }\n            return;\n        }\n\n        if (!string.Equals(kind, Orc.Game.GameUpdates.UnitDeployed, System.StringComparison.Ordinal)\n            && !string.Equals(kind, Orc.Game.GameUpdates.UnitJoined, System.StringComparison.Ordinal))\n        {\n            return;\n        }\n\n        if (payload is null\n            || !payload.TryGetValue(Orc.Game.GameUpdates.PayloadUnit, out var raw)\n            || raw is not Orc.Game.Cards.UnitCard deployed\n            || !object.ReferenceEquals(deployed.Owner, owner))\n        {\n            return;\n        }\n\n        var targets = new System.Collections.Generic.List<Orc.Cards.Card>();\n        foreach (var c in engine.Cards)\n        {\n            if (c is Orc.Game.Players.Hq hq)\n            {\n                if (hq.Owner.Index == enemyIndex) { targets.Add(hq); }\n            }\n            else if (c is Orc.Game.Cards.UnitCard u\n                && !object.ReferenceEquals(u.Owner, owner)\n                && onField(u))\n            {\n                targets.Add(u);\n            }\n        }\n\n        if (targets.Count == 0) { return; }\n        var pick = random.PickOne(targets);\n        await runtime.DamageAsync(pick, 1, self, token);\n    });\n};\n"
+        }
+      }
+    ],
+    "mounts": [
+      {
+        "target": "engine#card.played",
+        "member": "onEvent"
+      }
+    ],
+    "wraps": []
+  }
+}

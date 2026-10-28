@@ -20,7 +20,7 @@ public class DiyExample08_AssaultAdvanceRetreatTests
     [Fact]
     public async Task 突袭_BattleAsync_存活且前线无敌人_推进并打总部3()
     {
-        var match = CommandTestKit.CreateCommandMatch();
+        var match = CommandTestKit.CreateCommandMatch(allowRandomTargeting: true); // R2c：测试场景显式开启随机取样
         await match.Initialize();
         var playerA = match.Players[0];
         var playerB = match.Players[1];
@@ -44,7 +44,7 @@ public class DiyExample08_AssaultAdvanceRetreatTests
     [Fact]
     public async Task 突袭_BattleAsync_存活但前线有敌人_撤退到己方支援线()
     {
-        var match = CommandTestKit.CreateCommandMatch();
+        var match = CommandTestKit.CreateCommandMatch(allowRandomTargeting: true); // R2c：测试场景显式开启随机取样
         await match.Initialize();
         var playerA = match.Players[0];
         var playerB = match.Players[1];
@@ -71,7 +71,7 @@ public class DiyExample08_AssaultAdvanceRetreatTests
     [Fact]
     public async Task 突袭_BattleAsync_阵亡_不推进不撤退不打总部()
     {
-        var match = CommandTestKit.CreateCommandMatch();
+        var match = CommandTestKit.CreateCommandMatch(allowRandomTargeting: true); // R2c：测试场景显式开启随机取样
         await match.Initialize();
         var playerA = match.Players[0];
         var playerB = match.Players[1];

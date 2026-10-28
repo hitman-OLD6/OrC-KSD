@@ -108,7 +108,7 @@ public class DeckFetchTests
         match.Engine.Prefabs.RegisterPrefab(new EffectSnapshot(new EffectPrefab(
             FetchHostPrefabId,
             new TriggerPrefab(
-                "t.fetch.self", "test.csx.deckfetch.self", TriggerKind.Passive,
+                "t.fetch.self", "test.csx.deckfetch.self", true,
                 hooks: new[] { GameUpdates.UnitJoined },
                 events: new[] { new EventPrefab("e1", csxSource: FetchSelfCsx) }))));
 

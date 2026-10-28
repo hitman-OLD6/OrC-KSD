@@ -27,7 +27,7 @@ public sealed record PrefabSaveResult(
 
 /// <summary>
 /// 效果快照落盘器（批 2 加性·写方向）：把快照集合写成单文件（<c>&lt;root.id&gt;.prefab.json</c>，顶层）。
-/// 命名/结构口径与 <see cref="PrefabManager.LoadDirectory"/> 成对（<c>*.prefab.json</c>、单快照一文件、顶层）。
+/// 命名/结构口径与 <see cref="SnapshotStore.LoadDirectory"/> 成对（<c>*.prefab.json</c>、单快照一文件、顶层）。
 /// 数据源＝外部快照集合（静态管道——效果创建/编译产物在管理器外部诞生；不提供实例状态导出便捷面）。
 /// 失败契约（与读侧「单文件隔离」对偶）：
 /// ①单快照级失败＝隔离（记失败条目、跳过该条、其余继续）——含非法 id、批内重复、序列化失败、IO 失败；

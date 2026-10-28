@@ -1,4 +1,5 @@
-using Orc.Cards;
+﻿using Orc.Cards;
+using Orc.Core.Model;
 using Orc.Game.Cards;
 using Orc.Script;
 using Xunit;
@@ -6,6 +7,7 @@ using Xunit;
 namespace Orc.Game.Tests;
 
 /// <summary>铜墙铁壁系列（机动/固守/抢修）行为验收：csx 制品装载 + 额度/判定器/回合统计接线。</summary>
+[Collection("PackKeywordRegistrySerial")]
 public sealed class BulwarkKeywordTests : IDisposable
 {
     /// <summary>清理进程级词条注册（避免全局绑定核验影响其他测试）。</summary>
@@ -72,11 +74,14 @@ public sealed class BulwarkKeywordTests : IDisposable
 
         match.Engine.ScriptEvaluator = new CSharpScriptEvaluator();
         match.Engine.SyncScriptEvaluator = new CSharpSyncScriptEvaluator();
-        foreach (var id in new[] { "keyword.mobility", "keyword.entrench", "keyword.repair" })
-        {
-            match.Engine.Prefabs.RegisterPrefab(PrefabJson.Deserialize(File.ReadAllText(
-                Path.Combine(PackRoot, "effects", id + ".prefab.json"))));
-        }
+
+        // v4-only（§23.8 第 1 项）：词条行为由 effects-v4 组件承载（旧 effects/ 预制体已归档）。
+        var loaded = AssetPackLoader.Load(
+            match.Engine.Model!, Path.Combine(PackRoot, "effects-v4"),
+            match.Engine.ScriptEvaluator, match.Engine.SyncScriptEvaluator);
+        Assert.True(
+            loaded.Loaded,
+            "v4 装载失败：" + string.Join("；", loaded.Errors.Select(static e => $"{e.Category}/{e.Target}: {e.Message}")));
 
         return (match, bridge);
     }
@@ -137,12 +142,13 @@ public sealed class BulwarkKeywordTests : IDisposable
         Assert.NotNull(match.Engine.Judicators);
         Assert.True(match.Engine.Judicators!.Contains("inhibit.leg.eligibility"), "抑制判定器应已注册");
 
-        // 诊断：固守的抑制包装器 csx 应可求值。
-        var snapshot = PrefabJson.Deserialize(File.ReadAllText(
-            Path.Combine(PackRoot, "effects", "keyword.entrench.prefab.json")));
-        var immune = snapshot.Root.JudicatorWrappers.Single(j => j.JudicatorName == "inhibit.leg.eligibility");
+        // 诊断：固守的抑制包装器 csx 应可求值（v4：judge-wraps 声明，旧 judicatorWrappers 已退役）。
+        var asset = AssetSchema.Read(
+            File.ReadAllText(Path.Combine(PackRoot, "effects-v4", "keyword.entrench.component.json")),
+            "keyword.entrench.component.json");
+        var immune = asset.JudgeWraps.Single(j => j.Judicator == "inhibit.leg.eligibility");
         var evaluated = match.Engine.SyncScriptEvaluator!.Evaluate(
-            new Orc.Core.SyncScriptRequest(immune.Handler.CsxSource!, immune.Handler.EntryName));
+            new Orc.Core.SyncScriptRequest(immune.Script, immune.Entry));
         Assert.True(evaluated.Success, evaluated.Error);
 
         var raw = match.Engine.Judicators.Invoke("inhibit.leg.eligibility", new object?[] { unit });

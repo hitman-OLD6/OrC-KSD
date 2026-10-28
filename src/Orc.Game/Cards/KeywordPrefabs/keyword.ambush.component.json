@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 4,
+  "asset": {
+    "kind": "component",
+    "id": "keyword.ambush",
+    "requires-host": "any",
+    "active-when": "loaded",
+    "one-shot": false,
+    "private-fields": [],
+    "members": [
+      {
+        "name": "伏击改写",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Attacker",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Target",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Resolution",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "TriggerCard",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            }
+          ]
+        },
+        "handler": {
+          "id": "keyword.ambush#伏击改写",
+          "entry": "HandleAsync",
+          "script": "Func<dynamic, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Game.Cards.UnitCard self) { return; }\n    if (!self.TryGetData<Orc.Game.Cards.UnitStateData>(out var selfState) || selfState.IsDestroyed) { return; }\n\n    // 目标侧单命中：只有「本卡被攻击」才改写（HQ 目标不进入）。\n    if (view.Target is not Orc.Core.Ref<Orc.Core.Entity> targetRef || !targetRef.IsAlive) { return; }\n    if (!object.ReferenceEquals(targetRef.Value, self)) { return; }\n\n    if (view.Attacker is not Orc.Core.Ref<Orc.Core.Entity> attackerRef || !attackerRef.IsAlive) { return; }\n    if (attackerRef.Value is not Orc.Game.Cards.UnitCard attacker) { return; }\n    if (!attacker.TryGetData<Orc.Game.Cards.UnitStateData>(out _)) { return; }\n\n    if (view.Resolution is not Orc.Game.Commanding.AttackDamageResolution resolution || resolution.IsRewritten) { return; }\n\n    var runtime = Orc.Game.Effects.EffectRuntime.ResolveFor(self);\n    if (runtime is null) { return; }\n\n    // 先资格（combat.counter.eligibility 判定器通道——豁免约束改写）。\n    if (!runtime.Judge(Orc.Game.Judicators.JudicatorNames.CombatCounterEligibility, attacker, self)) { return; }\n\n    // 后条件（combat.ambush.condition 判定器通道——单源）。\n    if (!runtime.Judge(Orc.Game.Judicators.JudicatorNames.CombatAmbushCondition, self, attacker)) { return; }\n\n    resolution.MarkRewritten();\n\n    // 改写方自己执行死亡（经死亡动作走完整两端：触发端 → 处理端），随后置「已完整处置」。\n    await Orc.Game.Cards.KeywordEffectActionFace.DeathAsync(\n        self, attacker, self, view.TriggerCard as Orc.Cards.Card, ct);\n    resolution.MarkHandled();\n};\n"
+        }
+      }
+    ],
+    "mounts": [],
+    "wraps": [
+      {
+        "target": "engine#attack-damage",
+        "phase": "before",
+        "handler": "keyword.ambush#伏击改写"
+      }
+    ]
+  }
+}

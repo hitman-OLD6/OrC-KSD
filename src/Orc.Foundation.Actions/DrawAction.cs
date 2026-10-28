@@ -1,6 +1,8 @@
-﻿using Orc.Cards;
+using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Cards;
+using Orc.Game.Model;
 using Orc.Game.Players;
 using Orc.Game.Actions;
 
@@ -19,7 +21,7 @@ namespace Orc.Foundation.Actions;
 /// <para>
 /// 实现注记：取件（<c>DrawInstance</c> / <c>RemoveInstance</c>）在**触发端包装步骤**内执行，而不在
 /// <c>Initiate</c> 段 handler 内——空卡组必须保持集合契约的 <c>InvalidOperationException</c> 上抛语义
-/// （<c>Trigger</c> 会把 handler 内异常收口为 <c>ContractFailure</c>，不再是可捕获的业务抛错）。
+/// （成员执行面不会把 handler 内的异常收口成"结局"，而是原样上抛——这里因此只做取件前的硬门槛）。
 /// 语义上它仍是「触发端差异」：两入口只有取件不同，之后的「drawn → 加入手牌」完全共用。
 /// </para>
 /// </summary>
@@ -45,25 +47,38 @@ public sealed class DrawAction : IDrawAction
         _services = services;
         _addToHand = addToHand;
 
-        Top = new Trigger<DrawTriggerView>("卡组顶抽牌触发器", bandType: typeof(ActionTriggerBands));
-        Specific = new Trigger<DrawTriggerView>("指定牌抽取触发器", bandType: typeof(ActionTriggerBands));
-        Handle = new Trigger<DrawHandleView>("抽牌处理触发器", bandType: typeof(ActionHandleBands));
+        // U3：三端＝引擎成员（地址由实现自报）；实例＝过渡期内部执行面。
+        Top = MemberAddress.Create(AddressScope.Engine, EngineProcesses.DrawTop);
+        Specific = MemberAddress.Create(AddressScope.Engine, EngineProcesses.DrawSpecific);
+        Handle = MemberAddress.Create(AddressScope.Engine, EngineProcesses.DrawHandle);
 
-        Top.Register("通用前置", ValidateAsync, ActionTriggerBands.Initiate, DefaultPriority);
-        Top.Register("转发到处理端", ForwardAsync, ActionTriggerBands.Commit, DefaultPriority);
-        Specific.Register("通用前置", ValidateAsync, ActionTriggerBands.Initiate, DefaultPriority);
-        Specific.Register("转发到处理端", ForwardAsync, ActionTriggerBands.Commit, DefaultPriority);
-        Handle.Register("抽牌落地", HandleApplyAsync, ActionHandleBands.Apply, DefaultPriority);
+
+        // 自有边（新模型：按声明序；旧 Initiate／Commit／Apply 段由位次表达）。
+        ActionEdges.Attach<DrawTriggerView>(_engine, EngineProcesses.DrawTop, ValidateAsync);
+        ActionEdges.Attach<DrawTriggerView>(_engine, EngineProcesses.DrawTop, ForwardAsync);
+        ActionEdges.Attach<DrawTriggerView>(_engine, EngineProcesses.DrawSpecific, ValidateAsync);
+        ActionEdges.Attach<DrawTriggerView>(_engine, EngineProcesses.DrawSpecific, ForwardAsync);
+        ActionEdges.Attach<DrawHandleView>(_engine, EngineProcesses.DrawHandle, HandleApplyAsync);
+
+        Ends = new[]
+        {
+            new ActionTriggerEnd("卡组顶触发端", Top),
+            new ActionTriggerEnd("指定牌触发端", Specific),
+            new ActionTriggerEnd(ActionTriggerEnd.HandleRole, Handle),
+        };
     }
 
-    /// <summary>卡组顶抽牌**触发端**。</summary>
-    public Trigger<DrawTriggerView> Top { get; }
+    /// <inheritdoc />
+    public MemberAddress Top { get; }
 
-    /// <summary>指定牌抽取**触发端**。</summary>
-    public Trigger<DrawTriggerView> Specific { get; }
+    /// <inheritdoc />
+    public MemberAddress Specific { get; }
 
-    /// <summary>抽牌**处理端**（两入口共用；<c>card.drawn</c> 在此恰发一次）。</summary>
-    public Trigger<DrawHandleView> Handle { get; }
+    /// <inheritdoc />
+    public MemberAddress Handle { get; }
+
+    /// <inheritdoc />
+    public IReadOnlyList<ActionTriggerEnd> Ends { get; }
 
     /// <inheritdoc />
     public async Task<ActionResult> DrawTopAsync(
@@ -73,7 +88,7 @@ public sealed class DrawAction : IDrawAction
 
         // 取件＝触发端差异（卡组顶）；空卡组沿用集合契约的明确抛错（不经触发器——见类注释）。
         var card = _services.TakeTopFromDeck(player);
-        return await RunAsync(Top, player, card, triggerCard, ct).ConfigureAwait(false);
+        return await RunAsync(EngineProcesses.DrawTop, player, card, triggerCard, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -94,7 +109,7 @@ public sealed class DrawAction : IDrawAction
 
         // 取件＝触发端差异（指定实例）；此后与卡组顶路径完全共用。
         _services.TakeSpecificFromDeck(player, card);
-        return await RunAsync(Specific, player, card, triggerCard, ct).ConfigureAwait(false);
+        return await RunAsync(EngineProcesses.DrawSpecific, player, card, triggerCard, ct).ConfigureAwait(false);
     }
 
     /// <summary>通用前置（两个触发端共用）：取件结果必须存活且归属抽牌玩家。</summary>
@@ -124,7 +139,7 @@ public sealed class DrawAction : IDrawAction
             data[nameof(DrawHandleView.TriggerCard)] = view.TriggerCard;
         }
 
-        return Handle.InvokeAsync(_engine, data, ct);
+        return _engine.InvokeMemberAsync(EngineProcesses.DrawHandle, new Context(data), ct);
     }
 
     /// <summary>处理端默认执行体：先 <c>card.drawn</c>（恰一次），再交加入手牌子动作。</summary>
@@ -145,7 +160,7 @@ public sealed class DrawAction : IDrawAction
     }
 
     private async Task<ActionResult> RunAsync(
-        Trigger<DrawTriggerView> trigger, Player player, CardBase card, Card? triggerCard, CancellationToken ct)
+        string member, Player player, CardBase card, Card? triggerCard, CancellationToken ct)
     {
         var result = new ActionTargetResult(card.Ref, card, 1);
         var data = new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -159,7 +174,7 @@ public sealed class DrawAction : IDrawAction
             data[TriggerPayloadKeys.TriggerCard] = triggerCard;
         }
 
-        await trigger.InvokeAsync(_engine, data, ct).ConfigureAwait(false);
+        await _engine.InvokeMemberAsync(member, new Context(data), ct).ConfigureAwait(false);
 
         if (result.Outcome == ActionOutcomeKind.Skipped)
         {

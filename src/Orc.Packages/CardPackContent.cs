@@ -28,7 +28,10 @@ public sealed record CardPackKeyword(
 /// </summary>
 public sealed class CardPackContent
 {
-    internal CardPackContent(
+    /// <summary>
+    /// 构造一份卡包内容（程序化来源：测试夹具、宿主内联包；常规路径由 <see cref="PackageRegistrar"/> 产出）。
+    /// </summary>
+    public CardPackContent(
         PackageManifest manifest,
         string rootDirectory,
         IReadOnlyList<CardDefinitionEntry> definitions,
@@ -36,7 +39,8 @@ public sealed class CardPackContent
         IReadOnlyList<(string CardId, IReadOnlyList<string> PrefabIds)> declarations,
         string? effectsDirectory,
         IReadOnlyList<CardPackKeyword> keywords,
-        IReadOnlyDictionary<string, string> texts)
+        IReadOnlyDictionary<string, string> texts,
+        string? componentsDirectory = null)
     {
         Manifest = manifest;
         RootDirectory = rootDirectory;
@@ -46,6 +50,7 @@ public sealed class CardPackContent
         EffectsDirectory = effectsDirectory;
         Keywords = keywords;
         Texts = texts;
+        ComponentsDirectory = componentsDirectory;
     }
 
     /// <summary>
@@ -69,8 +74,14 @@ public sealed class CardPackContent
     /// <summary>卡 → 效果预制体 id 声明（cardId 已前缀化，与定义集同源）。</summary>
     public IReadOnlyList<(string CardId, IReadOnlyList<string> PrefabIds)> Declarations { get; }
 
-    /// <summary>效果库目录（不存在＝null）。</summary>
+    /// <summary>效果库目录（旧格式 <c>*.prefab.json</c>；不存在＝null）。</summary>
     public string? EffectsDirectory { get; }
+
+    /// <summary>
+    /// 组件资产目录（v4：<c>effects-v4/*.component.json</c>；不存在＝null）。
+    /// <para>生产装载首选：有本目录＝**只装 v4**（旧格式目录不进装载路径）；无＝过渡兼容旧格式。</para>
+    /// </summary>
+    public string? ComponentsDirectory { get; }
 
     /// <summary>词条声明（<c>keywords.json</c>；不存在＝空）。</summary>
     public IReadOnlyList<CardPackKeyword> Keywords { get; }

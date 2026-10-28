@@ -1,3 +1,5 @@
+using Orc.Core.Model;
+
 namespace Orc.Core;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -113,6 +115,40 @@ public sealed class ServiceEntry<TService> where TService : class, IUnifiedServi
     private WrapperBucket? ExistingBucket(int domain)
         => _buckets.TryGetValue(domain, out var bucket) ? bucket : null;
 
+    /// <summary>
+    /// 新模型判定器包装执行面（S9／R1i）：来源＝<see cref="Orc.Core.Model.WrapRegistry"/> 的
+    /// <c>judicator:&lt;名&gt;</c> 目标。**与成员包装器共用同一注册面**（相位语义相同）；
+    /// null＝该条目没有接入新模型包装面（判定器以外／未装配编排运行时的独立构造路径）。
+    /// </summary>
+    internal Func<Orc.Core.Model.WrapRegistry?>? ModelJudgeWrapSource { get; set; }
+
+    /// <summary>
+    /// 执行一条新模型判定器包装器：宿主对象追加到载荷末尾（旧 <c>judicatorWrappers</c> 的约定——
+    /// csx 以 <c>args[^1]</c> 取"哪张卡注册了我"）；宿主来源＝声明该包装的实体（或其宿主的承载对象）。
+    /// </summary>
+    private static object[]? ExtendArgs(object[]? args, object? host)
+    {
+        var extended = new object[(args?.Length ?? 0) + 1];
+        if (args is not null)
+        {
+            Array.Copy(args, extended, args.Length);
+        }
+
+        extended[^1] = host!;
+        return extended;
+    }
+
+    /// <summary>包装器声明实体的承载对象（判定器包装器的"宿主"；无声明实体＝null）。</summary>
+    private static object? HostOf(Orc.Core.Model.WrapEntry entry)
+        => entry.Declaring is null ? null : entry.Declaring.Bound ?? entry.Declaring.Host?.Bound;
+
+    /// <summary>
+    /// 本次调用的载荷：有声明实体时追加宿主（旧 <c>judicatorWrappers</c> 的末位约定）；
+    /// 无声明实体时**原样传递**（内联包装器自带宿主绑定，不得多补一个 null）。
+    /// </summary>
+    private static object[]? ArgsFor(Orc.Core.Model.WrapEntry entry, object[]? args)
+        => entry.Declaring is null ? args : ExtendArgs(args, HostOf(entry));
+
     /// <summary>指定域当前生效的替换包装器：最后注册且未注销者；无＝null（回退默认）。机制静默：无公共读面。</summary>
     private static Func<object[]?, object[]?>? LastReplace(WrapperBucket? bucket)
         => bucket is null || bucket.Replace.Count == 0 ? null : (Func<object[]?, object[]?>)bucket.Replace[^1].Handler;
@@ -189,6 +225,17 @@ public sealed class ServiceEntry<TService> where TService : class, IUnifiedServi
         var global = ExistingBucket(DefaultDomain);
         var local = domain == DefaultDomain ? null : ExistingBucket(domain);
 
+        // 判定器包装器（S9）：来源＝新模型 WrapRegistry 的 judicator 目标（**与成员包装器同一注册面**，R1i）。
+        // 相位语义相同：before 按声明序正序（FIFO，R1i 修订）、after 按声明序（FIFO）、replace 取最后声明者。
+        // 旧域桶（插件侧）与新模型面并列执行：前者承载插件包装器、后者承载组件资产声明（judge-wraps）。
+        // 注意：旧域桶的 before 仍是历史 LIFO（`SnapshotBefore` 反转），它随 `Trigger` 在 U5／A4 退役；
+        // 本模型面已按 D3 改为 FIFO——两者只在过渡期共存，同一判定器上跨两面的相对次序不构成契约。
+        var modelTarget = WrapTarget.ForJudicator(Name);
+        var modelWraps = ModelJudgeWrapSource?.Invoke();
+        var modelBefore = modelWraps?.BeforeExecutionOrder(modelTarget) ?? Array.Empty<WrapEntry>();
+        var modelReplace = modelWraps?.LastReplace(modelTarget);
+        var modelAfter = modelWraps?.Entries(modelTarget, WrapperPhase.After) ?? Array.Empty<WrapEntry>();
+
         foreach (var wrapper in SnapshotBefore(global))
         {
             wrapper(args);
@@ -202,8 +249,22 @@ public sealed class ServiceEntry<TService> where TService : class, IUnifiedServi
             }
         }
 
-        var replace = LastReplace(local) ?? LastReplace(global);
-        var result = replace is { } replacement ? replacement(args) : Service.Invoke(args);
+        foreach (var entry in modelBefore)
+        {
+            entry.Handler.Judge?.Invoke(ArgsFor(entry, args), null);
+        }
+
+        object[]? result;
+        if (modelReplace is { } modelReplacement)
+        {
+            // replace：替代整个核心逻辑（最后声明者生效）；result 入参＝null（与旧 judicatorWrappers 口径一致）。
+            result = modelReplacement.Handler.Judge?.Invoke(ArgsFor(modelReplacement, args), null);
+        }
+        else
+        {
+            var replace = LastReplace(local) ?? LastReplace(global);
+            result = replace is { } replacement ? replacement(args) : Service.Invoke(args);
+        }
 
         if (local is not null)
         {
@@ -216,6 +277,14 @@ public sealed class ServiceEntry<TService> where TService : class, IUnifiedServi
         foreach (var wrapper in SnapshotAfter(global))
         {
             result = wrapper(args, result);
+        }
+
+        foreach (var entry in modelAfter)
+        {
+            if (entry.Handler.Judge is { } judge)
+            {
+                result = judge(ArgsFor(entry, args), result);
+            }
         }
 
         return result;

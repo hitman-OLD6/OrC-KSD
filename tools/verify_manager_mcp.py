@@ -8,7 +8,7 @@ import json
 import subprocess
 import sys
 
-DLL = r"D:\OrC-KSD\src\Orc.Manager\bin\Debug\net8.0\Orc.Manager.dll"
+DLL = r"D:\OrC-KSD\artifacts\slot\bin\Orc.Manager\debug\Orc.Manager.dll"
 PORT = 51999
 
 proc = subprocess.Popen(

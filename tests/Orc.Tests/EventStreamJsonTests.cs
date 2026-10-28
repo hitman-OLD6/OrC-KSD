@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Output;
 using Xunit;
 
@@ -18,23 +19,18 @@ public class EventStreamJsonTests
     public async Task Tree_Structure_And_Local_Entry_Ownership_Exactly_Once()
     {
         var engine = new LogicEngine();
-        EventStream? childStream = null;
+        var child = KernelTestKit.Member("子", new OwnedEdge((_, _, _) => Task.CompletedTask));
+        KernelTestKit.Register(engine, child);
 
-        var child = new Trigger<CounterView>(name: "子", events: new[]
-        {
-            new TriggerEvent<CounterView>("子事件", (v, c, t) => Task.CompletedTask),
-        });
-        var parent = new Trigger<CounterView>(name: "父", events: new[]
-        {
-            new TriggerEvent<CounterView>("父事件", async (v, c, t) =>
-            {
-                childStream = await child.InvokeAsync(engine, new Dictionary<string, object?>());
-            }),
-        });
+        // 父成员内部以"另起数据面执行"调用子成员 ⇒ 子流挂父流（树结构由生产路径产生）。
+        var parent = KernelTestKit.Member("父", new OwnedEdge((KernelHandler)(async (_, _, _) =>
+            await KernelTestKit.RunNestedAsync(engine, "子"))));
+        await KernelTestKit.RunAsync(engine, parent);
 
-        var parentStream = await parent.InvokeAsync(engine, new Dictionary<string, object?>());
-        Assert.NotNull(childStream);
-        childStream!.WriteLog("测试源", "子条目一");
+        var parentStream = engine.RootStream.Children.Single();
+        var childStream = parentStream.Children.Single();
+
+        childStream.WriteLog("测试源", "子条目一");
         parentStream.WriteLog("测试源", "父条目一");
 
         var json = EventStreamJson.Serialize(engine.RootStream);
@@ -191,12 +187,12 @@ public class EventStreamJsonTests
         }
 
         // 造两条顶层流：从任意流导出＝以该流为根的子树（不含祖先、与兄弟无关）
-        var trigger = new Trigger<CounterView>(name: "触发", events: new[]
-        {
-            new TriggerEvent<CounterView>("事件", (v, c, t) => Task.CompletedTask),
-        });
-        var s1 = await trigger.InvokeAsync(engine, new Dictionary<string, object?>());
-        var s2 = await trigger.InvokeAsync(engine, new Dictionary<string, object?>());
+        var member = KernelTestKit.Member("触发", new OwnedEdge((_, _, _) => Task.CompletedTask));
+        KernelTestKit.Register(engine, member);
+        await engine.InvokeMemberAsync("触发");
+        await engine.InvokeMemberAsync("触发");
+        var s1 = engine.RootStream.Children[0];
+        var s2 = engine.RootStream.Children[1];
         s1.WriteLog("测试源", "s1 本地");
         s2.WriteLog("测试源", "s2 本地");
 

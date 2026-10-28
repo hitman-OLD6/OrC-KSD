@@ -1,20 +1,27 @@
 ﻿using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Cards;
 
 namespace Orc.Game.Actions;
 
 /// <summary>
 /// 死亡动作（S8/S10 动作接口）：处理端可改写是否死亡、击杀者归属、处置指向。
+/// <para>
+/// **两端是引擎成员（S13／U3）**：公开面只给成员地址；旧身份实例随 <see cref="Ends"/> 交给宿主装配
+/// （<c>CommandManager</c> 的 Rewrite 改写位按地址取实例注册），随旧类型在 U5 退役。
+/// </para>
 /// </summary>
 public interface IDeathAction
 {
-    /// <summary>死亡**触发端**。</summary>
-    Trigger<DeathTriggerView> Trigger { get; }
+    /// <summary>死亡**触发端**的成员地址（<c>engine#death</c>）。</summary>
+    MemberAddress Trigger { get; }
 
-    /// <summary>死亡**处理端**（<c>Rewrite</c> 单改写位 / <c>Veto</c> 免死守卫 / <c>Apply</c> 死亡链）。
-    /// 插件/内置词条经此注册改写 handler（替换实现后仍可访问）。</summary>
-    Trigger<DeathHandleView> Handle { get; }
+    /// <summary>死亡**处理端**的成员地址（<c>engine#death.handle</c>；<c>Rewrite</c> 改写位／<c>Veto</c> 免死守卫／<c>Apply</c> 死亡链）。</summary>
+    MemberAddress Handle { get; }
+
+    /// <summary>两端登记项（触发端、处理端）。</summary>
+    IReadOnlyList<ActionTriggerEnd> Ends { get; }
 
     /// <summary>执行一次死亡：触发端 → 处理端 →（<c>Disposition</c> 非空时）入口分支执行处置。</summary>
     Task<ActionResult> ExecuteAsync(

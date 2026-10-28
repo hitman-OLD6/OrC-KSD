@@ -135,6 +135,43 @@ public sealed class CardLoadLedger
         }
     }
 
+    /// <summary>
+    /// 记录**同一批的修订**（回填：实例装配阶段才发现的问题，见
+    /// <see cref="CardLoadReport.WithComponentFailures"/>）。
+    /// <para>
+    /// 为什么不复用 <see cref="Record"/>：<see cref="Record"/> 是「**新批次**累加」——它 <c>BatchCount++</c>
+    /// 并把 <c>refCount</c> 加上去；修订用的是同一批的报告（引用计数没变），走 <see cref="Record"/> 会让
+    /// <c>refCount</c> 与 <c>totalRefs</c> 凭空翻倍，批次数也会被一个"没有发生的新批次"污染。
+    /// 故本方法只做两件事：替换「最近一批」、把台账里**命中的**资产更新为修订后的值（**不动** <c>refCount</c>）。
+    /// </para>
+    /// <para>顺序不变量：调用方须先 <see cref="Record"/> 同一批（正常装配链保证）。</para>
+    /// </summary>
+    /// <param name="report">修订后的报告（同 <c>batchId</c>）。</param>
+    /// <exception cref="ArgumentNullException">report 为 null。</exception>
+    public void RecordRevision(CardLoadReport report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+
+        lock (_gate)
+        {
+            foreach (var item in report.Items)
+            {
+                if (_items.TryGetValue(item.AssetGuid, out var existing))
+                {
+                    // 保留已累计的引用计数：修订只改判定结果（档位／字段问题），不重新计数。
+                    _items[item.AssetGuid] = item with { RefCount = existing.RefCount };
+                    continue;
+                }
+
+                // 正常流程不会走到这里（修订不新增条目）；真走了＝台账与报告不同源，按追加处理以免静默丢条目。
+                _items.Add(item.AssetGuid, item);
+                _order.Add(item.AssetGuid);
+            }
+
+            _latest = report; // 不 _batches++：这是同一批，不是又一整批装载
+        }
+    }
+
     /// <summary>取累积视图快照（不可变；与后续记录互不影响）。</summary>
     public CardLoadLedgerSnapshot Snapshot()
     {

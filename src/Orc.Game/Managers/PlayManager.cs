@@ -1,10 +1,13 @@
 using Orc.Cards;
 using Orc.Core;
+using Orc.Game.Model;
+using Orc.Core.Model;
 using Orc.Game.Actions;
 using Orc.Game.Board;
 using Orc.Game.Cards;
 using Orc.Game.Players;
 using Orc.Game.Targeting;
+using Orc.Game.Triggers;
 using Orc.Game.Triggers;
 
 namespace Orc.Game.Managers;
@@ -81,15 +84,18 @@ public sealed class PlayManager
         // S13 第 6 条：指令施放经**唯一动作入口**（IOrderAction 包装 OrderFlow）——不直调 flow。
         _orderAction = orderAction ?? ActionRuntime.ResolveOrder(engine);
 
-        // S13：游戏层经 band 向内核 OrderFlow 注入语义（每条引擎恰注册一次）：
-        // ① Resolve / priority 0＝打出宣告（card.played；OrderCard 守卫——内核测试的裸卡不受影响）；
-        //    宣告点在 Resolve 之首：反制 Stop 使整个 Resolve 不执行，被反制的指令因此**不发** card.played
-        //    （视为未成功打出）——现有指令卡效果＝被动效果 hook card.played，宣告点若早于反制会绕过反制。
-        // ② Finalize / priority 100＝打出收尾（扣费 → 离手；Stop 不阻止本段）。
-        engine.OrderFlow.Trigger.Register(
-            "打出宣告", HandleOrderAnnouncedAsync, OrderFlowBands.Resolve, 0);
-        engine.OrderFlow.FinalizeTrigger.Register(
-            "打出收尾", HandleOrderFinalizedAsync, OrderFlowBands.Finalize, 100);
+        // S13：游戏层向内核 OrderFlow 注入语义（每条引擎恰注册一次）。批次 7（§27）起不再是 band 注册，
+        // 而是两条**外来边**（挂到引擎成员上，位次＝声明序优先级）：
+        // ① order.cast / 优先级 100＝打出宣告（card.played；OrderCard 守卫——内核测试的裸卡不受影响）；
+        //    反制检查边优先级 0 ⇒ 恒在宣告点之前：反制 Stop 使宣告与结算都不执行，被反制的指令因此**不发**
+        //    card.played（视为未成功打出）。
+        // ② order.finalize / 优先级 100＝打出收尾（扣费 → 离手；Stop 不阻止本段，两阶段语义不变）。
+        engine.SubscribeMember(
+            OrderFlow.CastMember, "打出宣告", this, MemberEdges.For<OrderFlowView>(HandleOrderAnnouncedAsync),
+            priority: 100); // 旧 Resolve 段的默认事件优先级
+        engine.SubscribeMember(
+            OrderFlow.FinalizeMember, "打出收尾", this, MemberEdges.For<OrderFlowView>(HandleOrderFinalizedAsync),
+            priority: 100); // 旧 Finalize 段的游戏层优先级
     }
 
     // ---------- ① 单位预打出（开始→交互→确认/取消；一次调用链） ----------
@@ -129,25 +135,18 @@ public sealed class PlayManager
         // ① 开始：触发预打出触发器（验证＝指挥点检查；不足＝拒绝、不发起 targeter 请求、不发任何更新）。
         // 捕获箱与指令预打出同形：单位预打出也可声明选靶（指向型部署），handler 经 CaptureBox 提交/取消。
         var captureBox = new CardCaptureBox();
-        var preStream = await card.PrePlayTrigger.InvokeAsync(
-            _engine,
-            new Dictionary<string, object?>
-            {
-                [GameUpdates.PayloadCard] = card,
-                [GameUpdates.PayloadPlayer] = owner,
-                [nameof(CardTriggerView.CaptureBox)] = captureBox,
-                [nameof(CardTriggerView.SelectorSlots)] = card.HandOriginSlots,
-            },
-            ct);
+        var preCtx = new Context(new Dictionary<string, object?>
+        {
+            [GameUpdates.PayloadCard] = card,
+            [GameUpdates.PayloadPlayer] = owner,
+            [nameof(CardTriggerView.CaptureBox)] = captureBox,
+            [nameof(CardTriggerView.SelectorSlots)] = card.HandOriginSlots,
+        });
+        await card.InvokeMemberAsync(CardProcesses.PrePlay, preCtx, ct);
 
-        if (preStream.Outcome == ExecutionOutcome.ValidationRejected)
+        if (IsGuardRejected(preCtx))
         {
             return PlayResult.Failure(PlayFailureReason.PrePlayPointShortage);
-        }
-
-        if (preStream.Outcome != ExecutionOutcome.Normal)
-        {
-            return PlayResult.Failure(PlayFailureReason.PlayChainFault);
         }
 
         if (captureBox.IsPrePlayCancelled)
@@ -231,17 +230,16 @@ public sealed class PlayManager
             return PlayResult.Failure(PlayFailureReason.FormationGapUnavailable);
         await using var scope = _engine.BeginAction();
         if(!await KeywordProgramRuntime.PreparePlayAsync(card,ct))return PlayResult.Cancelled();
-        var stream = await card.PlayTrigger.InvokeAsync(_engine, new Dictionary<string, object?>
+        var playCtx = new Context(new Dictionary<string, object?>
         {
             [GameUpdates.PayloadCard] = card, [GameUpdates.PayloadPlayer] = owner,
             [nameof(CardTriggerView.Position)] = gap,
-        }, ct);
-        return stream.Outcome switch
-        {
-            ExecutionOutcome.Normal => PlayResult.Success(),
-            ExecutionOutcome.ValidationRejected => PlayResult.Failure(PlayFailureReason.PlayVerificationRejected),
-            _ => PlayResult.Failure(PlayFailureReason.PlayChainFault),
-        };
+        });
+        await card.InvokeMemberAsync(CardProcesses.Play, playCtx, ct);
+
+        return IsGuardRejected(playCtx)
+            ? PlayResult.Failure(PlayFailureReason.PlayVerificationRejected)
+            : PlayResult.Success();
     }
 
     /// <summary>Pure entry availability. Executes the same native validation judicators;
@@ -252,10 +250,10 @@ public sealed class PlayManager
         return card switch
         {
             UnitCard unit => !unit.TryGetData<UnitStateData>(out _)
-                && unit.PrePlayTrigger.EvaluateValidation(Array.Empty<Ref<Entity>>()).IsValid
+                && CardPlayGuards.EvaluateCost(unit).IsValid
                 && DeploymentLines(unit).Any(line=>line.GetInsertionGaps().Count>0),
-            OrderCard command => command.PrePlayTrigger.EvaluateValidation(Array.Empty<Ref<Entity>>()).IsValid,
-            CounterCard counter => counter.UseCounterTrigger.EvaluateValidation(Array.Empty<Ref<Entity>>()).IsValid,
+            OrderCard command => CardPlayGuards.EvaluateCost(command).IsValid,
+            CounterCard counter => CardPlayGuards.EvaluateCounterUse(counter).IsValid,
             _ => false,
         };
     }
@@ -335,21 +333,15 @@ public sealed class PlayManager
         // 动作作用域（UI 消费桥接）：本动作产生的事件聚合为一段。
         await using var _actionScope = _engine.BeginAction();
 
-        var stream = await card.JoinTrigger.InvokeAsync(
-            _engine,
-            new Dictionary<string, object?>
-            {
-                [GameUpdates.PayloadCard] = card,
-                [GameUpdates.PayloadPlayer] = card.Owner,
-                [GameUpdates.PayloadPosition] = target,
-            },
-            ct);
-
-        return stream.Outcome switch
+        var joinCtx = new Context(new Dictionary<string, object?>
         {
-            ExecutionOutcome.Normal => PlayResult.Success(),
-            _ => PlayResult.Failure(PlayFailureReason.PlayChainFault),
-        };
+            [GameUpdates.PayloadCard] = card,
+            [GameUpdates.PayloadPlayer] = card.Owner,
+            [GameUpdates.PayloadPosition] = target,
+        });
+        await card.InvokeMemberAsync(CardProcesses.Join, joinCtx, ct);
+
+        return PlayResult.Success();
     }
 
     // ---------- ④ 指令（统一两段式「预行为」：预打出→打出；确认自动衔接） ----------
@@ -404,25 +396,18 @@ public sealed class PlayManager
 
         // ① 预打出段：验证＋handler 捕获集（默认无 handler＝无交互、零更新）。
         var captureBox = new CardCaptureBox();
-        var preStream = await card.PrePlayTrigger.InvokeAsync(
-            _engine,
-            new Dictionary<string, object?>
-            {
-                [GameUpdates.PayloadCard] = card,
-                [GameUpdates.PayloadPlayer] = owner,
-                [nameof(CardTriggerView.CaptureBox)] = captureBox,
-                [nameof(CardTriggerView.SelectorSlots)] = card.HandOriginSlots,
-            },
-            ct);
+        var preCtx = new Context(new Dictionary<string, object?>
+        {
+            [GameUpdates.PayloadCard] = card,
+            [GameUpdates.PayloadPlayer] = owner,
+            [nameof(CardTriggerView.CaptureBox)] = captureBox,
+            [nameof(CardTriggerView.SelectorSlots)] = card.HandOriginSlots,
+        });
+        await card.InvokeMemberAsync(CardProcesses.PrePlay, preCtx, ct);
 
-        if (preStream.Outcome == ExecutionOutcome.ValidationRejected)
+        if (IsGuardRejected(preCtx))
         {
             return PlayResult.Failure(PlayFailureReason.PrePlayPointShortage);
-        }
-
-        if (preStream.Outcome != ExecutionOutcome.Normal)
-        {
-            return PlayResult.Failure(PlayFailureReason.PlayChainFault);
         }
 
         if (captureBox.IsPrePlayCancelled)
@@ -434,23 +419,16 @@ public sealed class PlayManager
 
         // ② 打出段：复验（纯验证触发器，无链事件）→ 指令施放动作（唯一动作入口，经 OrderFlow）。
         if (!await KeywordProgramRuntime.PreparePlayAsync(card, ct)) return PlayResult.Cancelled();
-        var playStream = await card.PlayTrigger.InvokeAsync(
-            _engine,
-            new Dictionary<string, object?>
-            {
-                [GameUpdates.PayloadCard] = card,
-                [GameUpdates.PayloadPlayer] = owner,
-            },
-            ct);
+        var playCtx = new Context(new Dictionary<string, object?>
+        {
+            [GameUpdates.PayloadCard] = card,
+            [GameUpdates.PayloadPlayer] = owner,
+        });
+        await card.InvokeMemberAsync(CardProcesses.Play, playCtx, ct);
 
-        if (playStream.Outcome == ExecutionOutcome.ValidationRejected)
+        if (IsGuardRejected(playCtx))
         {
             return PlayResult.Failure(PlayFailureReason.PlayVerificationRejected);
-        }
-
-        if (playStream.Outcome != ExecutionOutcome.Normal)
-        {
-            return PlayResult.Failure(PlayFailureReason.PlayChainFault);
         }
 
         var result = await _orderAction
@@ -585,7 +563,7 @@ public sealed class PlayManager
 
         // 前置判定（与验证同源；J2：经「反制使用验证判定器」执行——与触发器验证同一绑定判定器，
         // moding 改写两侧同步生效；用于失败原因的可辨识映射——按取数语义消费拒绝类别）。
-        var verdict = card.UseCounterTrigger.EvaluateValidation(Array.Empty<Ref<Entity>>());
+        var verdict = CardPlayGuards.EvaluateCounterUse(card);
         if (!verdict.IsValid)
         {
             return PlayResult.Failure(verdict.RejectionReason switch
@@ -597,22 +575,21 @@ public sealed class PlayManager
             });
         }
 
-        var stream = await card.UseCounterTrigger.InvokeAsync(
-            _engine,
-            new Dictionary<string, object?>
-            {
-                [GameUpdates.PayloadCard] = card,
-                [GameUpdates.PayloadPlayer] = owner,
-            },
-            ct);
-
-        return stream.Outcome switch
+        var useCtx = new Context(new Dictionary<string, object?>
         {
-            ExecutionOutcome.Normal => PlayResult.Success(),
-            ExecutionOutcome.ValidationRejected => PlayResult.Failure(PlayFailureReason.PlayChainFault), // 防御（同源判定已前置）
-            _ => PlayResult.Failure(PlayFailureReason.PlayChainFault),
-        };
+            [GameUpdates.PayloadCard] = card,
+            [GameUpdates.PayloadPlayer] = owner,
+        });
+        await card.InvokeMemberAsync(CardProcesses.UseCounter, useCtx, ct);
+
+        return IsGuardRejected(useCtx)
+            ? PlayResult.Failure(PlayFailureReason.PlayChainFault) // 防御（同源判定已前置）
+            : PlayResult.Success();
     }
+
+    /// <summary>本次成员执行是否被守卫边拒绝（费用／反制使用检查）。</summary>
+    private static bool IsGuardRejected(Context ctx)
+        => ctx.TryGet(MemberGuardKeys.Rejected, out var rejected) && rejected is true;
 
     /// <summary>归属要求（装配性错误：未加载卡不可驱动打出链——fail-fast）。</summary>
     private static Player RequireOwner(CardBase card)

@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 4,
+  "asset": {
+    "kind": "component",
+    "id": "keyword.mobilize.loss",
+    "requires-host": "any",
+    "active-when": "loaded",
+    "one-shot": false,
+    "private-fields": [],
+    "members": [
+      {
+        "name": "onCardDamaged",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Card",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Amount",
+              "type": "number",
+              "writable": false,
+              "required": false
+            }
+          ]
+        },
+        "handler": {
+          "id": "keyword.mobilize.loss#onCardDamaged",
+          "entry": "HandleAsync",
+          "script": "Func<dynamic, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Game.Cards.CardBase host) { return; }\n    if (view.Card is not Orc.Cards.Card damaged || !object.ReferenceEquals(damaged, host)) { return; }\n\n    await host.Keywords.RevokeAsync(Orc.Game.Cards.KeywordIds.Mobilize);\n};\n"
+        }
+      }
+    ],
+    "mounts": [
+      {
+        "target": "engine#card.damaged",
+        "member": "onCardDamaged"
+      }
+    ],
+    "wraps": []
+  }
+}

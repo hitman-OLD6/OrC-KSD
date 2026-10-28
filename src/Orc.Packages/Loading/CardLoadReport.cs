@@ -59,6 +59,18 @@ public sealed record CardLoadSlot(
 public sealed record CardLoadSummary(int Total, int Valid, int Warning, int Invalid, int TotalRefs);
 
 /// <summary>
+/// 一条**实例装配阶段的组件失败**（回填入参；**不是**报告模型的一部分）：
+/// 落进报告后只以 <c>items[].fields</c>／<c>slots[].fieldPaths</c> 表达，不新增键。
+/// </summary>
+/// <param name="AppId">应用层 ID（GUID 未知时的命中键：按卡位反查资产）。</param>
+/// <param name="AssetGuid">资产版本 GUID（已知时优先按它命中条目）。</param>
+/// <param name="Issues">要追加进条目的字段问题（按 <c>(path, reason)</c> 去重）。</param>
+public sealed record CardComponentFailure(
+    string? AppId,
+    Guid? AssetGuid,
+    IReadOnlyList<CardFieldIssue> Issues);
+
+/// <summary>
 /// **卡牌加载报告**（I10 冻结 schema；键名与取值**不得改名**）：
 /// <code>
 /// CardLoadReport {
@@ -74,7 +86,7 @@ public sealed record CardLoadSummary(int Total, int Valid, int Warning, int Inva
 /// 恒等约定：
 /// <list type="bullet">
 ///   <item><c>batchId</c> 只作「同一次加载的多条日志」关联用，**不承载时间戳语义**（会话内单调序，测试可稳定断言）。</item>
-///   <item><c>reason</c> 只取 <see cref="CardIssueReason"/> 的十个 token（禁止自由文本）。</item>
+///   <item><c>reason</c> 只取 <see cref="CardIssueReason"/> 所列 token（禁止自由文本）。</item>
 ///   <item><c>tier</c> 只取 <c>valid</c>／<c>warning</c>／<c>invalid</c>。</item>
 ///   <item>报告**不落盘**（R5/D43）：只经返回值与工具返回。</item>
 ///   <item>与静态预检 <c>CardDistributionValidationReport</c> **不合并、不互转**（运行期装配 vs 静态预检，语义不同）。</item>
@@ -124,6 +136,157 @@ public sealed record CardLoadReport
 
     /// <summary>汇总计数。</summary>
     public CardLoadSummary Summary { get; }
+
+    /// <summary>
+    /// 回填实例装配阶段的组件错误：命中的资产条目追加 issue 并降为 <c>invalid</c>，对应卡位降为 <c>invalid</c>。
+    /// <para>
+    /// **不新增/不删除条目**（冻结 schema 的条目集合由装载批次决定）；卡位路径恒追加 <c>components</c>。
+    /// 命中规则：<see cref="CardComponentFailure.AssetGuid"/> 非空＝按 GUID 命中条目；否则按
+    /// <see cref="CardComponentFailure.AppId"/> 命中 <c>slots</c>（并取该 slot 的 <c>assetGuid</c> 反查条目）；
+    /// 两边都命中不了＝只改卡位。同一资产的多条失败合并进同一条目（<c>(path, reason)</c> 去重）。
+    /// </para>
+    /// <para><see cref="Summary"/> 按**新 items** 重算（<c>totalRefs</c>＝Σ refCount）——原语义不变。</para>
+    /// </summary>
+    /// <param name="failures">失败清单（空＝原样返回本实例）。</param>
+    /// <exception cref="ArgumentNullException">failures 为 null 或含 null 项。</exception>
+    public CardLoadReport WithComponentFailures(IReadOnlyList<CardComponentFailure> failures)
+    {
+        ArgumentNullException.ThrowIfNull(failures);
+        if (failures.Count == 0)
+        {
+            return this;
+        }
+
+        // ① 解析命中目标：GUID 优先；否则 AppId → 条目 → GUID；再否则 AppId → 卡位的 assetGuid（可为 null＝只改卡位）。
+        var targets = new List<FailureTarget>(failures.Count);
+        foreach (var failure in failures)
+        {
+            ArgumentNullException.ThrowIfNull(failure);
+            var issues = failure.Issues ?? Array.Empty<CardFieldIssue>();
+            var guid = failure.AssetGuid ?? ResolveGuidByAppId(failure.AppId);
+            targets.Add(new FailureTarget(guid, failure.AppId, issues));
+        }
+
+        var itemIssues = new Dictionary<Guid, List<CardFieldIssue>>();
+        var appIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var target in targets)
+        {
+            if (target.Guid is { } guid)
+            {
+                if (!itemIssues.TryGetValue(guid, out var bucket))
+                {
+                    bucket = new List<CardFieldIssue>();
+                    itemIssues.Add(guid, bucket);
+                }
+
+                bucket.AddRange(target.Issues);
+            }
+
+            if (!string.IsNullOrWhiteSpace(target.AppId))
+            {
+                appIds.Add(target.AppId);
+            }
+        }
+
+        // ② 条目：追加 issues（(path, reason) 去重）＋ 档位降 invalid（顺序不变）。
+        var changed = false;
+        var items = new CardLoadReportItem[Items.Count];
+        for (var i = 0; i < Items.Count; i++)
+        {
+            var item = Items[i];
+            if (!itemIssues.TryGetValue(item.AssetGuid, out var extra))
+            {
+                items[i] = item;
+                continue;
+            }
+
+            var fields = item.Fields.ToList();
+            foreach (var issue in extra)
+            {
+                if (!fields.Any(existing => string.Equals(existing.Path, issue.Path, StringComparison.Ordinal)
+                    && existing.Reason == issue.Reason))
+                {
+                    fields.Add(issue);
+                }
+            }
+
+            items[i] = item with { Tier = CardLoadTier.Invalid, Fields = fields };
+            changed = true;
+        }
+
+        // ③ 卡位：同 GUID 的卡位（该资产的所有牌堆位置）与 AppId 直接命中的卡位一并降 invalid。
+        var slots = new CardLoadSlot[Slots.Count];
+        for (var i = 0; i < Slots.Count; i++)
+        {
+            var slot = Slots[i];
+            var hit = (slot.AssetGuid is { } slotGuid && itemIssues.ContainsKey(slotGuid))
+                || (!string.IsNullOrWhiteSpace(slot.AppId) && appIds.Contains(slot.AppId));
+            if (!hit)
+            {
+                slots[i] = slot;
+                continue;
+            }
+
+            var paths = slot.FieldPaths.ToList();
+            if (!paths.Contains(ComponentFieldPath, StringComparer.Ordinal))
+            {
+                paths.Add(ComponentFieldPath);
+            }
+
+            slots[i] = slot with { Tier = CardLoadTier.Invalid, FieldPaths = paths };
+            changed = true;
+        }
+
+        if (!changed)
+        {
+            return this; // 一条都没命中：报告不变（不制造无意义的修订）
+        }
+
+        var summary = new CardLoadSummary(
+            items.Length,
+            items.Count(item => item.Tier == CardLoadTier.Valid),
+            items.Count(item => item.Tier == CardLoadTier.Warning),
+            items.Count(item => item.Tier == CardLoadTier.Invalid),
+            items.Sum(item => item.RefCount));
+
+        return new CardLoadReport(BatchId, items, slots, summary);
+    }
+
+    /// <summary>卡位上表征"组件装配段问题"的字段路径（与 <c>items[].fields[].path</c> 的资产字段路径不同层）。</summary>
+    private const string ComponentFieldPath = "components";
+
+    /// <summary>应用层 ID → 资产 GUID（先按条目、再按卡位的已解析资产；解析不到＝null）。</summary>
+    private Guid? ResolveGuidByAppId(string? appId)
+    {
+        if (string.IsNullOrWhiteSpace(appId))
+        {
+            return null;
+        }
+
+        foreach (var item in Items)
+        {
+            if (string.Equals(item.AppId, appId, StringComparison.Ordinal))
+            {
+                return item.AssetGuid;
+            }
+        }
+
+        foreach (var slot in Slots)
+        {
+            if (string.Equals(slot.AppId, appId, StringComparison.Ordinal) && slot.AssetGuid is { } guid)
+            {
+                return guid;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>一条失败的命中目标（解析后的 GUID ＋ 原始 AppId ＋ 待追加问题）。</summary>
+    private readonly record struct FailureTarget(
+        Guid? Guid,
+        string? AppId,
+        IReadOnlyList<CardFieldIssue> Issues);
 
     /// <summary>序列化为报告 JSON 文本（固定键序、2 空格缩进、LF、尾随换行；**不写盘**）。</summary>
     public string ToJson() => CardLoadReportJson.Serialize(this);

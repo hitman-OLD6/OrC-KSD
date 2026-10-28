@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Actions;
@@ -112,48 +112,7 @@ public class P1ActionContractTests
         }
     }
 
-    [Fact]
-    public void Damage_Action_Registers_Commit_Once_Per_Trigger_End()
-    {
-        var action = new Orc.Foundation.Actions.DamageAction(new LogicEngine(), new FixedDamageServices());
 
-        foreach (var trigger in new[] { action.CombatDamage, action.EffectDamage, action.BattleDamage })
-        {
-            var events = trigger.Events;
-            Assert.Single(events, e => e.Name == "转发到处理端" && e.BandValue == (int)ActionTriggerBands.Commit);
-            Assert.DoesNotContain(events, e => e.BandValue == (int)ActionTriggerBands.Announce);
-            Assert.DoesNotContain(events, e => e.BandValue == (int)ActionTriggerBands.CounterGuard);
-            Assert.DoesNotContain(events, e => e.BandValue == (int)ActionTriggerBands.Counter);
-            Assert.DoesNotContain(events, e => e.BandValue == (int)ActionTriggerBands.Adjust);
-        }
-
-        var handle = action.Apply.Events;
-        Assert.Single(handle);
-        Assert.Equal("扣除数值", handle[0].Name);
-        Assert.Equal((int)ActionHandleBands.Apply, handle[0].BandValue);
-    }
-
-    [Fact]
-    public async Task Damage_Apply_Veto_Stops_Apply_And_Leaves_Zero()
-    {
-        var match = CommandTestKit.CreateCommandMatch();
-        await match.Initialize();
-        var target = await CommandTestKit.PrepareOnSupportAsync(match, match.Players[0], CommandTestKit.BeastId, 0);
-        var dealer = await CommandTestKit.PrepareOnSupportAsync(match, match.Players[0], CommandTestKit.WeakId, 1);
-        var defenseBefore = target.Modifiers.GetEffectiveValue(CardStatFields.Defense);
-
-        match.CommandManager.DamagePipeline.Apply.Register(
-            "否决", (_, ctx, _) =>
-            {
-                ctx.Stop(); // 「否决是终局」：本级后续（含 Apply）不执行
-                return Task.CompletedTask;
-            }, ActionHandleBands.Veto);
-
-        var applied = await match.CommandManager.DamagePipeline.CombatAsync(dealer, target, 3);
-
-        Assert.False(applied);
-        Assert.Equal(defenseBefore, target.Modifiers.GetEffectiveValue(CardStatFields.Defense));
-    }
 
     [Fact]
     public void Action_Service_Surfaces_Have_Unique_Method_Names_And_Internal_Implementations()

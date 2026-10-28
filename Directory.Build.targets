@@ -1,0 +1,31 @@
+<Project>
+
+  <!--
+    槽位守护（D-z）
+
+    ArtifactsPath 只允许等于仓库根的 artifacts/slot。任何把它改到别处
+    （尤其 src/** 下的默认 bin/，那里被常驻 Manager 进程锁着）的用法都直接
+    构建失败，而不是静默生成第二份产物。
+  -->
+  <PropertyGroup>
+    <_OrcExpectedSlot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)artifacts/slot'))</_OrcExpectedSlot>
+    <_OrcActualSlot>$([System.IO.Path]::GetFullPath('$(ArtifactsPath)'))</_OrcActualSlot>
+  </PropertyGroup>
+
+  <Target Name="Guard-ArtifactSlot" BeforeTargets="BeforeBuild;_CheckForInvalidConfigurationAndPlatform">
+    <Error Condition="'$(_OrcActualSlot)' != '$(_OrcExpectedSlot)'"
+           Code="ORC0001"
+           Text="构建输出槽位被改到了 '$(ArtifactsPath)'，本仓库只允许 '$(MSBuildThisFileDirectory)artifacts/slot'。请去掉 artifacts-path 参数或 ArtifactsPath 覆盖：零参数即命中槽位。" />
+  </Target>
+
+  <!--
+    测试宿主的 xunit.runner.json 复制
+
+    8 个测试工程各有一份 xunit.runner.json（并行度按宿主资源画像分档，见 D-8）。
+    统一在这里声明复制，避免每个 csproj 重复一遍，也避免新加测试工程时漏掉。
+  -->
+  <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\xunit.runner.json')">
+    <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

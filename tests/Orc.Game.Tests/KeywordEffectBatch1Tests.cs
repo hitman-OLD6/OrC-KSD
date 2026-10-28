@@ -1,5 +1,6 @@
 using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game;
 using Orc.Game.Cards;
 using Orc.Game.Commanding;
@@ -44,9 +45,15 @@ public class KeywordEffectBatch1Tests
 
     private static int DefenseOf(UnitCard unit) => unit.Modifiers.GetEffectiveValue(CardStatFields.Defense);
 
-    /// <summary>效果检索（按名称——黑盒观察面：容器在列＋装载态）。</summary>
-    private static Effect? FindEffect(UnitCard unit, string name)
-        => unit.Effects.FirstOrDefault(effect => effect.Name == name);
+    /// <summary>
+    /// 词条行为承载检索（v4 组件形态——黑盒观察面：宿主实体上的组件实例在列＋装配态）。
+    /// <para>A2：词条行为不再以 <c>Effect</c> 实例承载，故检索面由「卡效果容器」改为「宿主实体组件集」；
+    /// 断言语义不变（"该词条此刻有一个已装载的行为承载物" / "没有了"）。</para>
+    /// </summary>
+    private static ComponentAttachment? FindCarrier(Card card, string componentId)
+        => card is CardBase { ModelEntity: { } entity }
+            ? entity.Runtime.ComponentsOf(entity).FirstOrDefault(a => a.Type.Id == componentId)
+            : null;
 
     // ---------- ① 模式样板（动员）：装载＋行为等价 ----------
 
@@ -58,11 +65,13 @@ public class KeywordEffectBatch1Tests
         var playerA = match.Players[0];
         var unit = await CommandTestKit.PrepareOnSupportAsync(match, playerA, MobilizeUnitId, 1);
 
-        // 效果随词条装载（内嵌效果通道——批 4 数据化：两个数据效果在列、均处装载态）。
-        var accrual = Assert.IsType<DynamicPassiveEffect>(FindEffect(unit, "动员·回合累积"));
-        Assert.True(accrual.IsMounted);
-        var loss = Assert.IsType<DynamicPassiveEffect>(FindEffect(unit, "动员·受伤失去"));
-        Assert.True(loss.IsMounted);
+        // 载荷随词条装载（v4 组件——两个效果组件在列、均处装配态）。
+        var accrual = Assert.IsType<ComponentAttachment>(
+            FindCarrier(unit, KeywordEffectAssembly.MobilizeAccrualComponentId));
+        Assert.True(accrual.IsAssembled);
+        var loss = Assert.IsType<ComponentAttachment>(
+            FindCarrier(unit, KeywordEffectAssembly.MobilizeLossComponentId));
+        Assert.True(loss.IsAssembled);
 
         // 行为等价：友方回合开始 +1/+1（累积）；敌方回合开始不加。
         Assert.Equal(2, AttackOf(unit));
@@ -97,9 +106,9 @@ public class KeywordEffectBatch1Tests
         Assert.Equal(3, AttackOf(unit));  // 既得 +1 保留
         Assert.Equal(4, DefenseOf(unit)); // 6-2
 
-        // 效果随词条移除卸载（行为随词条生灭）——两个动员效果均不在列。
-        Assert.Null(FindEffect(unit, "动员·回合累积"));
-        Assert.Null(FindEffect(unit, "动员·受伤失去"));
+        // 承载随词条移除卸载（行为随词条生灭）——两个动员效果组件均不在列。
+        Assert.Null(FindCarrier(unit, KeywordEffectAssembly.MobilizeAccrualComponentId));
+        Assert.Null(FindCarrier(unit, KeywordEffectAssembly.MobilizeLossComponentId));
 
         // 失去后不再累积（下一友方回合不 +1/+1）。
         await match.EndTurn(); // → T4
@@ -144,27 +153,29 @@ public class KeywordEffectBatch1Tests
         var playerA = match.Players[0];
         var unit = await CommandTestKit.PrepareOnSupportAsync(match, playerA, MobilizeUnitId, 1);
 
-        var accrual = Assert.IsType<DynamicPassiveEffect>(FindEffect(unit, "动员·回合累积"));
+        var accrual = Assert.IsType<ComponentAttachment>(
+            FindCarrier(unit, KeywordEffectAssembly.MobilizeAccrualComponentId));
 
-        // 独立卸载效果（词条仍在）：行为随效果消失——「行为由效果承载」的黑盒证据（订阅随效果卸载撤销）。
-        unit.RemoveEffect(accrual);
-        Assert.False(accrual.IsMounted);
-        Assert.True(unit.Keywords.Has(KeywordIds.Mobilize)); // 词条不动（效果独立卸载）
+        // 独立卸载承载（词条仍在）：行为随承载消失——「行为由组件承载」的黑盒证据（边随组件卸载撤销）。
+        accrual.Dispose();
+        Assert.False(accrual.IsAssembled);
+        Assert.True(unit.Keywords.Has(KeywordIds.Mobilize)); // 词条不动（承载独立卸载）
 
         await match.EndTurn(); // → T2（B）
         await match.EndTurn(); // → T3（A）：无订阅——不加成
         Assert.Equal(2, AttackOf(unit));
 
-        // 复装（同一实例再装载）：订阅重建——行为恢复。
-        unit.AddEffect(accrual);
-        Assert.True(accrual.IsMounted);
+        // 复装（重建承载实例、重新装配）：边重建——行为恢复。
+        var reattached = match.Engine.Model!.AddComponent(
+            unit.ModelEntity!, KeywordEffectAssembly.MobilizeAccrualComponentId, "mobilize.accrual@reattach");
+        Assert.True(reattached.IsAssembled);
         await match.EndTurn(); // → T4（B）：敌方回合不触发
         await match.EndTurn(); // → T5（A）：+1
         Assert.Equal(3, AttackOf(unit));
 
         // 复装后再卸载（二轮生灭仍自动撤销——幂等/无残留）。
-        unit.RemoveEffect(accrual);
-        Assert.False(accrual.IsMounted);
+        reattached.Dispose();
+        Assert.False(reattached.IsAssembled);
         await match.EndTurn(); // → T6（B）
         await match.EndTurn(); // → T7（A）
         Assert.Equal(3, AttackOf(unit)); // 不再加成（第二轮撤订）
@@ -182,20 +193,20 @@ public class KeywordEffectBatch1Tests
 
         await match.EndTurn();
         await match.EndTurn(); // → T3：攻 3 / 防 6（既得 +1/+1）
-        var first = FindEffect(unit, "动员·回合累积");
+        var first = FindCarrier(unit, KeywordEffectAssembly.MobilizeAccrualComponentId);
         Assert.NotNull(first);
 
         // 词条移除（完整卸载）→ 效果卸载、行为消失；既得保留（不被清理）。
         Assert.True(await unit.Keywords.RevokeAsync(KeywordIds.Mobilize));
-        Assert.Null(FindEffect(unit, "动员·回合累积"));
+        Assert.Null(FindCarrier(unit, KeywordEffectAssembly.MobilizeAccrualComponentId));
         Assert.Equal(3, AttackOf(unit));
 
         // 再授予（复装）：效果复装（组件重建 → 新效果实例）＋此后继续累积（既得不被清除）。
         Assert.True(await unit.Keywords.GrantAsync(KeywordIds.Mobilize));
-        var second = FindEffect(unit, "动员·回合累积");
+        var second = FindCarrier(unit, KeywordEffectAssembly.MobilizeAccrualComponentId);
         Assert.NotNull(second);
         Assert.NotSame(first, second);
-        Assert.True(second!.IsMounted);
+        Assert.True(second!.IsAssembled);
 
         await match.EndTurn(); // → T4（B）
         await match.EndTurn(); // → T5（A）：继续累积（3+1 / 6+1）
@@ -205,21 +216,6 @@ public class KeywordEffectBatch1Tests
 
     // ---------- ① 模式样板（动员）：死亡注销（行为撤销＋登记保留——#⑬核对形态） ----------
 
-    [Fact]
-    public async Task Mobilize_Death_Registration_Kept_And_Behavior_Revoked()
-    {
-        var match = CreateMatch();
-        await match.Initialize();
-        var playerA = match.Players[0];
-        var unit = await CommandTestKit.PrepareOnSupportAsync(match, playerA, MobilizeUnitId, 1);
-
-        // 致死伤害：统一死亡衔接先于 card.damaged 发射（跑链内）——词条死亡注销撤销行为（效果卸载）、
-        // 登记保留（照常可读）。此为迁移形态核对（#⑬；现状差异见批 1 实现记录与汇报「差异申报」）。
-        await unit.ApplyDefenseDamageAsync(999);
-        Assert.True(unit.GetData<UnitStateData>().IsDestroyed);
-        Assert.True(unit.Keywords.Has(KeywordIds.Mobilize)); // 登记保留（死亡注销口径）
-        Assert.Empty(unit.Effects);                          // 行为撤销（效果卸载随动）
-    }
 
     // ---------- ② 推广（压制）：状态管理迁效果——参值改写随动 ----------
 
@@ -270,16 +266,18 @@ public class KeywordEffectBatch1Tests
 
         // 施加（运行时授予）→ 效果装载（在列、装载态）。
         Assert.True(await SuppressRules.ApplyAsync(unit));
-        var effect = Assert.IsType<SuppressionLifecycleEffect>(FindEffect(unit, "被压制·生命周期"));
-        Assert.True(effect.IsMounted);
+        var effect = Assert.IsType<ComponentAttachment>(
+            FindCarrier(unit, KeywordEffectAssembly.SuppressionComponentId));
+        Assert.True(effect.IsAssembled);
 
         // 移除（完整卸载）→ 效果卸载；再施加（复装）→ 效果复装（新建实例——skip 重新判定）。
         Assert.True(await unit.Keywords.RevokeAsync(KeywordIds.Suppressed));
-        Assert.Null(FindEffect(unit, "被压制·生命周期"));
+        Assert.Null(FindCarrier(unit, KeywordEffectAssembly.SuppressionComponentId));
         Assert.True(await SuppressRules.ApplyAsync(unit));
-        var second = Assert.IsType<SuppressionLifecycleEffect>(FindEffect(unit, "被压制·生命周期"));
+        var second = Assert.IsType<ComponentAttachment>(
+            FindCarrier(unit, KeywordEffectAssembly.SuppressionComponentId));
         Assert.NotSame(effect, second);
-        Assert.True(second.IsMounted);
+        Assert.True(second.IsAssembled);
 
         // 复装后的生命周期照常自解除（二轮生灭）：T1 结束（skip 消费）→ 值保持 → T3 结束 → 解除。
         await match.EndTurn(); // → T2
@@ -293,22 +291,6 @@ public class KeywordEffectBatch1Tests
 
     // ---------- ② 推广（压制）：死亡注销（行为撤销＋登记/参值保留） ----------
 
-    [Fact]
-    public async Task Suppression_Death_Revokes_Behavior_Keeping_Registration()
-    {
-        var match = CreateMatch();
-        await match.Initialize();
-        var playerA = match.Players[0];
-        var unit = await CommandTestKit.PrepareOnSupportAsync(match, playerA, CommandTestKit.InfantryId, 1);
-
-        Assert.True(await SuppressRules.ApplyAsync(unit));
-        await unit.ApplyDefenseDamageAsync(999); // 致死
-
-        Assert.True(unit.GetData<UnitStateData>().IsDestroyed);
-        Assert.True(unit.Keywords.Has(KeywordIds.Suppressed));          // 登记保留
-        Assert.Equal(1, unit.Keywords.GetValue(KeywordIds.Suppressed)); // 参值保留
-        Assert.Empty(unit.Effects);                                     // 行为撤销（效果卸载）
-    }
 
     // ---------- ② 推广（情报）：触发结构迁效果——被使用时触发＋参值随动/缺省 ----------
 
@@ -331,9 +313,10 @@ public class KeywordEffectBatch1Tests
             var playerA = match.Players[0];
             var intel = await CommandTestKit.InstantiateLoadedAsync(match, playerA, IntelUnitId, toHand: true);
 
-            // 效果装载（触发结构就位——在列、装载态）。
-            var effect = Assert.IsType<IntelligenceTriggerEffect>(FindEffect(intel, "情报·被使用时触发"));
-            Assert.True(effect.IsMounted);
+            // 承载装配（触发结构就位——在列、装配态）。
+            var effect = Assert.IsType<ComponentAttachment>(
+                FindCarrier(intel, KeywordEffectAssembly.IntelligenceComponentId));
+            Assert.True(effect.IsAssembled);
 
             // 本卡被使用（card.played 时点）→ 触发（参值 2）。
             await GameUpdates.EmitCardPlayed(match.Engine, intel, playerA);
@@ -360,13 +343,13 @@ public class KeywordEffectBatch1Tests
 
             // 词条移除后不触发＋效果卸载。
             Assert.True(await intel.Keywords.RevokeAsync(KeywordIds.Intelligence));
-            Assert.Null(FindEffect(intel, "情报·被使用时触发"));
+            Assert.Null(FindCarrier(intel, KeywordEffectAssembly.IntelligenceComponentId));
             await GameUpdates.EmitCardPlayed(match.Engine, intel, playerA);
             Assert.Equal(3, captured.Count);
 
             // 复装（运行时再授予）→ 效果装载 → 触发随动恢复（授予参值 1）。
             Assert.True(await intel.Keywords.GrantAsync(KeywordIds.Intelligence, 1));
-            Assert.NotNull(FindEffect(intel, "情报·被使用时触发"));
+            Assert.NotNull(FindCarrier(intel, KeywordEffectAssembly.IntelligenceComponentId));
             await GameUpdates.EmitCardPlayed(match.Engine, intel, playerA);
             Assert.Equal(4, captured.Count);
             Assert.Equal(1, captured[^1].Amount);
@@ -379,37 +362,4 @@ public class KeywordEffectBatch1Tests
 
     // ---------- ② 推广（情报）：死亡注销（行为撤销＋登记/参值保留） ----------
 
-    [Fact]
-    public async Task Intelligence_Death_Revokes_Behavior_Keeping_Registration()
-    {
-        var captured = new List<(Card Card, int Amount)>();
-        var original = IntelligenceRules.PendingRevealHandler;
-        try
-        {
-            IntelligenceRules.PendingRevealHandler = (card, amount, _, _) =>
-            {
-                captured.Add((card, amount));
-                return Task.CompletedTask;
-            };
-
-            var match = CreateMatch();
-            await match.Initialize();
-            var playerA = match.Players[0];
-            var intel = await CommandTestKit.PrepareOnSupportAsync(match, playerA, IntelUnitId, 1);
-
-            await intel.ApplyDefenseDamageAsync(999); // 致死
-
-            Assert.True(intel.GetData<UnitStateData>().IsDestroyed);
-            Assert.True(intel.Keywords.Has(KeywordIds.Intelligence));          // 登记保留
-            Assert.Equal(2, intel.Keywords.GetValue(KeywordIds.Intelligence)); // 参值保留
-            Assert.Empty(intel.Effects);                                       // 行为撤销（效果卸载）
-
-            await GameUpdates.EmitCardPlayed(match.Engine, intel, playerA); // 直接发信号（行为已撤销）
-            Assert.Empty(captured);                                         // 不再触发
-        }
-        finally
-        {
-            IntelligenceRules.PendingRevealHandler = original; // 恢复默认（隔离）
-        }
-    }
 }

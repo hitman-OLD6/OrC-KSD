@@ -4,7 +4,6 @@ using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Cards;
 using Orc.Game.Cards.Loading;
-using Orc.Game.Triggers;
 
 namespace Orc.Packages.Loading;
 
@@ -24,8 +23,8 @@ namespace Orc.Packages.Loading;
 /// <list type="bullet">
 ///   <item>进程级信任边界＝<see cref="CardLoaderRegistry"/>（挂在 <see cref="AssetRegistry.CardLoaders"/> 子面）：
 ///     卡包元数据的 <c>loader</c> 只能引用此处已注册的名字；未注册／卡包自带 ⇒ **结构性拒绝**（整批不装载）。</item>
-///   <item>对局级审计面＝<see cref="TriggerRegistry"/>(<see cref="TriggerLayer.LowLevel"/>)：本局实际使用的加载器实例
-///     经 <see cref="RegisterIn"/> 登记，**仅记账**、不参与挂载（<c>TriggerRegistry</c> 注册与挂载本就解耦）。</item>
+///   <item>对局级审计面（批次 7／§27 起）：不存在第二本登记簿——加载器实例由卡装载链本身持有，
+///     审查面读的是引擎成员边图（<c>AuditGraph</c>）。</item>
 /// </list>
 /// </para>
 /// <para>
@@ -33,13 +32,16 @@ namespace Orc.Packages.Loading;
 /// <see cref="Revert"/> 摘除；失败＝抛异常（由 <c>AssetLoader</c> 回滚，全有或全无）。
 /// </para>
 /// </summary>
-public sealed class CardLoaderTrigger : Trigger<CardLoadBatchView>, IAssetLoadSink
+public sealed class CardLoaderTrigger : IAssetLoadSink
 {
     /// <summary>内置加载器名（插件注册面的默认声明名）。</summary>
     public const string DefaultLoaderName = "builtin.card";
 
-    /// <summary>批次事件名（触发器内部单事件——经 <see cref="LoadBatchAsync"/> 直调，不挂总线）。</summary>
+    /// <summary>批次事件名（历史名；处理器只经 <see cref="LoadBatchAsync"/> 直调，不挂总线）。</summary>
     public const string BatchEventName = "card.load.batch";
+
+    /// <summary>加载器名（须与注册面声明的名字一致才可被 sidecar 引用）。</summary>
+    public string Name { get; }
 
     private readonly AssetRegistry _registry;
     private readonly AssetIdBridge _bridge;
@@ -71,8 +73,9 @@ public sealed class CardLoaderTrigger : Trigger<CardLoadBatchView>, IAssetLoadSi
         Func<AssetRegistration, string?>? cardImageLookup = null,
         Func<AssetRegistration, string?>? descriptionLookup = null,
         string name = DefaultLoaderName)
-        : base(name)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        Name = name;
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(bridge);
         ArgumentNullException.ThrowIfNull(library);
@@ -88,8 +91,8 @@ public sealed class CardLoaderTrigger : Trigger<CardLoadBatchView>, IAssetLoadSi
         // 执行宿主：不挂总线、不订阅任何更新；只作为触发器执行的引擎引用（事件流留痕）。
         _host = new LogicEngine();
 
-        // 批次事件＝唯一事件：只能经 LoadBatchAsync 直调（不挂总线、无 hook 声明）。
-        Register(BatchEventName, HandleBatchAsync);
+        // 批次执行体＝本类唯一处理器：只经 LoadBatchAsync 直调（不挂总线、不声明 hook）。
+        // 批次 7（§27）：不再继承触发器——加载器本身就是那个处理器。
     }
 
     /// <summary>进程级声明面（信任边界；sidecar 的 <c>loader</c> 只能引用此处名字）。</summary>
@@ -97,18 +100,6 @@ public sealed class CardLoaderTrigger : Trigger<CardLoadBatchView>, IAssetLoadSi
 
     /// <summary>合法性检测套件（引擎内置三档 ＋ 插件追加项）。</summary>
     public CardValiditySuite Suite => _suite;
-
-    /// <summary>
-    /// 登记进**对局级**注册表（<see cref="TriggerLayer.LowLevel"/>）：仅记账审计、不参与挂载。
-    /// </summary>
-    /// <param name="registry">对局级触发器注册表。</param>
-    /// <exception cref="ArgumentNullException">registry 为 null。</exception>
-    /// <exception cref="InvalidOperationException">同一加载器实例重复登记（注册后不可变）。</exception>
-    public void RegisterIn(TriggerRegistry registry)
-    {
-        ArgumentNullException.ThrowIfNull(registry);
-        registry.Register(this, TriggerLayer.LowLevel);
-    }
 
     /// <summary>
     /// **唯一触发入口**（直调；批量一次调用、单卡＝一元清单）：返回「报告 ＋ 卡牌引用列表」。
@@ -135,7 +126,16 @@ public sealed class CardLoaderTrigger : Trigger<CardLoadBatchView>, IAssetLoadSi
             [nameof(CardLoadBatchView.Outcome)] = outcome,
         };
 
-        var stream = await InvokeAsync(_host, data, ct).ConfigureAwait(false);
+        var ctx = new Context(data);
+        var view = ContextViewBinder.Create<CardLoadBatchView>(ctx);
+        try
+        {
+            await HandleBatchAsync(view, ctx, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            ((IContextView)(object)view).Seal();
+        }
 
         if (outcome.Failure is { } failure)
         {
@@ -143,7 +143,7 @@ public sealed class CardLoaderTrigger : Trigger<CardLoadBatchView>, IAssetLoadSi
         }
 
         return outcome.Result ?? throw new InvalidOperationException(
-            $"卡牌加载批次未产出结果（触发器 '{Name}' 的执行结局为 {stream.Outcome}）。");
+            $"卡牌加载批次未产出结果（加载器 '{Name}' 的业务段未提交结果——契约违反）。");
     }
 
     /// <summary>批次执行体（触发器单事件；业务失败经收集器回传，不吞）。</summary>
@@ -344,7 +344,22 @@ public sealed class CardLoaderTrigger : Trigger<CardLoadBatchView>, IAssetLoadSi
             ? reference
             : AssetAppId.Compose(registration.PackageId, reference);
 
-        return _registry.ByAppId(appId).Any(asset => asset.Kind == AssetKind.Effect);
+        // ① 注册面：旧格式 effect 资产（sidecar 声明 kind=effect）。
+        if (_registry.ByAppId(appId).Any(asset => asset.Kind == AssetKind.Effect))
+        {
+            return true;
+        }
+
+        // ② v4-only（§23.8 第 1 项）：组件资产没有 sidecar ⇒ 不进注册面，其存在判据是
+        //    包内 effects-v4/<localId>.component.json 文件就在。两条判据取并集——
+        //    "引用是否解析得到"这件事与"资产以哪种格式承载"无关。
+        if (!AssetAppId.TrySplit(appId, out _, out var localId))
+        {
+            return false;
+        }
+
+        var relative = PackageScanner.ComponentsDirectoryName + "/" + localId + ".component.json";
+        return TryResolvePackageFile(registration, relative, out var absolute) && File.Exists(absolute);
     }
 
     /// <summary>包根相对路径解析（卡图路径相对包根——D59）。</summary>

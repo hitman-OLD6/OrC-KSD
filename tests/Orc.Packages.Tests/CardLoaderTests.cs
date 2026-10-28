@@ -443,32 +443,13 @@ public class CardLoaderTests : IDisposable
     }
 
     [Fact]
-    public void Loader_Is_Registered_Into_Match_Registry_As_LowLevel_Audit_Only()
-    {
-        var loader = CreateLoader(out _, out _, out _);
-        var triggers = new TriggerRegistry();
-
-        loader.RegisterIn(triggers);
-
-        var lowLevel = triggers.GetByLayer(TriggerLayer.LowLevel);
-        var entry = Assert.Single(lowLevel);
-        Assert.Same(loader, entry.Trigger);
-        Assert.Empty(triggers.GetByLayer(TriggerLayer.External));
-
-        // 只记账、不挂载：加载器是主动触发器（主动不得声明 hooks ⇒ 结构上不可能被总线挂载），
-        // 唯一入口是直调 LoadBatchAsync。
-        Assert.Equal(TriggerKind.Active, loader.Kind);
-        Assert.Equal(CardLoaderTrigger.DefaultLoaderName, loader.Name);
-    }
-
-    [Fact]
     public async Task Loader_Is_Usable_Without_Any_Bus_Mount()
     {
         var loader = CreateLoader(out var registry, out var bridge, out _);
         var card = RegisterCard(registry);
         Bind(bridge, card);
 
-        // 无 TriggerRegistry、无总线：直调即用（注册纯记账）。
+        // 无总线、无注册表：直调即用。
         var result = await loader.LoadBatchAsync(new[] { new CardLoadItem("p1", 0, card.AppId) });
 
         Assert.Single(result.Cards);

@@ -113,11 +113,8 @@ public static class InhibitRules
         // ② 清空所有修饰器（攻击力/防御力上限/行动花费的自然回落载体）
         await target.Modifiers.ClearAllAsync(ct);
 
-        // ③ 清除所有额外效果（含光环声明；主动/被动效果全撤；词条内嵌效果已随词条清除覆盖）
-        foreach (var effect in target.Effects.ToArray())
-        {
-            target.RemoveEffect(effect);
-        }
+        // ③ 清除所有额外效果：卡上效果容器随 `Effect` 家族删除——词条效果＝编排实体上的 v4 组件，
+        //    由词条组件卸载（DisposeAttachedComponents）随 ClearAllExceptAsync 一并撤销。
 
         // ④ 授予「被抑制」（保留标记——重复施加场景＝幂等无操作）
         await target.Keywords.GrantAsync(KeywordIds.Inhibited);
@@ -228,8 +225,9 @@ public static class IntelligenceRules
     public static Func<Card, int, LogicEngine?, CancellationToken, Task> PendingRevealHandler { get; set; }
         = WritePendingRevealLog;
 
-    /// <summary>触发点调用（情报效果在 card.played 命中本卡时——批 1 效果化后由 <see cref="IntelligenceTriggerEffect"/> 驱动）。</summary>
-    internal static Task InvokePendingRevealAsync(Card card, int amount, LogicEngine? engine, CancellationToken ct)
+    /// <summary>触发点调用（情报效果在 card.played 命中本卡时——v4 组件 <c>keyword.intelligence</c> 的 csx 成员驱动）。
+    /// <para>A2 起为 <c>public</c>：csx 行为面只能经公开 API 触达游戏层（组件资产的 handler 不享有 InternalsVisibleTo）。</para></summary>
+    public static Task InvokePendingRevealAsync(Card card, int amount, LogicEngine? engine, CancellationToken ct)
         => PendingRevealHandler(card, amount, engine, ct);
 
     /// <summary>默认待办实现：写引擎日志（触发留痕；G18 明牌系统就绪后替换为实际执行）。</summary>

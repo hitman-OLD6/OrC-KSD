@@ -5,7 +5,12 @@ using Xunit;
 namespace Orc.Tests;
 
 /// <summary>
-/// S-C5 预制体模型与效果快照/装载计划验收：来源二选一、主动禁 hooks、hooks 并集、计划步骤与顺序。
+/// S-C5 预制体模型与效果快照验收：来源二选一、被动＝声明 hooks、hooks 并集去重保序、下游声明。
+/// <para>
+/// **装载计划段已删除**（§28）：<c>EffectSnapshot.BuildLoadPlan</c>／<c>EffectLoadStepKind</c> 随
+/// <c>CardEffectLoader</c>（旧装载链）一并删除——v4 的装配面是组件（<c>OrchestrationRuntime.AddComponent</c>），
+/// 步骤顺序由组件装配相位与边位次表达，不再有"计划步骤"这一中间产物。
+/// </para>
 /// </summary>
 public class PrefabTests
 {
@@ -52,9 +57,9 @@ public class PrefabTests
     public void 触发器预制体_主动声明hooks_拒绝()
     {
         Assert.Throws<ArgumentException>(() =>
-            new TriggerPrefab("t", "unit.play", TriggerKind.Active, hooks: new[] { "card.placed" }));
+            new TriggerPrefab("t", "unit.play", false, hooks: new[] { "card.placed" }));
 
-        var passive = new TriggerPrefab("t", "effect.lifecycle", TriggerKind.Passive, hooks: new[] { "card.placed" });
+        var passive = new TriggerPrefab("t", "effect.lifecycle", true, hooks: new[] { "card.placed" });
         Assert.Equal(new[] { "card.placed" }, passive.Hooks);
     }
 
@@ -68,8 +73,8 @@ public class PrefabTests
     [Fact]
     public void 效果预制体_挂载hook为被动hooks并集且去重保序()
     {
-        var main = new TriggerPrefab("m", "effect.lifecycle", TriggerKind.Passive, hooks: new[] { "effect.removed", "card.destroyed" });
-        var other = new TriggerPrefab("o", "watch.trigger", TriggerKind.Passive, hooks: new[] { "card.destroyed", "turn.end" });
+        var main = new TriggerPrefab("m", "effect.lifecycle", true, hooks: new[] { "effect.removed", "card.destroyed" });
+        var other = new TriggerPrefab("o", "watch.trigger", true, hooks: new[] { "card.destroyed", "turn.end" });
 
         var effect = new EffectPrefab("prefab.mine", main, otherTriggers: new[] { other });
 
@@ -77,73 +82,22 @@ public class PrefabTests
     }
 
     [Fact]
-    public void 效果快照_被动_装载计划顺序为挂载_注册_替换()
-    {
-        var main = new TriggerPrefab(
-            "m", "effect.lifecycle", TriggerKind.Passive,
-            hooks: new[] { "effect.removed", "card.destroyed" },
-            events: new[] { CsxEvent("onRemove") });
-        var other = new TriggerPrefab(
-            "o", "watch.trigger", TriggerKind.Passive,
-            hooks: new[] { "turn.end" },
-            events: new[] { CsxEvent("onTurnEnd", "effect.lifecycle") });
-        var wrapper = new WrapperPrefab("replace", "onRemove", null, CsxEvent("onRemoveOverride"));
-
-        var snapshot = new EffectSnapshot(new EffectPrefab("p", main, new[] { other }, new[] { wrapper }));
-        var plan = snapshot.BuildLoadPlan();
-
-        Assert.Equal(EffectSnapshot.SchemaVersion, snapshot.Version);
-        Assert.Equal(
-            new[]
-            {
-                EffectLoadStepKind.MountMainTrigger,
-                EffectLoadStepKind.RegisterEvent,
-                EffectLoadStepKind.MountTrigger,
-                EffectLoadStepKind.RegisterEvent,
-                EffectLoadStepKind.ApplyWrapper,
-                EffectLoadStepKind.Dispose,
-            },
-            plan.Steps.Select(s => s.Kind));
-
-        Assert.Equal("effect.lifecycle", plan.Steps[0].Target);
-        Assert.Contains("effect.removed", plan.Steps[0].Detail);
-        Assert.Contains("csx:HandleAsync", plan.Steps[1].Detail);
-        Assert.Contains(plan.Steps, s => s.Detail.Contains("onRemoveOverride"));
-    }
-
-    [Fact]
-    public void 效果快照_主动_无挂载步骤()
-    {
-        var main = new TriggerPrefab(
-            "m", "order.fireball", TriggerKind.Active,
-            events: new[] { AsmEvent("cast") });
-
-        var plan = new EffectSnapshot(new EffectPrefab("p", main)).BuildLoadPlan();
-
-        Assert.DoesNotContain(plan.Steps, s => s.Kind == EffectLoadStepKind.MountMainTrigger);
-        Assert.Equal(2, plan.Steps.Count);
-        Assert.Equal(EffectLoadStepKind.RegisterEvent, plan.Steps[0].Kind);
-        Assert.Contains("asm:prefab.events.cast", plan.Steps[0].Detail);
-        Assert.Equal(EffectLoadStepKind.Dispose, plan.Steps[1].Kind); // E-D1：disposing 触发器默认必选
-    }
-
-    [Fact]
     public void 效果快照_主动触发的下游边_可指向主动触发器()
     {
-        var watcher = new TriggerPrefab("w", "watch.trigger", TriggerKind.Passive, hooks: new[] { "turn.end" },
+        var watcher = new TriggerPrefab("w", "watch.trigger", true, hooks: new[] { "turn.end" },
             events: new[] { CsxEvent("onTurnEnd", "order.fireball") });
-        var fireball = new TriggerPrefab("f", "order.fireball", TriggerKind.Active, events: new[] { AsmEvent("cast") });
+        var fireball = new TriggerPrefab("f", "order.fireball", false, events: new[] { AsmEvent("cast") });
 
         var effect = new EffectPrefab("p", watcher, otherTriggers: new[] { fireball });
 
         Assert.Equal(new[] { "order.fireball" }, effect.MainTrigger.Events[0].Downstream);
-        Assert.Equal(TriggerKind.Active, effect.OtherTriggers[0].Kind);
+        Assert.False(effect.OtherTriggers[0].IsPassive);
     }
 
     [Fact]
     public void 效果快照_版本非法_拒绝()
     {
-        var main = new TriggerPrefab("m", "k", TriggerKind.Active);
+        var main = new TriggerPrefab("m", "k", false);
         Assert.Throws<ArgumentOutOfRangeException>(() => new EventPrefab("e", assemblyKey: "k", version: 0));
         Assert.Throws<ArgumentOutOfRangeException>(() => new EffectSnapshot(new EffectPrefab("p", main), schemaVersion: 0));
     }
@@ -151,7 +105,7 @@ public class PrefabTests
     [Fact]
     public void moding预制体_目标id空白_拒绝()
     {
-        var main = new TriggerPrefab("m", "k", TriggerKind.Active, events: new[] { AsmEvent("cast") });
+        var main = new TriggerPrefab("m", "k", false, events: new[] { AsmEvent("cast") });
         Assert.Throws<ArgumentException>(() =>
             new EffectPrefab("p", main, wrappers: new[] { new WrapperPrefab("replace", "  ", null, AsmEvent("r")) }));
     }

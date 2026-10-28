@@ -121,6 +121,45 @@ public sealed class PackageRegistrarTests : IDisposable
         Assert.Contains(result.Diagnostics, d => d.Code == AssetDiagnosticCode.FailedFile);
     }
 
+    // ── 双结算护栏：同一张卡的「显式声明」与「文本模板」不得叠加成两个效果 ──
+
+    [Fact]
+    public void 注册_卡已显式声明效果_文本模板不再叠加()
+    {
+        WriteManifest();
+        WriteCardJson("cards/owned.card.json", CardWithExplicitEffect("owned", "hand.effect"));
+        WritePrefab("effects/hand.effect.prefab.json", "hand.effect");
+        File.WriteAllText(Path.Combine(PackRoot, "texts.json"), """
+            { "owned": "部署：抽 1 张牌。" }
+            """);
+
+        var result = PackageRegistrar.Register(PackRoot, Manifest(), _registry);
+
+        // 声明只有一条（卡数据体给出的手写预制体）：文本模板效果不再生成。
+        // 叠加会让同一张卡同时持两个效果实例，一次 card.played 把同一段效果结算两次。
+        var declaration = Assert.Single(result.Content.Declarations);
+        Assert.Equal("pack/sample.registry/owned", declaration.CardId);
+        Assert.Equal("hand.effect", Assert.Single(declaration.PrefabIds));
+        Assert.Empty(result.Content.InlinePrefabs);
+    }
+
+    [Fact]
+    public void 注册_卡无显式效果_文本模板照常生成一份()
+    {
+        WriteManifest();
+        WriteCardJson("cards/plain.card.json", CardWithExplicitEffect("plain", prefabId: null));
+        File.WriteAllText(Path.Combine(PackRoot, "texts.json"), """
+            { "plain": "部署：抽 1 张牌。" }
+            """);
+
+        var result = PackageRegistrar.Register(PackRoot, Manifest(), _registry);
+
+        var declaration = Assert.Single(result.Content.Declarations);
+        Assert.Equal("pack/sample.registry/plain", declaration.CardId);
+        Assert.Equal("pack.sample.registry.plain.effect", Assert.Single(declaration.PrefabIds));
+        Assert.Single(result.Content.InlinePrefabs);
+    }
+
     // ── R5/D40：注册期宽松解析（字段级问题不隔离，JSON 语法错误仍不注册） ──
 
     [Fact]
@@ -617,6 +656,33 @@ public sealed class PackageRegistrarTests : IDisposable
         lines.Add(" ]");
         lines.Add("}");
         return string.Join("\n", lines) + "\n";
+    }
+
+    private static string CardWithExplicitEffect(string id, string? prefabId)
+    {
+        var components = new List<string>
+        {
+            "{ \"component\": \"typeCategory\", \"type\": [\"infantry\"] }",
+            "{ \"component\": \"factionCost\", \"faction\": \"germany\", \"kredits\": 1 }",
+            "{ \"component\": \"battleStats\", \"operationCost\": 1, \"attack\": 2, \"defense\": 3 }",
+            "{ \"component\": \"tagData\", \"rarity\": \"standard\" }",
+        };
+        if (prefabId is not null)
+        {
+            components.Add($"{{ \"component\": \"effects\", \"prefabs\": [\"{prefabId}\"] }}");
+        }
+
+        return string.Join("\n", new[]
+        {
+            "{",
+            " \"schemaVersion\": 1,",
+            $" \"id\": \"{id}\",",
+            $" \"name\": \"示例卡 {id}\",",
+            " \"components\": [",
+            "  " + string.Join(",\n  ", components),
+            " ]",
+            "}",
+        }) + "\n";
     }
 
     /// <summary>写一份最小可解析的效果预制体（宿主单条目）。</summary>

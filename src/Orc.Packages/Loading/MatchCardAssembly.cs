@@ -99,6 +99,40 @@ public sealed class MatchCardAssembly : IMatchCardLoader
     public CardLoaderTrigger? Loader => _loader;
 
     /// <summary>
+    /// 回填**实例装配阶段**的组件失败（如效果 csx 在 v4 承载视图下编译不过）到最近一份报告：
+    /// 命中的资产条目降 <c>invalid</c> ＋ 追加 <c>fields</c>，对应卡位降 <c>invalid</c> ＋ 追加 <c>components</c>。
+    /// <para>
+    /// 语义＝**同一批的修订**（不是新批次）：只替换 <see cref="LastReport"/> 并让台账取修订后的值，
+    /// 批次数与 <c>refCount</c> 不变（见 <see cref="CardLoadLedger.RecordRevision"/>）。
+    /// </para>
+    /// <para>
+    /// 尚无报告（未装载过任何批次／独立装配路径）＝**不抛**：写一条告警留痕后返回——
+    /// 报告面缺席是装配事实，不该让一张坏卡把对局创建打断（它对局照常、只是无从标注）。
+    /// </para>
+    /// </summary>
+    /// <param name="failures">失败清单（空＝无动作）。</param>
+    /// <exception cref="ArgumentNullException">failures 为 null 或含 null 项。</exception>
+    public void RecordComponentFailures(IReadOnlyList<CardComponentFailure> failures)
+    {
+        ArgumentNullException.ThrowIfNull(failures);
+        if (failures.Count == 0)
+        {
+            return;
+        }
+
+        if (LastReport is not { } report)
+        {
+            _warnings.Add(
+                $"组件失败（{failures.Count} 条）无法回填：本局尚无卡牌加载报告（未装载过批次）——"
+                + "失败事实仅见于引擎日志。");
+            return;
+        }
+
+        LastReport = report.WithComponentFailures(failures);
+        Ledger.RecordRevision(LastReport);
+    }
+
+    /// <summary>
     /// 准备期：**注册**卡包目录（只解析元数据并生成 DTO，不实例化、不进对局），并读入两域 lock。
     /// <para>判定实现与 <see cref="Inspect"/> 同一份（<see cref="BuildOutcome"/>）；本方法只是把失败转成异常。</para>
     /// </summary>
@@ -335,20 +369,18 @@ public sealed class MatchCardAssembly : IMatchCardLoader
     /// 装配期（对局初始化内）：接入本局卡库 → 资产加载器装载分层列表 → 中间层写入定版结果。
     /// </summary>
     /// <param name="library">本局卡库。</param>
-    /// <param name="triggers">本局触发器注册表（加载器登记进 LowLevel 审计面——仅记账、不挂载）。</param>
     /// <exception cref="ArgumentNullException">参数为 null。</exception>
     /// <exception cref="InvalidOperationException">重复接入；或装载链结构性失败（lock 冲突／环依赖／装载失败）。</exception>
-    public void Attach(CardLibrary library, TriggerRegistry triggers)
+    public void Attach(CardLibrary library)
     {
         ArgumentNullException.ThrowIfNull(library);
-        ArgumentNullException.ThrowIfNull(triggers);
         if (_loader is not null)
         {
             throw new InvalidOperationException("卡组装载已接入过卡库（一个装载链只服务一个对局——重复接入被拒绝）。");
         }
 
         _loader = new CardLoaderTrigger(Registry, Bridge, library);
-        _loader.RegisterIn(triggers); // 对局级审计面：仅记账（注册与挂载解耦）
+        // 批次 7（§27）：不存在对局级登记簿——加载器由本装配面持有即进账（审查面读引擎成员边图）。
         _assetLoader = new AssetLoader(Registry, _loader);
 
         // 先正式后测试（R15：两段加载；跨域绝不互相合并——由 AssetLoader/Planner 保证）。

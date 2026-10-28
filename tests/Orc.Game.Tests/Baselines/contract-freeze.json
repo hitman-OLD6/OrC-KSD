@@ -1,6 +1,6 @@
 {
-  "commit": "2797057ffe798f6c14ab820a8763e85d1c0cb971",
-  "generatedAt": "2026-10-23T19:29:53.2137497+08:00",
+  "commit": "dc13b96b5ba584af615546a0c99d3a36af134729",
+  "generatedAt": "2026-10-28T16:24:52.5658542+08:00",
   "gameUpdates": [
     {
       "name": "CardBurned",
@@ -217,19 +217,13 @@
   ],
   "effectRuntime": [
     "AddToHandAsync`0(Orc.Cards.Card, System.String, System.Int32, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Int32>",
-    "AttachPrefabAsync`0(Orc.Cards.Card, System.String, System.Threading.CancellationToken):System.Threading.Tasks.Task<Orc.Game.Effects.EffectAttachResult>",
-    "AttachSnapshotAsync`0(Orc.Cards.Card, System.String, System.Threading.CancellationToken):System.Threading.Tasks.Task<Orc.Game.Effects.EffectAttachResult>",
     "AurasOf`0(Orc.Cards.Card):Orc.Game.Cards.AuraRegistry",
     "BattleAsync`0(Orc.Cards.Card, Orc.Cards.Card, Orc.Cards.Card, System.Threading.CancellationToken):System.Threading.Tasks.Task<System.Boolean>",
-    "BeginTargetSelectionAsync`0(Orc.Cards.Card, Orc.Game.Effects.EffectSelector, System.Threading.CancellationToken):System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Orc.Cards.Card>>",
     "BuffAsync`0(Orc.Cards.Card, System.Int32, System.Int32, Orc.Game.Effects.EffectDuration, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
-    "CompileAttachAsync`0(Orc.Cards.Card, System.String, System.String, System.Threading.CancellationToken):System.Threading.Tasks.Task<Orc.Game.Effects.EffectAttachResult>",
     "CostModAsync`0(Orc.Cards.Card, System.Int32, Orc.Game.Effects.EffectDuration, System.Threading.CancellationToken):System.Threading.Tasks.Task<System.Boolean>",
     "DamageAsync`0(Orc.Cards.Card, System.Int32, Orc.Cards.Card, System.Threading.CancellationToken):System.Threading.Tasks.Task<System.Boolean>",
     "DeclareAuraAsync`0(Orc.Cards.Card, System.String, System.Int32, Orc.Game.Effects.EffectAuraFilter, System.Threading.CancellationToken):System.Threading.Tasks.Task<System.Boolean>",
     "DeployCostModAsync`0(Orc.Cards.Card, System.Int32, System.Threading.CancellationToken):System.Threading.Tasks.Task<System.Boolean>",
-    "DetachEffectAsync`0(Orc.Cards.Card, Orc.Cards.Effect, System.Threading.CancellationToken):System.Threading.Tasks.Task<Orc.Game.Effects.EffectAttachResult>",
-    "DetachEffectAsync`0(Orc.Cards.Card, Orc.Game.Effects.EffectAttachCredential, System.Threading.CancellationToken):System.Threading.Tasks.Task<Orc.Game.Effects.EffectAttachResult>",
     "DrawAsync`0(Orc.Cards.Card, System.Int32, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Int32>",
     "EvaluateCondition`0(Orc.Cards.Card, System.String):System.Boolean",
     "FetchFromDeckAsync`0(Orc.Cards.Card, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<Orc.Game.Managers.DeckFetchResult>",
@@ -237,7 +231,6 @@
     "GainPointsAsync`0(Orc.Cards.Card, System.Int32, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
     "GrantAsync`0(Orc.Cards.Card, System.String, System.Nullable<System.Int32>, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
     "GrantAsync`0(Orc.Cards.Card, System.String, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
-    "GrantWithContentAsync`0(Orc.Cards.Card, System.String, Orc.Cards.Effect, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
     "JoinFrontlineAsync`0(Orc.Cards.Card, Orc.Game.Cards.UnitCard, System.Nullable<System.Int32>, System.Threading.CancellationToken):System.Threading.Tasks.Task<Orc.Game.Actions.ActionResult>",
     "JoinSupportLineAsync`0(Orc.Cards.Card, Orc.Game.Cards.UnitCard, System.Nullable<System.Int32>, System.Threading.CancellationToken):System.Threading.Tasks.Task<Orc.Game.Actions.ActionResult>",
     "Judge`0(System.String, System.Object[]):System.Boolean",
@@ -257,14 +250,12 @@
     "ShuffleInAsync`0(Orc.Cards.Card, System.String, System.Int32, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Int32>",
     "SilenceAsync`0(Orc.Cards.Card, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<System.Boolean>",
     "UpgradeAsync`0(Orc.Cards.Card, System.Threading.CancellationToken, Orc.Cards.Card):System.Threading.Tasks.Task<Orc.Game.Cards.VeteranPromotionResult>",
-    "UseEffectAssets`0(System.Collections.Generic.IReadOnlyList<Orc.Game.EffectParsing.Templates.EffectTemplate>, Orc.Game.EffectParsing.Compilation.OpTemplateCatalog):System.Void",
-    "UseEffectAssets`0(System.String):System.Void",
     "get_DamagePipeline`0():Orc.Game.Damage.DamagePipeline",
-    "get_JoinFrontlineTrigger`0():Orc.Core.Trigger<Orc.Game.Actions.JoinBattlefieldTriggerView>",
-    "get_JoinSupportLineTrigger`0():Orc.Core.Trigger<Orc.Game.Actions.JoinBattlefieldTriggerView>",
+    "get_JoinFrontlineTrigger`0():System.Nullable<Orc.Core.Model.MemberAddress>",
+    "get_JoinSupportLineTrigger`0():System.Nullable<Orc.Core.Model.MemberAddress>",
     "property DamagePipeline:Orc.Game.Damage.DamagePipeline",
-    "property JoinFrontlineTrigger:Orc.Core.Trigger<Orc.Game.Actions.JoinBattlefieldTriggerView>",
-    "property JoinSupportLineTrigger:Orc.Core.Trigger<Orc.Game.Actions.JoinBattlefieldTriggerView>"
+    "property JoinFrontlineTrigger:System.Nullable<Orc.Core.Model.MemberAddress>",
+    "property JoinSupportLineTrigger:System.Nullable<Orc.Core.Model.MemberAddress>"
   ],
   "gameEntryPoints": [
     {

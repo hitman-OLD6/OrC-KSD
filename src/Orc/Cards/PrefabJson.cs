@@ -6,47 +6,23 @@ using Orc.Core;
 namespace Orc.Cards;
 
 /// <summary>
-/// 效果快照 JSON 序列化器（S-C5/S-C10）：把 <see cref="EffectSnapshot"/>（嵌套三层预制体）导出/读回。
+/// 效果快照落盘序列化器（S-C5/S-C10；v4-only 后只保留**写出**一半）。
+/// <para>
 /// 形态：{ schemaVersion, root: { id, version, mainTrigger, otherTriggers[], wrappers[] } }；
 /// 触发器＝{ id, stableKey, kind("active"/"passive"), viewType, hooks[], events[] }；
 /// 事件＝{ id, entry, csx?, assemblyKey?, downstream[], version }；wrapper＝{ target, replacement }。
-/// 版本（S-C10）：读出时 <c>schemaVersion</c> 与本版不符＝结构化失败（不静默降级）。
-/// 明文约定：输入输出均为 UTF-8 文本（社区明文储存）。
+/// </para>
+/// <para>
+/// 唯一用途＝<c>LegacySnapshotComponentBinder</c> 的迁移输入（旧快照 → 旧格式 JSON → v4 组件）。
+/// 读入（<c>Deserialize</c>／<c>DeserializeFile</c>）随旧装载链删除——资产面已切 v4，不再读旧格式。
+/// </para>
 /// </summary>
 public static class PrefabJson
 {
-    private static readonly JsonSerializerOptions WriteOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
-
-    private static readonly JsonSerializerOptions ReadOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-    };
-
-    /// <summary>导出效果快照为 JSON 字符串。</summary>
-    /// <exception cref="ArgumentNullException">snapshot 为 null。</exception>
-    public static string Serialize(EffectSnapshot snapshot, bool indented = false)
-    {
-        ArgumentNullException.ThrowIfNull(snapshot);
-
-        var dto = new SnapshotDto
-        {
-            SchemaVersion = snapshot.Version,
-            Root = ToDto(snapshot.Root),
-        };
-
-        return JsonSerializer.Serialize(dto, indented ? IndentedOptions : WriteOptions);
-    }
-
     /// <summary>
-    /// 落盘文本生成（批 2 加性辅助——**落盘文本单一真源**；批 5 起可见性放宽〔internal→public，加性〕
-    /// 供离线编译驱动复用——落盘出口 <c>PrefabWriter</c> 与 <c>Orc.Game.EffectParsing.EffectCompilationDriver</c>
-    /// 共用，防「第二套文本标准」漂移；既有 <see cref="Serialize"/> 默认行为不变）：
+    /// 落盘文本生成（**落盘文本单一真源**；离线编译驱动与迁移桥共用，防「第二套文本标准」漂移）：
     /// 文本契约与卡侧硬契约对齐（2 空格缩进多行、LF、尾随换行、不转义非 ASCII）；键序确定（DTO 声明序）、
-    /// null 值字段忽略（沿用既有序列化选项）。UTF-8 无 BOM 由文件写入面保证。
+    /// null 值字段忽略。UTF-8 无 BOM 由文件写入面保证。
     /// </summary>
     /// <exception cref="ArgumentNullException">snapshot 为 null。</exception>
     public static string SerializeForDisk(EffectSnapshot snapshot)
@@ -65,7 +41,38 @@ public static class PrefabJson
         return json.Replace("\r\n", "\n", StringComparison.Ordinal) + "\n";
     }
 
-    /// <summary>读回效果快照（失败＝抛，fail-fast）。</summary>
+    /// <summary>
+    /// **豁免保留**（本轮明确记账，见 PROGRESS §26）：把快照写成 JSON 文本（可缩进）。
+    /// 消费者＝①卡数据 <c>components.effects.inline</c> 的写方向；②<see cref="EffectCompiler.CompileToJson"/>。
+    /// 两者产出的都是**旧快照文本**，下一步仍由 <c>LegacySnapshotComponentBinder</c> 转 v4。
+    /// </summary>
+    /// <exception cref="ArgumentNullException">snapshot 为 null。</exception>
+    public static string Serialize(EffectSnapshot snapshot, bool indented = false)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        var dto = new SnapshotDto
+        {
+            SchemaVersion = snapshot.Version,
+            Root = ToDto(snapshot.Root),
+        };
+
+        return JsonSerializer.Serialize(dto, indented ? IndentedOptions : DiskOptions);
+    }
+
+    private static readonly JsonSerializerOptions IndentedOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    /// <summary>
+    /// **豁免保留**（本轮明确记账，见 PROGRESS §26）：读回效果快照文本。
+    /// 唯一消费者＝卡数据 <c>components.effects.inline</c> 的读方向（卡包内联效果仍以旧快照形态随卡分发）。
+    /// 目录级旧资产装载已删除——不得再用它扫描 <c>*.prefab.json</c> 目录。
+    /// </summary>
     /// <exception cref="ArgumentNullException">json 为 null。</exception>
     /// <exception cref="FormatException">JSON 非法、schema 版本不符或结构缺项。</exception>
     public static EffectSnapshot Deserialize(string json)
@@ -87,7 +94,6 @@ public static class PrefabJson
             throw new FormatException("效果快照缺少 root。");
         }
 
-        // E-D1：接受 2（旧版：缺 disposingTrigger/oneShot/band）并按默认补齐；内存快照归一化为 3，写出恒为 3。
         if (dto.SchemaVersion is not (2 or EffectSnapshot.SchemaVersion))
         {
             throw new FormatException(
@@ -97,36 +103,14 @@ public static class PrefabJson
         return new EffectSnapshot(FromDto(dto.Root), EffectSnapshot.SchemaVersion);
     }
 
-    /// <summary>读回效果快照（结构化：失败不抛）。</summary>
-    /// <exception cref="ArgumentNullException">json 为 null。</exception>
-    public static bool TryDeserialize(string json, out EffectSnapshot? snapshot, out string? error)
+    private static readonly JsonSerializerOptions ReadOptions = new()
     {
-        ArgumentNullException.ThrowIfNull(json);
-
-        try
-        {
-            snapshot = Deserialize(json);
-            error = null;
-            return true;
-        }
-        catch (Exception ex) when (ex is FormatException or ArgumentException or ArgumentNullException or ArgumentOutOfRangeException)
-        {
-            snapshot = null;
-            error = ex.Message;
-            return false;
-        }
-    }
-
-    private static readonly JsonSerializerOptions IndentedOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        WriteIndented = true,
+        PropertyNameCaseInsensitive = true,
     };
 
     /// <summary>
-    /// 落盘文本选项（批 2 加性辅助）：缩进多行 ＋ 宽松编码器（不转义非 ASCII/HTML 敏感字符——
-    /// 对齐既有样本实态与卡侧「不转义非 ASCII」口径；仅落盘出口使用，不影响既有 API 输出）。
+    /// 落盘文本选项：缩进多行 ＋ 宽松编码器（不转义非 ASCII/HTML 敏感字符——
+    /// 对齐既有样本实态与卡侧「不转义非 ASCII」口径）。
     /// </summary>
     private static readonly JsonSerializerOptions DiskOptions = new()
     {
@@ -172,7 +156,7 @@ public static class PrefabJson
     {
         Id = prefab.Id,
         StableKey = prefab.StableKey,
-        Kind = prefab.Kind == TriggerKind.Passive ? "passive" : "active",
+        Kind = prefab.IsPassive ? "passive" : "active",
         ViewType = prefab.ViewTypeName,
         Hooks = prefab.Hooks.ToList(),
         Events = prefab.Events.Select(ToDto).ToList(),
@@ -191,7 +175,7 @@ public static class PrefabJson
         Band = prefab.Band,
     };
 
-    // ---------- DTO → 领域 ----------
+    // ---------- DTO → 领域（**豁免读面**：仅卡体内联效果） ----------
 
     private static EffectPrefab FromDto(EffectPrefabDto dto)
     {
@@ -266,14 +250,12 @@ public static class PrefabJson
             throw new FormatException($"触发器预制体 '{dto.Id}' 缺少 events。");
         }
 
-        var kind = string.Equals(dto.Kind, "passive", StringComparison.OrdinalIgnoreCase)
-            ? TriggerKind.Passive
-            : TriggerKind.Active;
+        var isPassive = string.Equals(dto.Kind, "passive", StringComparison.OrdinalIgnoreCase);
 
         return new TriggerPrefab(
             dto.Id ?? string.Empty,
             dto.StableKey ?? string.Empty,
-            kind,
+            isPassive,
             dto.Hooks,
             dto.Events.Select(FromDto),
             dto.Version <= 0 ? 1 : dto.Version,
@@ -290,7 +272,7 @@ public static class PrefabJson
         dto.Band,
         dto.Seams);
 
-    // ---------- DTO 定义（可空字段容忍缺项，结构校验在领域构造期完成） ----------
+    // ---------- DTO 定义（只写出，不需要读入容错） ----------
 
     private sealed class SnapshotDto
     {

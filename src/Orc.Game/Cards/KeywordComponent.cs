@@ -1,26 +1,27 @@
 using Orc.Cards;
+using Orc.Core.Model;
 
 namespace Orc.Game.Cards;
 
 /// <summary>
 /// 词条组件基类（2C-A1；词条＝独立组件）：自含数据（标识＋可选参值）＋运行逻辑（可选覆写）＋
-/// 授予/移除生命周期回调（<see cref="OnGrant"/> / <see cref="OnRevoke"/>）＋可内嵌效果（复用 Effect 体系；实例持有）。
+/// 授予/移除生命周期回调（<see cref="OnGrant"/> / <see cref="OnRevoke"/>）＋**效果组件挂载态**（v4 组件资产）。
 /// 语义双轨（仅语义划分、共用同一基类与同一挂载/卸载机制——不建两套框架）：
-/// 能力型＝有主动行为面（组件运行逻辑与/或内嵌效果——如闪击/伏击/奋战）；标记型＝无行为面（仅数据、被读取消费——
+/// 能力型＝有主动行为面（组件运行逻辑与/或效果组件——如闪击/伏击/奋战）；标记型＝无行为面（仅数据、被读取消费——
 /// 如烟幕，经 <see cref="PlainKeywordComponent"/> 轻量形态）。
 /// 生命周期（由体系编排、经词条管理组件 <see cref="KeywordManager"/> 驱动；序列裁定见「实现 grill 第 2 批」场 1）：
-/// 授予（挂载）＝存在性置位 → 运行逻辑装载（<see cref="Mount"/>）＋内嵌效果装载 → <see cref="OnGrant"/>（最后）；
+/// 授予（挂载）＝存在性置位 → 运行逻辑装载（<see cref="Mount"/>）＋效果组件装配 → <see cref="OnGrant"/>（最后）；
 /// 装载链内失败＝fail-fast → 逆序整体回滚（存在性回 false、零残留、无半态）。
-/// 移除（完整卸载）＝<see cref="OnRevoke"/>（先、行为面先撤）→ 运行逻辑注销（<see cref="Unmount"/>）＋内嵌效果卸载
+/// 移除（完整卸载）＝<see cref="OnRevoke"/>（先、行为面先撤）→ 运行逻辑注销（<see cref="Unmount"/>）＋效果组件卸载
 /// → 存在性清除（参值不可读）。
-/// 死亡注销＝同样触发 OnRevoke 序列（OnRevoke → 运行逻辑注销＋内嵌效果卸载）、不执行「存在性清除」步
+/// 死亡注销＝同样触发 OnRevoke 序列（OnRevoke → 运行逻辑注销＋效果组件卸载）、不执行「存在性清除」步
 /// （登记/参值保留、照常可读——仅行为撤销）。
-/// 内嵌效果生命周期由体系统一驱动（词条挂载 ⇒ 内嵌效果自动装载；词条卸载 ⇒ 内嵌效果自动卸载）——
-/// 词条作者只负责经 <see cref="EmbedEffect"/> 持有实例、无需手工管理效果生命周期。
+/// 效果组件生命周期由体系统一驱动（词条挂载 ⇒ 组件自动装配；词条卸载 ⇒ 组件自动撤销）——
+/// 词条作者只负责经 <see cref="AttachComponent"/> 持有句柄、无需手工管理。
 /// </summary>
 public abstract class KeywordComponent
 {
-    private readonly List<Effect> _embeddedEffects = new();
+    private readonly List<ComponentAttachment> _attachedComponents = new();
 
     /// <summary>创建词条组件（标识＋可选参值＝自含数据）。</summary>
     /// <exception cref="ArgumentException">keyword 为 null/空白（标识非空）。</exception>
@@ -70,40 +71,32 @@ public abstract class KeywordComponent
     }
 
     /// <summary>
-    /// 内嵌效果（实例持有——作者在构造期经本方法注入；体系在挂载链自动装载、卸载链自动卸载——作者无需手工管理效果生命周期）。
-    /// 装载走完整装载链语义（挂主触发器＋OnMount＋托管登记＋失败回滚）；卸载无残留（统一卸载链含托管清理）——与外部效果同待遇。
+    /// 词条效果组件的挂载态（v4 组件资产形态；框架装载链专用）：词条绑定的 <c>effects-v4</c> 资产在宿主实体上
+    /// 装配后的句柄集合——随词条生灭（卸载/死亡注销/授予回滚逐句柄撤销，见 <see cref="DisposeAttachedComponents"/>）。
     /// </summary>
-    /// <exception cref="ArgumentNullException">effect 为 null。</exception>
-    protected void EmbedEffect(Effect effect)
-    {
-        ArgumentNullException.ThrowIfNull(effect);
-        _embeddedEffects.Add(effect);
-    }
+    internal IReadOnlyList<ComponentAttachment> AttachedComponents => _attachedComponents;
 
     /// <summary>
-    /// 数据壳效果接入（批 4 加性·数据化；**框架装载链专用**——词条装载期实例化点经本方法把实例化的数据效果
-    /// 〔数据壳＋行为引用形态〕并入内嵌效果通道，与构造期 <see cref="EmbedEffect"/> 的制品同待遇：随词条生灭
-    /// （装载/卸载/死亡注销/回滚/复装——同一条遍历链）。**不面向词条作者**（作者装配一律经构造期 <see cref="EmbedEffect"/>）。
+    /// 组件挂载态接入（v4 形态的「内嵌效果装载」；框架装载链专用）：与 <see cref="AttachDataEffect"/> 同一位置——
+    /// 随词条生灭（同一条遍历链：卸载/死亡注销/回滚），但执行面是组件实体的成员边，不是 <c>Effect</c> 实例。
     /// </summary>
-    /// <exception cref="ArgumentNullException">effect 为 null。</exception>
-    internal void AttachDataEffect(Effect effect)
+    /// <exception cref="ArgumentNullException">attachment 为 null。</exception>
+    internal void AttachComponent(ComponentAttachment attachment)
     {
-        ArgumentNullException.ThrowIfNull(effect);
-        _embeddedEffects.Add(effect);
+        ArgumentNullException.ThrowIfNull(attachment);
+        _attachedComponents.Add(attachment);
     }
 
-    /// <summary>
-    /// 内容装载点（A4 加性；内容载荷注入——授予链在组件创建后、装载遍历前调用；默认忽略）。
-    /// 内容型词条组件覆写吸收（如亡计：内容经 <see cref="EmbedEffect"/> 进入内嵌效果通道、
-    /// 生命周期随词条组件生灭——授予装载/移除卸载/授予失败回滚无残留，全部继承内嵌效果既有口径）；
-    /// 非内容型词条＝忽略（内容不进入承载）。
-    /// </summary>
-    internal virtual void AttachContent(Effect? content)
+    /// <summary>组件挂载态卸载（逐句柄撤销 + 销毁组件实体；幂等——重复调用无残留）。</summary>
+    internal void DisposeAttachedComponents()
     {
-    }
+        for (var i = _attachedComponents.Count - 1; i >= 0; i--)
+        {
+            _attachedComponents[i].Dispose();
+        }
 
-    /// <summary>内嵌效果清单（登记序；体系装载/卸载驱动的依据）。</summary>
-    internal IReadOnlyList<Effect> EmbeddedEffects => _embeddedEffects;
+        _attachedComponents.Clear();
+    }
 
     /// <summary>
     /// 参值改写（统一读改写口的受控变更；纯存储改写——A1 不重载行为面；A2 加性：改为 virtual——

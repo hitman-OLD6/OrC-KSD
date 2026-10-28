@@ -1,4 +1,4 @@
-﻿using Orc.Game.Judicators;
+using Orc.Game.Judicators;
 using Orc.Game.Triggers;
 
 namespace Orc.Game;
@@ -8,7 +8,7 @@ namespace Orc.Game;
 /// </summary>
 public enum GameHookAccessPath
 {
-    /// <summary>订阅（<c>Bus.Mount</c>——被动触发器挂载更新总线）。</summary>
+    /// <summary>订阅（<c>LogicEngine.Mount</c>——被动触发器挂到 <c>engine#&lt;信号&gt;</c> 成员上）。</summary>
     Subscribe = 0,
 
     /// <summary>band 注入（<c>Effect.Inject&lt;TView&gt;</c>——效果注册到通用流程触发器的具名 band）。</summary>
@@ -38,7 +38,7 @@ public enum GameHookObservation
 /// </summary>
 public enum GameHookExtensionKind
 {
-    /// <summary>注册表（<c>HookRegistry</c> / <c>PrefabManager</c> / 判定器注册表等）。</summary>
+    /// <summary>注册表（<c>HookRegistry</c> / <c>SnapshotStore</c> / 判定器注册表等）。</summary>
     Registry = 0,
 
     /// <summary>提供器（<c>CardLibrary</c> 延迟提供器 / <c>IScriptEvaluator</c> 等）。</summary>
@@ -87,7 +87,7 @@ public sealed record GameHookPendingTrigger(
 /// <summary>
 /// 游戏层接入点／观察面／扩展点的**聚合索引**（03-hook定义 清单层的代码侧承载；纯声明、零行为）。
 /// 信号常量／载荷键／判定器名／触发器分层**一律转发引用**既有定义（<see cref="GameUpdates"/>、
-/// <see cref="JudicatorNames"/>、<see cref="TriggerLayer"/>），不复制字面值（防第二真源）；
+/// <see cref="JudicatorNames"/>），不复制字面值（防第二真源）；
 /// 分类枚举与待补层为本类新定义。
 /// 边界：本类不含内核信号 <c>card.placed</c>（<c>Updates.CardPlaced</c>，经 <c>GameUpdates.EmitCardPlaced</c> 转发）。
 /// </summary>
@@ -405,14 +405,6 @@ public static class GameHooks
     public static IReadOnlyList<string> ExternalJudicatorNames { get; } = new[]
     {
         JudicatorDeckTopTag,
-    };
-
-    // ---------- 触发器分层（转发引用 TriggerLayer 成员） ----------
-
-    /// <summary>触发器分层全量（转发 <see cref="TriggerLayer"/> 成员；名称由 <c>ToString</c> 派生）。</summary>
-    public static IReadOnlyList<TriggerLayer> TriggerLayers { get; } = new[]
-    {
-        TriggerLayer.LowLevel, TriggerLayer.External,
     };
 
     // ---------- 流程位标识（非信号；待补层对位用） ----------

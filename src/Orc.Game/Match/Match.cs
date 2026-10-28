@@ -8,6 +8,7 @@ using Orc.Game.Damage;
 using Orc.Game.Effects;
 using Orc.Game.Judicators;
 using Orc.Game.Managers;
+using Orc.Game.Model;
 using Orc.Game.Players;
 using Orc.Game.Targeting;
 using Orc.Game.Triggers;
@@ -172,10 +173,48 @@ public sealed class Match
         _cardLoader = cardLoader;
         _sandboxAuthorized = resolvedOptions.SandboxAuthorized;
         Engine = new LogicEngine();
+
+        // 批次 2（S3／S7）：编排引擎实体——对局级**单例**（R6b），信号＝引擎实体的成员触发器。
+        // 批次 3：该运行时同时挂到引擎的审查面（S10 的实体—成员—挂载边图以此为数据源）；
+        // 生产发射仍走旧总线直到批次 4（共存边界见 docs/引擎重构-编排实体化/PROGRESS.md）。
+        EngineRuntime = GameEnginePrefabs.CreateRuntime();
+        Engine.Model = EngineRuntime;
+
+        // E1-34（DSL 可运行）：默认装配脚本求值器——csx 处理器（效果解析器产物）需要它才能编译执行。
+        // 批次 4（S14）：**提前到构造期**——装载门要求 csx 在装载期全量预编译（S5 第 9 条），
+        // 而效果库目录的装载发生在 Initialize 之前（卡加载链解析效果引用所必需）。
+        // 内核零依赖口径不变（接口倒置），实现由 satellite（Orc.Script）提供；宿主已装配＝不覆盖。
+        Engine.ScriptEvaluator ??= new Orc.Script.CSharpScriptEvaluator();
+
+        // A2（决策门 A）：内建词条行为制品＝v4 效果组件（Cards/KeywordPrefabs/*.component.json）——
+        // 构造期装进编排运行时目录：①词条效果绑定核验（Initialize 的装配段）以目录为判据；②授予链的
+        // v4 首选路径（KeywordManager.TryAttachComponent）同以目录为判据；两者都在 Initialize 之前就位。
+        KeywordComponentLibrary.LoadInto(EngineRuntime, Engine.ScriptEvaluator);
     }
 
     /// <summary>对局引擎（公开；外部经此访问总线/总流以订阅更新——订阅须在 <see cref="Initialize"/> 前挂接）。</summary>
     public LogicEngine Engine { get; }
+
+    /// <summary>
+    /// **组件失败出口**（装配方注入；null＝无报告面）：卡级装载失败（如效果 csx 在 v4 承载视图下编译不过）
+    /// 发生时，把定位信息交给宿主——宿主负责回填卡牌加载报告（<c>CardLoadReport</c> 在 <c>Orc.Packages</c>，
+    /// 游戏层不引用它，故只能经这个缝交出去）。
+    /// <para>
+    /// 时序：须在 <see cref="Initialize"/> **之前**设置（装载发生在初始化内）；粒度＝一次装载批量一次。
+    /// </para>
+    /// </summary>
+    public Action<IReadOnlyList<CardComponentFailureData>>? ComponentFailureSink { get; set; }
+
+    /// <summary>
+    /// 编排运行时（新模型的引擎实体；对局级单例，R6b）：<c>engine</c> 根下合并内核 4 个信号、
+    /// 游戏层 35 个信号与 9 个引擎流程成员（S3／S7）。
+    /// <para>
+    /// **A2 起它是生产执行面**：<see cref="Engine"/> 的 <c>Emit</c>／<c>Mount</c> 全部经它——
+    /// 发射＝对 <c>engine#&lt;信号&gt;</c> 成员的调用，订阅＝该成员上的边（<c>Orc.Core.SignalBridge</c>）。
+    /// 总线门面已在 b5 删除（详见 PROGRESS.md §十八）——这里只剩一条执行路。
+    /// </para>
+    /// </summary>
+    public Orc.Core.Model.OrchestrationRuntime EngineRuntime { get; }
 
     /// <summary>对局状态（准备 / 换牌 / 进行 / 结束——经生命周期对象读；"结束"＝HQ≤0 或认输立即终局，不可逆）。</summary>
     public MatchState State => _lifecycle.State;
@@ -204,14 +243,6 @@ public sealed class Match
 
     /// <summary>本次实际使用的随机种子（传入则＝传入值；未传入则＝自动生成值，支撑事后复现）。</summary>
     public int Seed { get; }
-
-    // ---------- 触发器注册表（对局级机制；2A） ----------
-
-    /// <summary>
-    /// 触发器注册表（对局级；与对局生命周期一致——创建即就绪、随对局回收；每对局一份）。
-    /// 登记「触发器对象本体＋分层分类」；注册与挂载/运行完全解耦；本批声明位不注册（真实注册自 2C）。
-    /// </summary>
-    public TriggerRegistry TriggerRegistry { get; } = new();
 
     // ---------- 管理器群（五管理器公开；仅"进行"态可访问） ----------
 
@@ -477,10 +508,6 @@ public sealed class Match
         // 动作作用域（UI 消费桥接）：初始化＝一次大动作；内部洗切/加载/起始回合等信号合并入本段。
         await using var _actionScope = Engine.BeginAction();
 
-        // W3-A3：装载管线「装载完成动作」注册（游戏层装配期）——被动效果装载成功后自动登记托管清理
-        // （卸载时按来源撤销该效果施加的修饰器/光环声明；任何装载入口含复装统一生效；内核不感知本语义）。
-        Engine.RegisterCardMountCompletedAction(CardEffectLoader.CreateManagedCleanupAction(Engine));
-
         // 生成并初始化管理器群（2B：卡牌库注入回合上下文提供器——反制「仅己方回合」验证的延迟读取来源；
         // 2C：加注词条装载上下文提供器——词条装载〔伏击效果〕的延迟读取来源；
         // W1-1：加注对局级卡牌 ID 提供器——加载时分配自增 ID〔构筑外判定基础〕的延迟读取来源；
@@ -518,6 +545,8 @@ public sealed class Match
         // E1-25：资源管理器注入引擎（发槽信号）＋判定器延迟读取面（判定器注册表在本行之后创建——延迟求值）。
         _resourceManager = new ResourceManager(Engine, () => _judicators, _options.MaxPointSlots);
         _playerManager = new PlayerManager(Engine, _cardLibrary, () => _commandManager?.DrawAction);
+        // 卡级失败出口：lambda 现读属性——宿主在 Initialize 前任意时刻设置均生效（含装配期后置注入）。
+        _playerManager.ComponentFailureSink = failures => ComponentFailureSink?.Invoke(failures);
         _playerManager.CreatePlayers(_deckForPlayerA, _deckForPlayerB);
         // E1-25 后续：资源管理器注入各玩家（「卡 → 玩家 → 服务」路径——卡级扣费/退点经 ResourceManager.ResolveFor 取用）。
         foreach (var player in _playerManager.Players)
@@ -573,7 +602,9 @@ public sealed class Match
             // S7：加入手牌动作面（对局装配＝指挥管理器持有的同一动作实例）。
             () => _commandManager?.AddToHandAction,
             // S7：局内新增卡的单卡装载面（对局装配＝同一卡牌加载器实例；null＝独立装配路径不设装载）。
-            _cardLoader);
+            _cardLoader,
+            // §34：运行期单卡创建同样是"卡级失败"来源——同一出口（宿主据此回填卡牌加载报告）。
+            failures => ComponentFailureSink?.Invoke(failures));
         foreach (var player in _playerManager.Players)
         {
             player.ConfigureCardService(_cardService);
@@ -606,6 +637,9 @@ public sealed class Match
         // 时点＝卡加载之前（远早于洗切与加载段——就绪由装配链位置保证：「装配期已注册条目在卡加载阶段即可被解析调用」）。
         _judicators = new JudicatorRegistry();
         Engine.Judicators = _judicators; // 效果装载链落地 judicatorWrappers 的解析源（对局级）
+        // S9（批次 5）：判定器包装器与成员包装器**同一注册面**（R1i）——组件资产的 judge-wraps 登记在
+        // 编排运行时的 WrapRegistry 上，判定器调用点在此接入，执行相位语义与成员包装器相同。
+        _judicators.ModelWraps = EngineRuntime.Wraps;
         // A.20：行动输入准入判定器（无状态；每次查询/提交现读前端状态）。
         _judicators.Register(JudicatorNames.ActionInput,
             new ActionInputJudicator(player => InteractionStateReader?.Invoke(player)));
@@ -638,11 +672,7 @@ public sealed class Match
                 _judicators,
                 Engine.Prefabs,
                 uiServices: new Orc.Game.Ui.UiPluginServices(UiProjections));
-            foreach (var failure in activation.Failures)
-            {
-                Engine.RootStream.WriteLog(
-                    "包激活（前）", failure, Orc.Core.LogLevel.Error, new[] { "package", "activation" });
-            }
+            HandleActivation("包激活（前）", activation);
         }
 
         // E1-34（DSL 可运行）：默认装配脚本求值器——csx 处理器（效果解析器产物）需要它才能编译执行；
@@ -662,29 +692,11 @@ public sealed class Match
             () => _resourceManager,
             () => Engine,
             () => _lifecycle.IsActionAllowed,
-            battlefield: () => _battlefieldManager.Battlefield);
+            battlefield: () => _battlefieldManager.Battlefield,
+            allowRandom: () => _options.AllowRandomTargeting);
         foreach (var player in _playerManager.Players)
         {
             player.ConfigureEffectRuntime(_effectRuntime);
-        }
-
-        // E1-27 加性（任务 4 前置）：对局级具名触发器注册表——把四个流程触发器按名登记，供效果预制体 `injects`
-        // 在宿主卡未命中时回退解析（解析发生在装载期，创建时点晚于本注册表但早于卡加载，故以延迟提供器承载）。
-        var matchTriggers = new MatchNamedTriggers();
-        matchTriggers.Register("指挥触发器", typeof(CommandTriggerView), () => _commandManager?.CommandTrigger);
-        matchTriggers.Register("单位移动触发器", typeof(UnitMoveTriggerView), () => _commandManager?.UnitMoveTrigger);
-        matchTriggers.Register("单位攻击触发器", typeof(UnitAttackTriggerView), () => _commandManager?.UnitAttackTrigger);
-        matchTriggers.Register("造成攻击伤害触发器", typeof(AttackDamageTriggerView), () => _commandManager?.AttackDamageTrigger);
-        matchTriggers.Register("行动额度触发器", typeof(ActionQuotaView), () => _commandManager?.ActionQuotaTrigger);
-        // 伤害管线四端按名登记（R11 面；预制体 `injects` 可把 csx handler 注入伤害改写点）：
-        // 处理端＝唯一扣数值处（「受到的伤害 -N」类效果的落点）；三个触发端＝按来源分的量改写点。
-        matchTriggers.Register("伤害处理触发器", typeof(DamageApplyView), () => _commandManager?.DamagePipeline.Apply);
-        matchTriggers.Register("对战伤害触发器", typeof(DamageEventView), () => _commandManager?.DamagePipeline.CombatDamage);
-        matchTriggers.Register("效果伤害触发器", typeof(DamageEventView), () => _commandManager?.DamagePipeline.EffectDamage);
-        matchTriggers.Register("战斗伤害触发器", typeof(DamageEventView), () => _commandManager?.DamagePipeline.BattleDamage);
-        foreach (var player in _playerManager.Players)
-        {
-            player.ConfigureMatchTriggers(matchTriggers);
         }
 
         // 外部装配段（追加/定制通道——最小加性保持；重复注册默认名被拒绝〔J1「注册即配置、重复拒绝」口径〕；
@@ -734,7 +746,7 @@ public sealed class Match
         // 资产化 P11（甲）：四类内置流程触发器登记**不再硬编码**——由内置插件声明、在本相经绑定面执行。
         if (_packageActivator is not null)
         {
-            var binding = new Orc.Game.Plugins.MatchBindingServices(() => _commandManager, TriggerRegistry, Engine);
+            var binding = new Orc.Game.Plugins.MatchBindingServices(() => _commandManager, Engine);
             var activation = _packageActivator.Activate(
                 Orc.Core.AssetActivationPhase.PostCommand,
                 matchServices,
@@ -743,11 +755,7 @@ public sealed class Match
                 _judicators,
                 Engine.Prefabs,
                 uiServices: new Orc.Game.Ui.UiPluginServices(UiProjections));
-            foreach (var failure in activation.Failures)
-            {
-                Engine.RootStream.WriteLog(
-                    "包激活（后）", failure, Orc.Core.LogLevel.Error, new[] { "package", "activation" });
-            }
+            HandleActivation("包激活（后）", activation);
         }
 
         // A2 加性：HQ 词条面的装载上下文提供器注入（延迟读取——与卡牌侧同构；HQ 免疫等词条运行时授予的
@@ -884,7 +892,7 @@ public sealed class Match
     /// <exception cref="InvalidOperationException">装载链结构性失败；或卡位结局与输入不同长（装配契约不符）。</exception>
     private async Task LoadDecksFromCardLoaderAsync(IMatchCardLoader loader, CancellationToken ct)
     {
-        loader.Attach(_cardLibrary!, TriggerRegistry);
+        loader.Attach(_cardLibrary!);
 
         var slots = new List<MatchCardSlot>(_deckForPlayerA.Count + _deckForPlayerB.Count);
         for (var i = 0; i < _deckForPlayerA.Count; i++)
@@ -1120,6 +1128,36 @@ public sealed class Match
         {
             throw new ArgumentOutOfRangeException(
                 paramName, allyFaction, "盟国不得与主国相同（创建期 fail-fast 拒绝）。");
+        }
+    }
+
+    /// <summary>
+    /// 包激活结果落地（S14）：失败逐条写日志 → 可选包跳过与必需包失败写入装载门报告（审查面可见）→
+    /// **必需包失败＝对局不开局**（初始化上抛，且不留半初始化状态：此处在初始化早期，异常沿 Initialize 上抛）。
+    /// </summary>
+    private void HandleActivation(string phase, Orc.Game.Plugins.MatchPackageActivationResult activation)
+    {
+        foreach (var failure in activation.Failures)
+        {
+            Engine.RootStream.WriteLog(
+                phase, failure, Orc.Core.LogLevel.Error, new[] { "package", "activation" });
+        }
+
+        foreach (var skip in activation.SkippedPackages)
+        {
+            Engine.LoadGate.Record(
+                skip.PackageId,
+                skip.Required,
+                skip.Required ? Orc.Core.PackLoadStatus.Failed : Orc.Core.PackLoadStatus.Skipped,
+                skip.Failures);
+        }
+
+        var required = activation.RequiredFailures;
+        if (required.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"必需卡包激活失败：{string.Join("；", required.Select(static r => $"{r.PackageId}（{string.Join("／", r.Failures)}）"))}"
+                + " —— 必需包失败＝对局不开局（S14 第 2 条）。");
         }
     }
 }

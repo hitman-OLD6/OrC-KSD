@@ -178,19 +178,15 @@ internal sealed class BurnedWatchHandler
 {
     private readonly LogicEngine _engine;
     private readonly Player _watchedPlayer;
-    private readonly Trigger<BurnedWatchView> _watchTrigger;
+    private readonly string _watchName;
     private readonly List<Card> _burned = new();
+    private IDisposable? _watch;
 
     public BurnedWatchHandler(LogicEngine engine, Player watchedPlayer)
     {
         _engine = engine;
         _watchedPlayer = watchedPlayer;
-        _watchTrigger = new Trigger<BurnedWatchView>(
-            $"{watchedPlayer.Index}/爆牌监听",
-            TriggerKind.Passive,
-            events: new[] { new TriggerEvent<BurnedWatchView>("累计", OnBurnedAsync) },
-            hooks: new[] { GameUpdates.CardBurned },
-            owner: this);
+        _watchName = $"{watchedPlayer.Index}/爆牌监听";
     }
 
     /// <summary>收到的 card.burned 事件总数（过滤前；真实源联动证据）。</summary>
@@ -199,7 +195,8 @@ internal sealed class BurnedWatchHandler
     /// <summary>被爆卡记录（归属过滤后、发生序）。</summary>
     public IReadOnlyList<Card> Burned => _burned;
 
-    public void Attach() => _engine.Bus.Mount(_watchTrigger);
+    public void Attach()
+        => _watch ??= _engine.Watch<BurnedWatchView>(GameUpdates.CardBurned, _watchName, this, OnBurnedAsync);
 
     private Task OnBurnedAsync(BurnedWatchView view, Context ctx, CancellationToken ct)
     {

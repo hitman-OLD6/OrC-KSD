@@ -5,15 +5,17 @@ using Xunit;
 namespace Orc.Tests;
 
 /// <summary>
-/// S-C4 审查链导出验收：JSON 真源（结构/缺口/hook 段）与派生文本视图。
+/// S-C4 审查链导出验收（v4 形态：节点＝**成员**，实例＝该成员上的外来边）：
+/// JSON 真源（结构／缺口／边四元组）与派生文本视图。
 /// </summary>
 public class AuditChainExportTests
 {
-    private static Trigger<CounterView> Make(string key, params string[] downstream)
+    /// <summary>订阅一个**已声明**的内核信号（card.placed）：产生"端点实体 + engine#card.placed 边"。</summary>
+    private static LogicEngine Subscribed(string name = "挂", string signal = Updates.CardPlaced)
     {
-        var trigger = new Trigger<CounterView>(key, stableKey: key);
-        trigger.Register("事件", (v, c, ct) => Task.CompletedTask, downstream: downstream);
-        return trigger;
+        var engine = new LogicEngine();
+        SignalTestHelpers.Subscribe(engine, signal, name, new List<string>());
+        return engine;
     }
 
     [Fact]
@@ -25,114 +27,116 @@ public class AuditChainExportTests
 
         Assert.Equal(OrchestrationManager.SchemaVersion, doc.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.Equal(0, doc.RootElement.GetProperty("nodes").GetArrayLength());
-        Assert.Equal(0, doc.RootElement.GetProperty("hooks").GetArrayLength());
+        Assert.Equal(0, doc.RootElement.GetProperty("edges").GetArrayLength());   // 无任何挂载边
+        Assert.Equal(0, doc.RootElement.GetProperty("wraps").GetArrayLength());
+        Assert.Equal(1, doc.RootElement.GetProperty("entities").GetArrayLength()); // 实体节点只有引擎（内核 4 信号已声明）
     }
 
     [Fact]
-    public void JSON_节点事件与实例_完整表达()
+    public void JSON_节点以成员为粒度_实例与事件步骤完整表达()
     {
-        var engine = new LogicEngine();
-        engine.Orchestration.Register(Make("root", "mid"), host: "卡:甲");
-        engine.Orchestration.Register(Make("mid"), host: "卡:乙");
-
-        using var doc = JsonDocument.Parse(engine.ExportAuditChainJson());
+        using var doc = JsonDocument.Parse(Subscribed().ExportAuditChainJson());
         var nodes = doc.RootElement.GetProperty("nodes");
 
-        Assert.Equal(2, nodes.GetArrayLength());
+        var node = Assert.Single(nodes.EnumerateArray().ToArray());
+        Assert.Equal("engine#card.placed", node.GetProperty("stableKey").GetString()); // 节点＝成员地址
+        Assert.Equal("engine#card.placed", node.GetProperty("displayName").GetString());
+        Assert.Equal("passive", node.GetProperty("kind").GetString());  // 信号成员＝等更新
+        Assert.False(node.GetProperty("serializable").GetBoolean());
+        Assert.True(node.GetProperty("declaredKey").GetBoolean());
 
-        var root = nodes.EnumerateArray().Single(n => n.GetProperty("stableKey").GetString() == "root");
-        Assert.Equal("active", root.GetProperty("kind").GetString());
-        Assert.False(root.GetProperty("serializable").GetBoolean());
-        Assert.True(root.GetProperty("declaredKey").GetBoolean());
-        Assert.Equal("卡:甲", root.GetProperty("instances")[0].GetProperty("host").GetString());
-        Assert.Equal("explicit", root.GetProperty("instances")[0].GetProperty("origin").GetString());
-        Assert.False(root.GetProperty("instances")[0].GetProperty("mounted").GetBoolean());
+        // 实例＝该成员上的一条外来边（来源实体／来源类别／装载态）。
+        var instance = node.GetProperty("instances")[0];
+        Assert.Equal("挂", instance.GetProperty("host").GetString());
+        Assert.Equal("Explicit", instance.GetProperty("origin").GetString());
+        Assert.True(instance.GetProperty("mounted").GetBoolean());
 
-        var downstream = root.GetProperty("events")[0].GetProperty("downstream")[0];
-        Assert.Equal("mid", downstream.GetProperty("key").GetString());
+        // 事件步骤＝外来边在成员内的位次（1 起）与位次来源；旧 band 段号不再导出。
+        var step = node.GetProperty("events")[0];
+        Assert.Equal("挂", step.GetProperty("name").GetString());
+        Assert.Equal(1, step.GetProperty("seq").GetInt32());
+        Assert.Equal("appended", step.GetProperty("position").GetString());
+        Assert.False(step.TryGetProperty("band", out _));
+
+        // 下游＝边声明的目标地址（本成员自身；已解析）。
+        var downstream = node.GetProperty("downstream")[0];
+        Assert.Equal("engine#card.placed", downstream.GetProperty("key").GetString());
         Assert.NotEqual(JsonValueKind.Null, downstream.GetProperty("resolved").ValueKind);
     }
 
     [Fact]
-    public void JSON_未登记的下游_解析为null()
+    public void JSON_edges段_含目标来源与顺序来源()
     {
+        // 未声明的信号名：边落在 hook#<名> 上、显式标为图缺口（"这个名字没人声明过"仍可读出）。
         var engine = new LogicEngine();
-        engine.Orchestration.Register(Make("solo", "missing"));
+        SignalTestHelpers.Subscribe(engine, "h.json", "挂", new List<string>());
 
         using var doc = JsonDocument.Parse(engine.ExportAuditChainJson());
-        var downstream = doc.RootElement.GetProperty("nodes")[0]
-            .GetProperty("events")[0].GetProperty("downstream")[0];
+        var edge = doc.RootElement.GetProperty("edges")[0];
 
-        Assert.Equal(JsonValueKind.Null, downstream.GetProperty("resolved").ValueKind);
+        // 目标、来源、位次来源、位次，四者一起才能推出执行序；来源是四类闭合枚举，不再有"无来源"。
+        Assert.Equal("hook#h.json", edge.GetProperty("target").GetString());
+        Assert.Equal("h.json", edge.GetProperty("targetMember").GetString());
+        Assert.Equal("挂", edge.GetProperty("declaring").GetString());
+        Assert.Equal("explicit", edge.GetProperty("source").GetString());
+        Assert.Equal("appended", edge.GetProperty("orderSource").GetString());
+        Assert.Equal(1, edge.GetProperty("position").GetInt32());
+        Assert.True(edge.GetProperty("graphGap").GetBoolean()); // 未对应信号成员＝图缺口（显式呈现）
+
+        // 同一条边挂在**已声明**信号上时：图缺口标记消失、目标为成员地址。
+        using var declared = JsonDocument.Parse(Subscribed().ExportAuditChainJson());
+        var signalEdge = declared.RootElement.GetProperty("edges")[0];
+        Assert.Equal("engine#card.placed", signalEdge.GetProperty("target").GetString());
+        Assert.False(signalEdge.GetProperty("graphGap").GetBoolean());
     }
 
     [Fact]
-    public void JSON_hook段_含标识与订阅者()
+    public void JSON_含四集合与schema版本2()
     {
-        var engine = new LogicEngine();
-        engine.Bus.Mount(BusTestHelpers.RecordingPassive("挂", new[] { "h.json" }, new List<string>()));
+        using var doc = JsonDocument.Parse(Subscribed().ExportAuditChainJson());
+        var root = doc.RootElement;
 
-        using var doc = JsonDocument.Parse(engine.ExportAuditChainJson());
-        var hook = doc.RootElement.GetProperty("hooks")[0];
-
-        Assert.Equal("h.json", hook.GetProperty("hook").GetString());
-        Assert.Equal("挂", hook.GetProperty("subscribers")[0].GetString());
-        Assert.False(string.IsNullOrWhiteSpace(hook.GetProperty("id").GetString()));
+        Assert.Equal(2, root.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("entities").ValueKind);
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("members").ValueKind);
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("edges").ValueKind);
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("wraps").ValueKind);
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("nodes").ValueKind); // 能力不退化：成员图保留
+        Assert.False(root.TryGetProperty("hooks", out _)); // 旧订阅读面不再导出（不留两套读面）
     }
 
     [Fact]
     public void 文本视图_含关键行()
     {
-        var engine = new LogicEngine();
-        engine.Orchestration.Register(Make("root", "mid"), host: "卡:甲");
-        engine.Orchestration.Register(Make("mid"));
+        var text = Subscribed().ExportAuditChainText();
 
-        var text = engine.ExportAuditChainText();
-
-        Assert.Contains("审查链 schemaVersion=1", text);
-        Assert.Contains("[主动] root", text);
-        Assert.Contains("→ mid (resolved ", text);
+        Assert.Contains("审查链 schemaVersion=2", text);
+        Assert.Contains("[被动] engine#card.placed key=engine#card.placed", text);
+        Assert.Contains("→ engine#card.placed (resolved ", text);
         Assert.Contains("serializable=false", text);
-        Assert.Contains("origin=explicit", text);
+        Assert.Contains("origin=Explicit mounted=true", text);
+        Assert.Contains("#1 挂 pos=appended", text);
     }
 
     [Fact]
-    public void 文本视图_未登记下游_标缺口()
+    public void 可达链导出_以成员节点为起点且下游解析为自身()
     {
-        var engine = new LogicEngine();
-        engine.Orchestration.Register(Make("solo", "ghost"));
+        var engine = Subscribed();
 
-        Assert.Contains("→ ghost (未登记·图缺口)", engine.ExportAuditChainText());
-    }
-
-    [Fact]
-    public void 可达链导出_仅含起点可达集()
-    {
-        var engine = new LogicEngine();
-        engine.Orchestration.Register(Make("root", "mid"));
-        engine.Orchestration.Register(Make("mid"));
-        engine.Orchestration.Register(Make("orphan"));
-
-        using var doc = JsonDocument.Parse(engine.ExportChainJson(TriggerId.FromKey("root")));
+        using var doc = JsonDocument.Parse(engine.ExportChainJson(TriggerId.FromKey("engine#card.placed")));
         var keys = doc.RootElement.GetProperty("nodes").EnumerateArray()
             .Select(n => n.GetProperty("stableKey").GetString()).ToList();
 
-        Assert.Equal(2, keys.Count);
-        Assert.Contains("root", keys);
-        Assert.Contains("mid", keys);
-        Assert.DoesNotContain("orphan", keys);
+        Assert.Equal(new[] { "engine#card.placed" }, keys);
     }
 
     [Fact]
-    public void 文本视图_被动触发器_显示hook与挂载态()
+    public void 可达链导出_起点未登记时为空链()
     {
-        var engine = new LogicEngine();
-        engine.Bus.Mount(BusTestHelpers.RecordingPassive("被", new[] { "h.text" }, new List<string>()));
+        var engine = Subscribed();
 
-        var text = engine.ExportAuditChainText();
+        using var doc = JsonDocument.Parse(engine.ExportChainJson(TriggerId.FromKey("engine#not-a-member")));
 
-        Assert.Contains("[被动] 被", text);
-        Assert.Contains("hooks: h.text", text);
-        Assert.Contains("origin=bus-mount mounted=true", text);
+        Assert.Equal(0, doc.RootElement.GetProperty("nodes").GetArrayLength());
     }
 }

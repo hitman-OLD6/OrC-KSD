@@ -1,7 +1,9 @@
-﻿using Orc.Cards;
+using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game;
 using Orc.Game.Cards;
+using Orc.Game.Model;
 using Orc.Game.Players;
 using Orc.Game.Actions;
 
@@ -21,6 +23,7 @@ public sealed class AddToHandAction : IAddToHandAction
 
     private readonly LogicEngine _engine;
     private readonly IHandActionServices _services;
+    private bool _bound;
 
     /// <summary>创建加入手牌动作（两端默认 handler 都在本类内注册）。</summary>
     /// <param name="engine">对局引擎（执行流挂载点）。</param>
@@ -33,21 +36,46 @@ public sealed class AddToHandAction : IAddToHandAction
         _engine = engine;
         _services = services;
 
-        Trigger = new Trigger<AddToHandTriggerView>(
-            "加入手牌触发器", bandType: typeof(ActionTriggerBands));
-        Handle = new Trigger<AddToHandHandleView>(
-            "加入手牌处理触发器", bandType: typeof(ActionHandleBands));
+        // U5-a：两端＝引擎成员；实例是过渡期内部执行面（U5-b 随旧类型退役）。
+        Trigger = MemberAddress.Create(AddressScope.Engine, EngineProcesses.HandAdd);
+        Handle = MemberAddress.Create(AddressScope.Engine, EngineProcesses.HandAddHandle);
 
-        Trigger.Register("通用前置", ValidateAsync, ActionTriggerBands.Initiate, DefaultPriority);
-        Trigger.Register("转发到处理端", ForwardAsync, ActionTriggerBands.Commit, DefaultPriority);
-        Handle.Register("加入手牌", HandleApplyAsync, ActionHandleBands.Apply, DefaultPriority);
+        Ends = new[]
+        {
+            new ActionTriggerEnd("触发端", Trigger),
+            new ActionTriggerEnd(ActionTriggerEnd.HandleRole, Handle),
+        };
     }
 
-    /// <summary>加入手牌**触发端**。</summary>
-    public Trigger<AddToHandTriggerView> Trigger { get; }
+    /// <summary>
+    /// 把两端的默认流程接成引擎成员上的**自有边**（首次执行时接入；缺编排运行时＝明确失败）。
+    /// <para>接入序＝执行序：通用前置 → 转发到处理端／加入手牌（旧 Initiate／Commit／Apply 段由位次表达）。</para>
+    /// </summary>
+    private void EnsureBound()
+    {
+        if (_bound)
+        {
+            return;
+        }
 
-    /// <summary>加入手牌**处理端**（<c>Apply</c> 段＝入列表或爆牌）。</summary>
-    public Trigger<AddToHandHandleView> Handle { get; }
+        var runtime = _engine.Model
+            ?? throw new InvalidOperationException(
+                $"加入手牌动作需要已装配的编排运行时（{Trigger}／{Handle} 是引擎成员）：本引擎未挂 Model。");
+
+        runtime.Engine.AttachOwnedEdge(EngineProcesses.HandAdd, MemberEdges.For<AddToHandTriggerView>(ValidateAsync));
+        runtime.Engine.AttachOwnedEdge(EngineProcesses.HandAdd, MemberEdges.For<AddToHandTriggerView>(ForwardAsync));
+        runtime.Engine.AttachOwnedEdge(EngineProcesses.HandAddHandle, MemberEdges.For<AddToHandHandleView>(HandleApplyAsync));
+        _bound = true;
+    }
+
+    /// <inheritdoc />
+    public MemberAddress Trigger { get; }
+
+    /// <inheritdoc />
+    public MemberAddress Handle { get; }
+
+    /// <inheritdoc />
+    public IReadOnlyList<ActionTriggerEnd> Ends { get; }
 
     /// <inheritdoc />
     public async Task<ActionResult> AddAsync(
@@ -68,7 +96,8 @@ public sealed class AddToHandAction : IAddToHandAction
             data[TriggerPayloadKeys.TriggerCard] = triggerCard;
         }
 
-        await Trigger.InvokeAsync(_engine, data, ct).ConfigureAwait(false);
+        EnsureBound();
+        await _engine.InvokeMemberAsync(EngineProcesses.HandAdd, new Context(data), ct).ConfigureAwait(false);
 
         if (result.Outcome == ActionOutcomeKind.Skipped)
         {
@@ -107,7 +136,7 @@ public sealed class AddToHandAction : IAddToHandAction
             data[nameof(AddToHandHandleView.TriggerCard)] = view.TriggerCard;
         }
 
-        return Handle.InvokeAsync(_engine, data, ct);
+        return _engine.InvokeMemberAsync(EngineProcesses.HandAddHandle, new Context(data), ct);
     }
 
     /// <summary>处理端默认执行体：满手＝爆牌失败分支；未满＝入列表＋<c>card.hand.add</c>。</summary>

@@ -1,0 +1,29 @@
+<Project>
+
+  <!--
+    全仓统一构建输出槽位（本次改造 D-1 裁决）
+
+    目的：所有工程（src / tests / samples / tools）的 bin 输出一律落在同一个
+    可复用目录 artifacts/slot 之下，零参数即命中；不再产生 artifacts/test-<批次>
+    这类每跑一次新建的目录。
+
+    槽位内布局（SDK artifacts output 默认布局）：
+      artifacts/slot/bin/<工程名>/<config>/
+      例：artifacts/slot/bin/Orc.Manager/debug/Orc.Manager.dll
+
+    为什么 obj 不跟着搬（UseArtifactsIntermediateOutput=false）：
+      本机 NuGet restore 已损坏（GetFolderPath(CommonApplicationData) 返回空，
+      XPlatMachineWideSetting 构造抛 ArgumentNullException(path1)，全新空工程同样复现）。
+      把 obj 搬进槽位会强制重新还原，从而让任何构建都无法进行。
+      本裁决要求的是「输出目录唯一」，中间产物留在工程内 obj/ 不产生第二份输出真相。
+
+    禁止事项（由 Directory.Build.targets 的 Guard-ArtifactSlot 强制）：
+      1. 用 -p:ArtifactsPath 覆盖，或用 dotnet test 的 artifacts-path 参数把输出改到别处；
+      2. 槽位落在 src/** 或任何 bin/ 之下（会撞常驻 Manager 进程的 DLL 锁）。
+  -->
+  <PropertyGroup>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts/slot</ArtifactsPath>
+    <UseArtifactsIntermediateOutput>false</UseArtifactsIntermediateOutput>
+  </PropertyGroup>
+
+</Project>

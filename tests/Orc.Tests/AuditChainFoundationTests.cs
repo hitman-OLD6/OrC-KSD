@@ -113,116 +113,60 @@ public class AuditChainFoundationTests
         Assert.False(b.Hooks.TryGetId("only.a", out _));
     }
 
-    // ---------- S-C1：触发器稳定键 ----------
+    // ---------- S-C1：定义级标识 = 成员地址 ----------
 
     [Fact]
-    public void 触发器_显式稳定键_定义级标识由键派生()
+    public void 成员地址即定义级标识_同址同标识()
     {
-        var t1 = new Trigger<CounterView>("打出触发器", stableKey: "unit.play");
-        var t2 = new Trigger<CounterView>("部署触发器", stableKey: "unit.play");
-
-        Assert.Equal("unit.play", t1.StableKey);
-        Assert.True(t1.HasDeclaredStableKey);
-        Assert.Equal(t1.Id, t2.Id); // 同键＝同种类标识（与展示名无关）
-        Assert.Equal(TriggerId.FromKey("unit.play"), t1.Id);
+        // 旧"触发器稳定键"由成员地址承担：与展示名无关、同址恒同标识。
+        Assert.Equal(TriggerId.FromKey("engine#unit.play"), TriggerId.FromKey("engine#unit.play"));
+        Assert.NotEqual(TriggerId.FromKey("engine#unit.play"), TriggerId.FromKey("engine#unit.deploy"));
     }
 
-    [Fact]
-    public void 触发器_未声明稳定键_回退派生并标弱身份()
-    {
-        var named = new Trigger<CounterView>("自定义触发器");
-        Assert.False(named.HasDeclaredStableKey);
-        Assert.Equal("自定义触发器", named.StableKey);
-
-        var unnamed = new Trigger<CounterView>();
-        Assert.False(unnamed.HasDeclaredStableKey);
-        Assert.Equal(nameof(CounterView), unnamed.StableKey);
-    }
+    // ---------- S-C2：审查面上的订阅边 ----------
 
     [Fact]
-    public void 触发器_空白稳定键_拒绝()
-    {
-        Assert.Throws<ArgumentException>(() => new Trigger<CounterView>("x", stableKey: "   "));
-    }
-
-    // ---------- S-C2：事件枚举与下游声明 ----------
-
-    [Fact]
-    public void 触发器_事件枚举_按执行序且携带下游声明()
-    {
-        var trigger = new Trigger<CounterView>("t", stableKey: "t.kind");
-        trigger.Register("后置", (v, c, ct) => Task.CompletedTask, priority: 10, downstream: new[] { "unit.deploy" });
-        trigger.Register("前置", (v, c, ct) => Task.CompletedTask, priority: 1);
-
-        var events = trigger.Events;
-
-        Assert.Equal(2, events.Count);
-        Assert.Equal("前置", events[0].Name); // 优先级升序
-        Assert.Equal("后置", events[1].Name);
-        Assert.Empty(events[0].Downstream);
-        Assert.Equal(new[] { "unit.deploy" }, events[1].Downstream);
-        Assert.Equal(1, events[0].Priority);
-    }
-
-    [Fact]
-    public void 触发器_下游声明_含重复项_拒绝()
-    {
-        var trigger = new Trigger<CounterView>("t");
-        Assert.Throws<ArgumentException>(() =>
-            trigger.Register("e", (v, c, ct) => Task.CompletedTask, downstream: new[] { "a", "a" }));
-        Assert.Throws<ArgumentException>(() =>
-            trigger.Register("e", (v, c, ct) => Task.CompletedTask, downstream: new[] { " " }));
-    }
-
-    // ---------- S-C2：总线枚举面 ----------
-
-    [Fact]
-    public void 总线_枚举hook_按挂载序且含订阅者()
+    public void 审查面_按执行序列出hook的边()
     {
         var engine = new LogicEngine();
         var trace = new List<string>();
-        var slow = BusTestHelpers.RecordingPassive("慢", new[] { "h.one" }, trace, UpdatePriorities.Low);
-        var fast = BusTestHelpers.RecordingPassive("快", new[] { "h.one" }, trace, UpdatePriorities.High);
-        var other = BusTestHelpers.RecordingPassive("其它", new[] { "h.two" }, trace);
+        SignalTestHelpers.Subscribe(engine, "h.one", "慢", trace, UpdatePriorities.Low);
+        SignalTestHelpers.Subscribe(engine, "h.one", "快", trace, UpdatePriorities.High);
+        SignalTestHelpers.Subscribe(engine, "h.two", "其它", trace);
 
-        engine.Bus.Mount(slow);
-        engine.Bus.Mount(fast);
-        engine.Bus.Mount(other);
+        // S3-14：hook 的"谁订阅了"由审查图的边回答（原 EnumerateHooks 的等价替代）。
+        var one = AuditTestKit.EdgesInto(engine, "h.one");
+        Assert.Equal(2, one.Count);
+        Assert.Equal(new[] { "快", "慢" }, one.Select(e => e.Member)); // 位次＝执行序（优先级升序）
+        Assert.All(one, e => Assert.True(e.GraphGap)); // "h.one" 不是信号成员：标为图缺口，不再静默
 
-        var hooks = engine.Bus.EnumerateHooks();
-
-        Assert.Equal(2, hooks.Count);
-        Assert.Equal("h.one", hooks[0].Hook);
-        Assert.Equal(HookId.FromName("h.one"), hooks[0].Id);
-        Assert.Equal(new[] { "快", "慢" }, hooks[0].Subscribers); // 优先级升序
-        Assert.Equal("h.two", hooks[1].Hook);
+        Assert.Single(AuditTestKit.EdgesInto(engine, "h.two"));
     }
 
     [Fact]
-    public void 总线_挂载_将hook登记进引擎词汇表()
+    public void 订阅信号_将hook名登记进引擎词汇表()
     {
         var engine = new LogicEngine();
         Assert.False(engine.Hooks.TryGetId("custom.placed", out _));
 
-        engine.Bus.Mount(BusTestHelpers.RecordingPassive("t", new[] { "custom.placed" }, new List<string>()));
+        engine.SubscribeMember(
+            "custom.placed", "t", null,
+            new Orc.Core.Model.OwnedEdge((Orc.Core.Model.KernelHandler)((_, _, _) => Task.CompletedTask)));
 
         Assert.True(engine.Hooks.TryGetId("custom.placed", out var id));
         Assert.Equal(HookId.FromName("custom.placed"), id);
     }
 
     [Fact]
-    public void 总线_卸载后_hook枚举不再包含()
+    public void 撤销订阅后_边从审查面消失但词汇表保留()
     {
         var engine = new LogicEngine();
-        var owner = new object();
-        var trigger = BusTestHelpers.RecordingPassive("t", new[] { "h.x" }, new List<string>(), owner: owner);
-        engine.Bus.Mount(trigger);
-        Assert.Single(engine.Bus.EnumerateHooks());
+        var handle = SignalTestHelpers.Subscribe(engine, "h.x", "t", new List<string>());
+        Assert.Single(AuditTestKit.EdgesInto(engine, "h.x"));
 
-        engine.Bus.UnmountOwner(owner);
+        handle.Dispose();
 
-        Assert.Empty(engine.Bus.EnumerateHooks());
-        Assert.True(engine.Hooks.TryGetId("h.x", out _)); // 词汇表登记不因卸载消失（对局内固化）
+        Assert.Empty(AuditTestKit.EdgesInto(engine, "h.x"));
     }
 
     // ---------- S-C2：Context.Engine ----------
@@ -233,18 +177,14 @@ public class AuditChainFoundationTests
         var engine = new LogicEngine();
         LogicEngine? seen = null;
 
-        var trigger = new Trigger<CounterView>(
-            "t",
-            events: new[]
+        var member = KernelTestKit.Member("读引擎", new Orc.Core.Model.OwnedEdge(
+            (Orc.Core.Model.KernelHandler)((_, c, _) =>
             {
-                new TriggerEvent<CounterView>("e", (v, c, ct) =>
-                {
-                    seen = c.Engine;
-                    return Task.CompletedTask;
-                }),
-            });
+                seen = c.Engine;
+                return Task.CompletedTask;
+            })));
 
-        await trigger.InvokeAsync(engine);
+        await KernelTestKit.RunAsync(engine, member);
 
         Assert.Same(engine, seen);
         Assert.Null(new Context().Engine); // 未关联执行会话＝null

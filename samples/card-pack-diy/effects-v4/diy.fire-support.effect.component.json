@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 4,
+  "asset": {
+    "kind": "component",
+    "id": "diy.fire-support.effect",
+    "requires-host": "any",
+    "active-when": "loaded",
+    "one-shot": false,
+    "private-fields": [],
+    "members": [
+      {
+        "name": "onPlayed",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Card",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Effect",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Unit",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Player",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Killer",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Source",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "TriggerCard",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            }
+          ]
+        },
+        "handler": {
+          "id": "diy.fire-support.effect#onPlayed",
+          "entry": "HandleAsync",
+          "script": "Func<dynamic, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n    if (view.Card is not Orc.Cards.Card played)\n    {\n        return;\n    }\n\n    if (!object.ReferenceEquals(played, view.Host))\n    {\n        return;\n    }\n\n    var runtime = Orc.Game.Effects.EffectRuntime.ResolveFor(played);\n    if (runtime is null)\n    {\n        return;\n    }\n\n    var targets = await runtime.SelectAsync(played, new Orc.Game.Effects.EffectSelector(\"one\", \"enemy\"));\n    foreach (var target in targets)\n    {\n        await runtime.DamageAsync(target, 3, played, ct);\n    }\n\n    var owner = (played as Orc.Game.Cards.CardBase)?.Owner;\n    var hq = owner?.Hq;\n    if (hq is not null)\n    {\n        await runtime.BuffAsync(hq, 0, 5, Orc.Game.Effects.EffectDuration.Permanent, ct, played);\n    }\n};\n"
+        }
+      }
+    ],
+    "mounts": [
+      {
+        "target": "engine#card.played",
+        "member": "onPlayed"
+      }
+    ],
+    "wraps": []
+  }
+}

@@ -1,4 +1,5 @@
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game;
 using Orc.Game.Board;
 using Orc.Game.Cards;
@@ -86,7 +87,7 @@ public class CovertMechanismTests
     }
 
     private static Match CreateMatch(MockTargeterBridge? bridge = null)
-        => CommandTestKit.CreateCommandMatch(bridge, extraDefinitions: LoadCovertDefinitions());
+        => CommandTestKit.CreateCommandMatch(bridge, extraDefinitions: LoadCovertDefinitions(), allowRandomTargeting: true);
 
     private static int AttackOf(UnitCard unit) => unit.Modifiers.GetEffectiveValue(CardStatFields.Attack);
 
@@ -94,32 +95,6 @@ public class CovertMechanismTests
 
     // ---------- 契约冻结（触发器官名 / 标记标识 / 读取面 / 具名登记） ----------
 
-    [Fact]
-    public void Contract_Trigger_Name_Marker_Id_Are_Frozen_And_Readable()
-    {
-        // 对外契约（对 S3）：触发器名＝「揭示触发器」（查证无冲突）；标记标识＝「隐蔽」。
-        Assert.Equal("揭示触发器", CovertRules.TriggerName);
-        Assert.Equal("隐蔽", KeywordIds.Covert);
-        Assert.True(KeywordRegistry.IsDefined(KeywordIds.Covert));
-        Assert.Contains(KeywordIds.Covert, KeywordIds.All);
-        Assert.False(KeywordRegistry.IsBattleKeyword(KeywordIds.Covert)); // 纯内容标记——不打对战词条标
-
-        // 具名登记可寻址（效果预制体 injects 按名解析的注入目标面）。
-        var engine = new LogicEngine();
-        var unit = new UnitCard(
-            engine,
-            new CardDefinition("契约检查", 1, 1, 1, 1, faction: Faction.Germany, rarity: Rarity.Standard));
-        Assert.True(unit.TryFindNamedTrigger(CovertRules.TriggerName, out var trigger, out var viewType));
-        Assert.Same(unit.RevealTrigger, trigger);
-        Assert.Equal(typeof(CardTriggerView), viewType);
-
-        // 读取面降级：null/非隐蔽卡＝false 降级、不抛错。
-        Assert.False(CovertRules.IsCovert(null));
-        var command = new OrderCard(
-            engine,
-            new CardDefinition("指令", 1, 0, 0, 0, CardCategory.Command, faction: Faction.Germany, rarity: Rarity.Standard));
-        Assert.False(CovertRules.IsCovert(command));
-    }
 
     // ---------- 数据映射专项（自含数据——真实链路：数据体 JSON → 加载 → 标记可读＋不再留痕） ----------
 
@@ -297,14 +272,21 @@ public class CovertMechanismTests
         recorder.Clear();
 
         // 揭示逻辑探针（「揭示触发器」测试内容）：记录执行时点可读到的公共面状态。
+        // 夹具（v4 地址面）：揭示成员在**卡实体**（`host#reveal`），不在引擎（`engine#reveal`）——
+        // 原夹具挂到引擎命名空间，探针因此从不执行（defenseAtLogic 恒 -1）。改挂卡实体的揭示成员自有边，
+        // 与被测内容同址（揭示流程：①移除标记 → ②本成员 → ③发射 unit.revealed）。
         var defenseAtLogic = -1;
         var revealedSignalsAtLogic = -1;
-        defender.RevealTrigger.Register("测试揭示内容", (view, ctx, ct) =>
+        var defenderEntity = defender.ModelEntity
+            ?? throw new InvalidOperationException("夹具错误：揭示探针需要卡的编排实体（先 LoadAsync）。");
+        defenderEntity.AttachOwnedEdge(
+            defender.RevealTrigger.Member,
+            MemberEdges.For<CardTriggerView>((view, ctx, ct) =>
         {
             defenseAtLogic = DefenseOf(defender); // 伤害结算前的数值（揭示逻辑已可读/生效）
-            revealedSignalsAtLogic = recorder.Updates.Count(u => u.Type == GameUpdates.UnitRevealed);
-            return Task.CompletedTask;
-        });
+                revealedSignalsAtLogic = recorder.Updates.Count(u => u.Type == GameUpdates.UnitRevealed);
+                return Task.CompletedTask;
+            }));
 
         // 攻击（可被攻击——攻击候选不受隐蔽剔除影响；提交隐蔽目标被接受即证）。
         var result = await CommandTestKit.RunCommandAsync(match, bridge, attacker, defender.Ref);
@@ -706,12 +688,17 @@ public class CovertMechanismTests
         var markerAtLogic = true;
         var signalsAtLogic = -1;
         var reentryOutcome = RevealOutcome.Revealed;
-        unit.RevealTrigger.Register("测试揭示内容", async (view, ctx, ct) =>
+        // 夹具（v4 地址面）：同 C2——揭示成员在卡实体（`host#reveal`），探针须挂卡实体而非引擎。
+        var unitEntity = unit.ModelEntity
+            ?? throw new InvalidOperationException("夹具错误：揭示探针需要卡的编排实体（先 LoadAsync）。");
+        unitEntity.AttachOwnedEdge(
+            unit.RevealTrigger.Member,
+            MemberEdges.For<CardTriggerView>(async (view, ctx, ct) =>
         {
             markerAtLogic = unit.Keywords.Has(KeywordIds.Covert);                        // ①标记先行移除（落定）
             signalsAtLogic = recorder.Updates.Count(u => u.Type == GameUpdates.UnitRevealed); // ②信号后发射（逻辑时未发）
-            reentryOutcome = await CovertRules.RevealAsync(unit);                        // ③执行中重入＝无操作
-        });
+                reentryOutcome = await CovertRules.RevealAsync(unit);                    // ③执行中重入＝无操作
+            }));
 
         var outcome = await CovertRules.RevealAsync(unit);
         Assert.Equal(RevealOutcome.Revealed, outcome);

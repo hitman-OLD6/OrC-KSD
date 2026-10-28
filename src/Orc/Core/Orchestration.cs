@@ -1,348 +1,277 @@
-using Orc.Cards;
+using Orc.Core.Model;
 
 namespace Orc.Core;
 
 /// <summary>
-/// 编排管理器（S-C3；内核侧、引擎级）：集中登记"触发器 ↔ hook ↔ 事件（含声明的下游）"关系，
-/// 提供反向依赖查询与**声明期可达链**导出（审查链真源）。节点＝触发器种类（<see cref="TriggerId"/>），
-/// 节点携带实例清单（宿主/来源/装载态）。
-/// 登记来源：内核自动采样（<see cref="Bus.Mount"/>）+ 装配方显式登记（未挂载主动触发器 / 动态 / 词条内嵌）；
-/// 审查导出另聚合引擎卡牌上的效果主触发器与效果注入项——只读、无副作用。
+/// 编排管理器（S-C3；内核侧、引擎级）：把**新模型的边表**投影成审查链的「节点＋实例＋下游」形态。
+/// <para>
+/// 节点＝<b>引擎／托管实体上的一个成员</b>（<see cref="TriggerId"/> 由成员地址派生，<c>engine#move</c>…）；
+/// 节点携带该成员上的外来边（<see cref="TriggerInstance"/>），下游＝这些边声明的目标。
+/// 与旧实现的差别只有数据来源：旧实现按 <c>Trigger&lt;TView&gt;</c> 实例登记，
+/// 现在唯一的登记面是 <see cref="AuditGraph"/>（实体—成员—挂载边图），不存在第二份账本。
+/// </para>
+/// <para>
 /// 与运行期因果树（<see cref="EventStream"/>）无关：本管理器只描述"逻辑长什么样"。
+/// </para>
 /// </summary>
 public sealed class OrchestrationManager
 {
     /// <summary>审查链载荷 schema 版本（S-C10；快照/导出演进的兼容锚点）。</summary>
-    public const int SchemaVersion = 1;
+    /// <remarks>
+    /// 批次 3（S10／A-4）升到 2：订阅读面（<c>hooks</c> 段）由**实体—成员—挂载边图**
+    /// （<c>entities</c>／<c>members</c>／<c>edges</c>／<c>wraps</c>）等价替代；
+    /// <c>nodes</c>（成员图）保留，能力不退化。批次 7（§27）节点改由边表投影——字段不变。
+    /// </remarks>
+    public const int SchemaVersion = 2;
 
     private readonly LogicEngine _engine;
-    private readonly List<Registration> _registered = new();
-    private readonly HashSet<ITriggerMetadata> _seen = new(ReferenceEqualityComparer.Instance);
 
     internal OrchestrationManager(LogicEngine engine) => _engine = engine;
 
-    /// <summary>已登记触发器数量（登记序集合大小；不含审查导出时临时聚合的卡牌效果触发器）。</summary>
-    public int Count => _registered.Count;
+    /// <summary>成员节点数量（＝审查图里带边的成员数；诊断摘要用）。</summary>
+    public int Count => BuildNodes(_engine.BuildAuditGraph()).Count;
 
     /// <summary>
-    /// 登记一个触发器（幂等：同一实例重复登记＝无操作）。origin/host 为审查标注（缺省自动推导）。
-    /// 登记同时把其 hook 名登记进引擎词汇表。
-    /// </summary>
-    /// <exception cref="ArgumentNullException">trigger 为 null。</exception>
-    /// <exception cref="ArgumentException">trigger 未实现 <see cref="ITriggerMetadata"/>。</exception>
-    public void Register(object trigger, string origin = "explicit", string? host = null)
-    {
-        ArgumentNullException.ThrowIfNull(trigger);
-
-        if (trigger is not ITriggerMetadata metadata)
-        {
-            throw new ArgumentException(
-                "对象不是触发器（未实现 ITriggerMetadata）。", nameof(trigger));
-        }
-
-        if (!_seen.Add(metadata))
-        {
-            return; // 幂等：同一实例只登记一次
-        }
-
-        foreach (var hook in metadata.HookNames)
-        {
-            _engine.Hooks.Register(hook);
-        }
-
-        _registered.Add(new Registration(metadata, origin, host ?? DeriveHost(metadata)));
-    }
-
-    /// <summary>已登记触发器（登记序快照）。</summary>
-    public IReadOnlyList<ITriggerMetadata> Triggers
-    {
-        get
-        {
-            var result = new ITriggerMetadata[_registered.Count];
-            for (var i = 0; i < _registered.Count; i++)
-            {
-                result[i] = _registered[i].Trigger;
-            }
-
-            return result;
-        }
-    }
-
-    /// <summary>反向依赖：声明了该 hook 的已登记触发器（登记序快照）。</summary>
-    public IReadOnlyList<ITriggerMetadata> TriggersWithHook(string hook)
-    {
-        ArgumentNullException.ThrowIfNull(hook);
-
-        var result = new List<ITriggerMetadata>();
-        foreach (var registration in _registered)
-        {
-            foreach (var declared in registration.Trigger.HookNames)
-            {
-                if (string.Equals(declared, hook, StringComparison.Ordinal))
-                {
-                    result.Add(registration.Trigger);
-                    break;
-                }
-            }
-        }
-
-        return result;
-    }
-
-    /// <summary>按稳定键找已登记触发器（登记序快照）。</summary>
-    public IReadOnlyList<ITriggerMetadata> TriggersWithKey(string stableKey)
-    {
-        ArgumentNullException.ThrowIfNull(stableKey);
-
-        var result = new List<ITriggerMetadata>();
-        foreach (var registration in _registered)
-        {
-            if (string.Equals(registration.Trigger.StableKey, stableKey, StringComparison.Ordinal))
-            {
-                result.Add(registration.Trigger);
-            }
-        }
-
-        return result;
-    }
-
-    /// <summary>
-    /// 构建全域审查链（S-C3）：登记触发器 + 引擎卡牌效果主触发器 + 效果注入目标触发器；按种类聚合节点。
+    /// 构建全域审查链（S-C3）：节点＝成员，实例＝该成员上的外来边；另附实体—成员—挂载边图与包/随机记录。
     /// 只读、无副作用（可反复调用）。
     /// </summary>
     public AuditChain BuildAuditChain()
     {
-        var all = CollectAll();
-        var nodes = new List<TriggerNode>();
-        foreach (var group in GroupById(all))
-        {
-            nodes.Add(BuildNode(group.Key, group.Value, all));
-        }
-
-        return new AuditChain(SchemaVersion, nodes, _engine.Bus.EnumerateHooks());
+        var graph = _engine.BuildAuditGraph();
+        return new AuditChain(
+            SchemaVersion, BuildNodes(graph), graph, _engine.LoadGate.Records, _engine.RandomSelections.ToArray());
     }
 
     /// <summary>
-    /// 声明期可达链（S-C3）：以指定触发器种类为起点，沿"事件声明的下游稳定键"做 BFS；
-    /// 未登记的下游键＝图缺口（<see cref="AuditEdge.ResolvedTriggerId"/> 为 null，显式呈现）。
+    /// 声明期可达链（S-C3）：以指定成员为起点沿"边声明的目标"做 BFS；未解析的目标＝图缺口
+    /// （<see cref="AuditEdge.ResolvedTriggerId"/> 为 null，显式呈现）。
     /// </summary>
     public AuditChain QueryChain(TriggerId root)
     {
-        var all = CollectAll();
-        var byId = GroupById(all);
+        var graph = _engine.BuildAuditGraph();
+        var byId = BuildNodes(graph).ToDictionary(static n => n.Id);
         var nodes = new List<TriggerNode>();
 
-        if (!byId.ContainsKey(root))
+        if (!byId.TryGetValue(root, out var start))
         {
-            return new AuditChain(SchemaVersion, nodes, _engine.Bus.EnumerateHooks()); // 起点未登记＝空链
+            // 起点未登记＝空链
+            return new AuditChain(
+                SchemaVersion, nodes, graph, _engine.LoadGate.Records, _engine.RandomSelections.ToArray());
         }
 
         var visited = new HashSet<TriggerId> { root };
-        var queue = new Queue<TriggerId>();
-        queue.Enqueue(root);
+        var queue = new Queue<TriggerNode>();
+        queue.Enqueue(start);
 
         while (queue.Count > 0)
         {
-            var id = queue.Dequeue();
-            var node = BuildNode(id, byId[id], all);
+            var node = queue.Dequeue();
             nodes.Add(node);
 
             foreach (var edge in node.Downstream)
             {
-                if (edge.ResolvedTriggerId is { IsUnset: false } next && visited.Add(next))
+                if (edge.ResolvedTriggerId is { IsUnset: false } next
+                    && visited.Add(next)
+                    && byId.TryGetValue(next, out var nextNode))
                 {
-                    queue.Enqueue(next);
+                    queue.Enqueue(nextNode);
                 }
             }
         }
 
-        return new AuditChain(SchemaVersion, nodes, _engine.Bus.EnumerateHooks());
+        return new AuditChain(
+            SchemaVersion, nodes, graph, _engine.LoadGate.Records, _engine.RandomSelections.ToArray());
     }
 
     // ---------- 内部 ----------
 
-    /// <summary>聚合全部触发器（登记项 + 卡牌效果主触发器 + 注入目标），按引用去重，保持遇见序。</summary>
-    private List<Registration> CollectAll()
+    /// <summary>
+    /// 把审查图的成员节点投影为成员节点（带边的成员各一节点，声明序）。
+    /// 节点 id＝成员地址的稳定哈希（跨对局/跨机器一致，与旧 <c>TriggerId</c> 同一构造）。
+    /// </summary>
+    private static List<TriggerNode> BuildNodes(AuditGraph graph)
     {
-        var result = new List<Registration>(_registered);
-        var seen = new HashSet<ITriggerMetadata>(_seen, ReferenceEqualityComparer.Instance);
-
-        void Consider(ITriggerMetadata? trigger, string origin, string host)
+        var addressOf = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var member in graph.Members)
         {
-            if (trigger is not null && seen.Add(trigger))
-            {
-                result.Add(new Registration(trigger, origin, host));
-            }
+            addressOf[$"{member.Entity}#{member.Name}"] = $"{member.Entity}#{member.Name}";
         }
 
-        foreach (var card in _engine.Cards)
+        var incoming = new Dictionary<string, List<AuditMemberEdge>>(StringComparer.Ordinal);
+        foreach (var edge in graph.Edges)
         {
-            foreach (var effect in card.Effects)
+            var key = $"{EngineOf(edge.Target)}#{edge.TargetMember}";
+            if (!incoming.TryGetValue(key, out var list))
             {
-                var host = $"效果:{effect.Name}@{card.Name}";
-                Consider(effect.MainTrigger, "effect", host);
-                Consider(effect.DisposalTriggerMetadata, "dispose", host); // E-D1：销毁触发器与主触发器并列进入审查图
+                list = new List<AuditMemberEdge>();
+                incoming[key] = list;
+            }
 
-                foreach (var injection in effect.Injections)
+            list.Add(edge);
+        }
+
+        var nodes = new List<TriggerNode>();
+        foreach (var member in graph.Members)
+        {
+            var address = $"{member.Entity}#{member.Name}";
+            if (!incoming.TryGetValue(address, out var edges))
+            {
+                continue; // 无外来边的成员不是节点（节点图只描述"可执行/被订阅"的面）
+            }
+
+            // 信号的时机入口是"等更新"（被动）；流程成员是"被调用"（主动）——沿用旧词，语义不变。
+            var kind = member.IsSignal ? "passive" : "active";
+
+            var instances = new List<TriggerInstance>(edges.Count);
+            var steps = new List<MemberStep>(edges.Count);
+            var downstream = new List<AuditEdge>();
+            var seenKeys = new HashSet<string>(StringComparer.Ordinal);
+            for (var i = 0; i < edges.Count; i++)
+            {
+                var edge = edges[i];
+                instances.Add(new TriggerInstance(edge.DeclaringEntity, edge.Source.ToString(), true));
+                steps.Add(new MemberStep(edge.Member, i + 1, edge.OrderSource.ToString().ToLowerInvariant()));
+
+                if (seenKeys.Add(edge.Target) && addressOf.ContainsKey(edge.Target))
                 {
-                    if (injection.Target is ITriggerMetadata target)
-                    {
-                        Consider(target, "injection", host);
-                    }
+                    downstream.Add(new AuditEdge(edge.Target, TriggerId.FromKey(edge.Target)));
                 }
             }
+
+            nodes.Add(new TriggerNode(
+                TriggerId.FromKey(address),
+                address,
+                hasDeclaredStableKey: true,
+                address,
+                kind,
+                Array.Empty<string>(),
+                steps,
+                instances,
+                downstream));
         }
 
-        return result;
+        return nodes;
     }
 
-    private static Dictionary<TriggerId, List<Registration>> GroupById(IReadOnlyList<Registration> all)
-    {
-        var map = new Dictionary<TriggerId, List<Registration>>();
-        foreach (var registration in all)
-        {
-            if (!map.TryGetValue(registration.Trigger.Id, out var list))
-            {
-                list = new List<Registration>();
-                map[registration.Trigger.Id] = list;
-            }
-
-            list.Add(registration);
-        }
-
-        return map;
-    }
-
-    /// <summary>按种类聚合为节点：实例清单取全部命中，事件/下游取该种类代表（首个实例）。</summary>
-    private TriggerNode BuildNode(TriggerId id, IReadOnlyList<Registration> group, IReadOnlyList<Registration> all)
-    {
-        var representative = group[0].Trigger;
-
-        var instances = new List<TriggerInstance>(group.Count);
-        foreach (var registration in group)
-        {
-            instances.Add(new TriggerInstance(
-                registration.Host, registration.Origin, registration.Trigger.IsMounted));
-        }
-
-        var downstream = new List<AuditEdge>();
-        var seenKeys = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var info in representative.Events)
-        {
-            foreach (var key in info.Downstream)
-            {
-                if (!seenKeys.Add(key))
-                {
-                    continue;
-                }
-
-                downstream.Add(new AuditEdge(key, ResolveKey(key, all)));
-            }
-        }
-
-        return new TriggerNode(id, representative, instances, downstream);
-    }
-
-    /// <summary>把下游稳定键解析为该种类的 <see cref="TriggerId"/>（未登记＝null）。</summary>
-    private static TriggerId? ResolveKey(string stableKey, IReadOnlyList<Registration> all)
-    {
-        foreach (var registration in all)
-        {
-            if (string.Equals(registration.Trigger.StableKey, stableKey, StringComparison.Ordinal))
-            {
-                return registration.Trigger.Id;
-            }
-        }
-
-        return null;
-    }
-
-    private static string DeriveHost(ITriggerMetadata metadata) => metadata.Owner switch
-    {
-        Effect effect => $"效果:{effect.Name}",
-        null => "<无主>",
-        var owner => owner.GetType().Name,
-    };
-
-    private sealed record Registration(ITriggerMetadata Trigger, string Origin, string Host);
+    /// <summary>边目标（<c>作用域#成员</c>）的作用域段；无 <c>#</c> 时按引擎处理。</summary>
+    private static string EngineOf(string target)
+        => target.Contains('#') ? target[..target.IndexOf('#')] : "engine";
 }
 
 /// <summary>审查链载荷（S-C3；JSON 真源的结构模型）。</summary>
 public sealed class AuditChain
 {
-    internal AuditChain(int schemaVersion, IReadOnlyList<TriggerNode> nodes, IReadOnlyList<HookSubscriptions> hooks)
+    internal AuditChain(
+        int schemaVersion,
+        IReadOnlyList<TriggerNode> nodes,
+        Orc.Core.Model.AuditGraph graph,
+        IReadOnlyList<PackLoadRecord> packages,
+        IReadOnlyList<RandomSelectionRecord> randomSelectors)
     {
         SchemaVersion = schemaVersion;
         Nodes = nodes;
-        Hooks = hooks;
+        Graph = graph;
+        Packages = packages;
+        RandomSelectors = randomSelectors;
     }
 
     /// <summary>schema 版本（演进兼容锚点）。</summary>
     public int SchemaVersion { get; }
 
-    /// <summary>触发器种类节点（每个种类恰一节点，携带实例清单）。</summary>
+    /// <summary>成员节点（每个"被订阅/带边"的成员恰一节点，携带边清单）。</summary>
     public IReadOnlyList<TriggerNode> Nodes { get; }
 
-    /// <summary>总线 hook 订阅读面（名/标识/订阅者）。</summary>
-    public IReadOnlyList<HookSubscriptions> Hooks { get; }
+    /// <summary>
+    /// 实体—成员—挂载边图（S10／R7）：能回答"谁订阅了某个信号"（<see cref="Orc.Core.Model.AuditGraph.EdgesInto"/>）
+    /// 以及边的来源／位次。
+    /// </summary>
+    public Orc.Core.Model.AuditGraph Graph { get; }
+
+    /// <summary>
+    /// 包装载记录（S14 第 3 条）：成功／被跳过的可选包／失败的必需包，逐条含失败项。
+    /// 这是"哪些包没生效"的唯一导出面（作者据此知道效果为何什么都没发生）。
+    /// </summary>
+    public IReadOnlyList<PackLoadRecord> Packages { get; }
+
+    /// <summary>
+    /// 本对局用到的随机选择器（R2c／R7）：<c>{ viewer, selector }</c>。
+    /// 只有显式允许随机（<c>MatchOptions.AllowRandomTargeting</c>）并真正取值时才有条目——
+    /// 它回答"这局哪里用了随机"，也是复盘"结果为何不可复现"的入口。
+    /// </summary>
+    public IReadOnlyList<RandomSelectionRecord> RandomSelectors { get; }
 }
 
-/// <summary>审查链节点：一个触发器种类及其实例、事件与声明的下游边。</summary>
+/// <summary>审查链节点：一个成员及其实例（外来边）、步骤与声明的下游。</summary>
 public sealed class TriggerNode
 {
     internal TriggerNode(
-        TriggerId id, ITriggerMetadata representative, IReadOnlyList<TriggerInstance> instances, IReadOnlyList<AuditEdge> downstream)
+        TriggerId id,
+        string stableKey,
+        bool hasDeclaredStableKey,
+        string displayName,
+        string kind,
+        IReadOnlyList<string> hookNames,
+        IReadOnlyList<MemberStep> events,
+        IReadOnlyList<TriggerInstance> instances,
+        IReadOnlyList<AuditEdge> downstream)
     {
         Id = id;
-        StableKey = representative.StableKey;
-        HasDeclaredStableKey = representative.HasDeclaredStableKey;
-        DisplayName = representative.DisplayName;
-        Kind = representative.Kind;
-        HookNames = representative.HookNames;
-        Events = representative.Events;
+        StableKey = stableKey;
+        HasDeclaredStableKey = hasDeclaredStableKey;
+        DisplayName = displayName;
+        Kind = kind;
+        HookNames = hookNames;
+        Events = events;
         Instances = instances;
         Downstream = downstream;
-        Serializable = representative.Owner is ISerializableEffect; // S-C12：仅预制体（动态）效果可序列化
+        // S-C12：可序列化面随旧 `ISerializableEffect`（动态效果）删除——v4 组件走资产面，不在此投影。
+        Serializable = false;
     }
 
-    /// <summary>触发器种类标识。</summary>
+    /// <summary>成员标识（＝成员地址的稳定哈希）。</summary>
     public TriggerId Id { get; }
 
-    /// <summary>稳定键（定义级身份）。</summary>
+    /// <summary>稳定键（这里＝成员地址，如 <c>engine#move</c>；定义级身份）。</summary>
     public string StableKey { get; }
 
-    /// <summary>是否为作者显式声明（false＝弱身份）。</summary>
+    /// <summary>是否为作者显式声明（成员地址恒为显式声明）。</summary>
     public bool HasDeclaredStableKey { get; }
 
-    /// <summary>展示名。</summary>
+    /// <summary>展示名（＝成员地址）。</summary>
     public string DisplayName { get; }
 
-    /// <summary>种类（主动/被动）。</summary>
-    public TriggerKind Kind { get; }
+    /// <summary>种类：<c>active</c>（流程成员，被调用）／<c>passive</c>（信号成员，等更新）。</summary>
+    public string Kind { get; }
 
-    /// <summary>hook 名（声明顺序）。</summary>
+    /// <summary>目标信号名（成员不是信号＝空）。</summary>
     public IReadOnlyList<string> HookNames { get; }
 
-    /// <summary>事件信息（执行序）。</summary>
-    public IReadOnlyList<TriggerEventInfo> Events { get; }
+    /// <summary>执行步骤（外来边，按边表顺序）。</summary>
+    public IReadOnlyList<MemberStep> Events { get; }
 
-    /// <summary>实例清单（宿主/来源/装载态）。</summary>
+    /// <summary>实例清单（来源实体／来源类别／装载态）。</summary>
     public IReadOnlyList<TriggerInstance> Instances { get; }
 
-    /// <summary>声明的下游边（稳定键 + 解析结果；未登记＝null）。</summary>
+    /// <summary>声明的下游边（目标地址 + 解析结果；未登记＝null）。</summary>
     public IReadOnlyList<AuditEdge> Downstream { get; }
 
-    /// <summary>是否可序列化为效果快照（S-C12；仅预制体（动态）效果为 true）。</summary>
+    /// <summary>是否可序列化为效果快照（S-C12；当前恒 false）。</summary>
     public bool Serializable { get; }
 }
 
-/// <summary>审查链边：事件声明的下游触发器稳定键及其解析结果。</summary>
-/// <param name="DownstreamKey">声明的下游稳定键。</param>
-/// <param name="ResolvedTriggerId">解析到的触发器种类标识（未登记＝null＝图缺口）。</param>
+/// <summary>成员的一步执行（外来边）：来源成员名、位次（1 起）、位次来源（<c>declared</c>／<c>appended</c>）。</summary>
+/// <param name="Name">边指向的成员名（来源实体上被执行的成员）。</param>
+/// <param name="Seq">执行序（1 起；同一目标成员内）。</param>
+/// <param name="Position">位次来源（声明序／追加序）。</param>
+public sealed record MemberStep(string Name, int Seq, string Position);
+
+/// <summary>审查链边：边声明的目标地址及其解析结果。</summary>
+/// <param name="DownstreamKey">目标地址（<c>作用域#成员</c>）。</param>
+/// <param name="ResolvedTriggerId">解析到的成员标识（未登记＝null＝图缺口）。</param>
 public sealed record AuditEdge(string DownstreamKey, TriggerId? ResolvedTriggerId);
 
-/// <summary>触发器实例（审查链节点附属）：宿主标签、来源与装载态。</summary>
-/// <param name="Host">宿主标签（如 效果:名@卡名 / &lt;无主&gt;）。</param>
-/// <param name="Origin">来源（explicit / bus-mount / effect / injection / embedded / dynamic）。</param>
-/// <param name="Mounted">是否处于挂载状态（主动触发器恒 false）。</param>
+/// <summary>成员实例（审查链节点附属）：来源实体、来源类别与装载态。</summary>
+/// <param name="Host">来源实体名。</param>
+/// <param name="Origin">来源类别（explicit／injected／framework:disposal／framework:one-shot）。</param>
+/// <param name="Mounted">是否处于挂载状态（边恒为已挂载）。</param>
 public sealed record TriggerInstance(string Host, string Origin, bool Mounted);

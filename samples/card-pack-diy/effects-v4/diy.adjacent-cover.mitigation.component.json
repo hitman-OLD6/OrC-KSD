@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 4,
+  "asset": {
+    "kind": "component",
+    "id": "diy.adjacent-cover.mitigation",
+    "requires-host": "any",
+    "active-when": "loaded",
+    "one-shot": false,
+    "private-fields": [],
+    "members": [
+      {
+        "name": "onDamageApply",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Source",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Target",
+              "type": "entity",
+              "writable": false,
+              "required": true
+            },
+            {
+              "name": "Amount",
+              "type": "number",
+              "writable": true,
+              "required": true
+            },
+            {
+              "name": "Kind",
+              "type": "string",
+              "writable": false,
+              "required": true
+            },
+            {
+              "name": "IsZeroed",
+              "type": "boolean",
+              "writable": true,
+              "required": true
+            },
+            {
+              "name": "Result",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            }
+          ]
+        },
+        "handler": {
+          "id": "diy.adjacent-cover.mitigation#onDamageApply",
+          "entry": "HandleAsync",
+          "script": "Func<dynamic, Context, CancellationToken, Task> HandleAsync = (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Cards.Card self)\n    {\n        return Task.CompletedTask;\n    }\n\n    var runtime = Orc.Game.Effects.EffectRuntime.ResolveFor(self);\n    if (runtime is null)\n    {\n        return Task.CompletedTask;\n    }\n\n    if (runtime.Judge(Orc.Game.Judicators.JudicatorNames.UnitAdjacent, self, view.Target)\n        && runtime.Judge(Orc.Game.Judicators.JudicatorNames.UnitTypeMatch, view.Target, \"infantry\")\n        && runtime.Judge(Orc.Game.Judicators.JudicatorNames.UnitSide, self, view.Target))\n    {\n        view.Amount = System.Math.Max(0, view.Amount - 1);\n    }\n\n    return Task.CompletedTask;\n};\n"
+        }
+      }
+    ],
+    "mounts": [],
+    "wraps": [
+      {
+        "target": "engine#damage-apply",
+        "phase": "before",
+        "handler": "diy.adjacent-cover.mitigation#onDamageApply"
+      }
+    ]
+  }
+}

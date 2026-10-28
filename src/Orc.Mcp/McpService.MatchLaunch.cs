@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Nodes;
+using System.Text.Json.Nodes;
 using Orc.Core;
 using Orc.Foundation.Actions;
 using Orc.Game;
@@ -140,6 +140,8 @@ public sealed partial class McpService
                     OpeningHandSizeSecondPlayer = options.OpeningHandSizeSecondPlayer,
                     // 沙盒授权（R2）：仅 Authoring（沙盒）装配路径开启；play 路径不开启。
                     SandboxAuthorized = Options.Mode == McpServiceMode.Authoring,
+                    // R2c：随机取样只在沙盒（Authoring）装配路径开启，play 路径关闭。
+                    AllowRandomTargeting = Options.Mode == McpServiceMode.Authoring,
                 },
                 targeterBridge: Bridge,
                 effectRegistry: effectRegistry,
@@ -155,6 +157,12 @@ public sealed partial class McpService
 
         EffectRegistry = effectRegistry;
 
+        // §34：卡级装载失败（如效果 csx 在 v4 承载视图下编译不过）→ 回填卡牌加载报告。
+        // 游戏层只把事实交出来（CardComponentFailureData），报告模型与映射都在 Orc.Packages 侧；
+        // 时机＝Initialize 之前（牌堆装载发生在初始化内）。
+        match.ComponentFailureSink = failures =>
+            assembly.RecordComponentFailures(CardComponentFailureMapper.ToReportFailures(failures));
+
         // 内联预制体与效果库须在 Initialize 前注册（卡装载链在 Initialize 内解析效果引用）。
         foreach (var snapshot in assembly.InlinePrefabs)
         {
@@ -163,13 +171,10 @@ public sealed partial class McpService
 
         foreach (var directory in assembly.EffectDirectories)
         {
-            var report = match.Engine.Prefabs.LoadDirectory(directory);
-            if (report.Failures.Count > 0)
-            {
-                return ActionOutcome.Failed(
-                    McpCodes.InvalidArguments,
-                    $"效果库装载失败：{string.Join("；", report.Failures)}");
-            }
+            // 旧格式效果库目录（*.prefab.json）随旧装载链删除——明确失败，不静默漏装。
+            return ActionOutcome.Failed(
+                McpCodes.InvalidArguments,
+                $"旧格式效果库目录已不再支持（v4-only）：'{directory}'——请改用 effects-v4/*.component.json。");
         }
 
         AttachMatch(match);

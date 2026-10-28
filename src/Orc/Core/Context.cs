@@ -27,13 +27,34 @@ public sealed class Context
         ? value
         : throw new KeyNotFoundException($"上下文数据中不存在键 '{key}'。");
 
+    /// <summary>
+    /// 写入数据面（供**宿主层的守卫边**回填判定结果：如"本次被打出验证拒绝"）。
+    /// 与视图写入同一份载体，因此同一执行链的后续步骤与调用方都能读到。
+    /// </summary>
+    /// <exception cref="ArgumentNullException">key 为 null。</exception>
+    public void Set(string key, object? value)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        Data[key] = value;
+    }
+
     private ExecutionFrame? _frame;
+    private readonly Stack<Orc.Core.Model.MemberExecutionScope> _memberScopes = new();
 
     /// <summary>
     /// 本级停止标志（Stop）：停止当前触发器剩余事件；不影响父层与子执行。
     /// 与执行的事件边界检查共用同一状态源；未关联执行会话的上下文恒为 false。
     /// </summary>
-    public bool Stopped => _frame?.Stopped ?? false;
+    public bool Stopped
+        => (_frame?.Stopped ?? false)
+           || (_memberScopes.Count > 0 && _memberScopes.Peek().Stopped);
+
+    /// <summary>
+    /// 当前成员执行作用域（新模型；无＝null）。作用域的存在使 <see cref="Stop"/> 的停止范围精确等于"当前成员"——
+    /// 不外溢到调用方的其它成员（S2a）。
+    /// </summary>
+    public Orc.Core.Model.MemberExecutionScope? CurrentMemberScope
+        => _memberScopes.Count == 0 ? null : _memberScopes.Peek();
 
     /// <summary>
     /// 链中断标志（Interrupt）：动作链取消，沿嵌套链传播（起点层及全部祖先层在各自下一事件边界停止）。
@@ -42,7 +63,29 @@ public sealed class Context
     public bool Interrupted => _frame?.Interrupted ?? false;
 
     /// <summary>请求停止本级剩余事件（仅本级；已触发的子执行照常完成）。</summary>
-    public void Stop() => _frame?.RequestStop();
+    /// <remarks>
+    /// 新模型（编排实体化）下，若当前处于某个成员执行作用域内，则同时标记该作用域停止：
+    /// 停止范围＝**当前成员**（本成员剩余单元全部不执行），不外溢到调用方的其它成员（S2a）。
+    /// 已执行的 <c>before</c> 包装器不回滚，其写入保留在数据面上。
+    /// <para>
+    /// 例外＝<see cref="Orc.Core.Model.MemberExecutionScope.PropagatesStop"/> 的作用域（信号端点成员＝订阅体本身，
+    /// 自身没有"剩余单元"可停）：停止继续向调用方成员穿透（旧模型里订阅体与信号成员同处一个执行帧）。
+    /// </para>
+    /// </remarks>
+    public void Stop()
+    {
+        _frame?.RequestStop();
+
+        // 栈枚举＝栈顶（当前成员）先行；遇到不透传的作用域即止（停止不外溢）。
+        foreach (var scope in _memberScopes)
+        {
+            scope.RequestStop();
+            if (!scope.PropagatesStop)
+            {
+                break;
+            }
+        }
+    }
 
     /// <summary>
     /// 静默停止（框架内部；E-D2）：语义同 <see cref="Stop"/>，但不写事件流条目——
@@ -88,4 +131,26 @@ public sealed class Context
 
     /// <summary>关联执行会话（框架内部流程调用；状态查询与检查点共用该帧的状态）。</summary>
     internal void AttachFrame(ExecutionFrame frame) => _frame = frame;
+
+    /// <summary>
+    /// 是否已关联执行会话（框架内部；成员执行面据此判断"要不要补建帧"）。
+    /// <para>
+    /// 用途：**沿用调用方上下文**执行成员时，若该上下文还没有帧，必须在进入成员前补建一个——
+    /// 否则 <see cref="Engine"/>／<see cref="Stopped"/>／<see cref="Interrupted"/> 三个读面全部退化，
+    /// 依赖 <c>ctx.Engine</c> 的组件 handler 会静默早退（§22.1 根因 2 的同型缺陷）。
+    /// </para>
+    /// </summary>
+    internal bool HasFrame => _frame is not null;
+
+    /// <summary>进入一个成员执行作用域（新模型；框架内部）。作用域可嵌套（挂载成员在宿主成员内执行）。</summary>
+    internal void PushMemberScope(Orc.Core.Model.MemberExecutionScope scope) => _memberScopes.Push(scope);
+
+    /// <summary>退出成员执行作用域（框架内部；与 <see cref="PushMemberScope"/> 成对）。</summary>
+    internal void PopMemberScope(Orc.Core.Model.MemberExecutionScope scope)
+    {
+        if (_memberScopes.Count > 0 && ReferenceEquals(_memberScopes.Peek(), scope))
+        {
+            _memberScopes.Pop();
+        }
+    }
 }

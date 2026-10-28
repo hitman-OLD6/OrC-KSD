@@ -1,4 +1,5 @@
 using Orc.Cards;
+using Orc.Core.Model;
 using Orc.Game.Board;
 using Orc.Game.Cards;
 
@@ -11,9 +12,19 @@ namespace Orc.Game.Actions;
 /// <c>orc.foundation.actions</c>，但宿主不能引用插件程序集，故接口与两端描述只在此处声明。
 /// </para>
 /// <para>落位＝插入空隙（有序列表模型）：目标线内的位置由 <see cref="FormationGap.Ordinal"/> 给出，右侧元素顺移。</para>
+/// <para>
+/// **两端是引擎成员（S13／U3）**：公开面只给成员地址（<c>engine#move</c>／<c>engine#move.handle</c>）；
+/// 旧身份实例随 <see cref="Ends"/> 交给宿主装配，随旧类型在 U5 退役。
+/// </para>
 /// </summary>
 public interface IMoveAction
 {
+    /// <summary>移动**触发端**的成员地址（<c>engine#move</c>）。</summary>
+    MemberAddress Trigger { get; }
+
+    /// <summary>移动**处理端**的成员地址（<c>engine#move.handle</c>）。</summary>
+    MemberAddress Handle { get; }
+
     /// <summary>被指挥移动的底层动作（入口：<c>DispatchMoveAsync</c>；资源收尾由入口经 <c>OperateFinalizer</c> 完成）。</summary>
     Task<ActionResult> CommandAsync(
         UnitCard unit, FormationGap destination, Card? triggerCard = null, CancellationToken ct = default);
@@ -23,8 +34,8 @@ public interface IMoveAction
         UnitCard unit, FormationGap destination, Card? triggerCard = null, CancellationToken ct = default);
 
     /// <summary>
-    /// 两端触发器（≥1 触发端 + 恰 1 处理端）：由实现自报、宿主按目录装配。
-    /// 视图类型随实现迁出宿主程序集，故此处以类型擦除的 <see cref="ActionTriggerEnd"/> 承载。
+    /// 两端登记项（≥1 触发端 + 恰 1 处理端）：由实现自报、宿主按目录装配。
+    /// 视图类型随实现迁出宿主程序集，故以类型擦除的 <see cref="ActionTriggerEnd"/> 承载（地址＋实例双身份）。
     /// </summary>
     IReadOnlyList<ActionTriggerEnd> Ends { get; }
 }

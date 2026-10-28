@@ -35,12 +35,12 @@ public sealed class SandboxPrimitives
     private readonly Match _match;
     private readonly bool _authorized;
 
-    private readonly Trigger<SandboxPrimitiveView> _instantiate;
-    private readonly Trigger<SandboxPrimitiveView> _unitize;
-    private readonly Trigger<SandboxPrimitiveView> _move;
-    private readonly Trigger<SandboxPrimitiveView> _remove;
-    private readonly Trigger<SandboxPrimitiveView> _setPoints;
-    private readonly Trigger<SandboxPrimitiveView> _draw;
+    private readonly SandboxPrimitiveHandler _instantiate;
+    private readonly SandboxPrimitiveHandler _unitize;
+    private readonly SandboxPrimitiveHandler _move;
+    private readonly SandboxPrimitiveHandler _remove;
+    private readonly SandboxPrimitiveHandler _setPoints;
+    private readonly SandboxPrimitiveHandler _draw;
 
     /// <summary>
     /// 构造原语族（对局装配期一次）：每个原语「注册唯一内置 handler → 立即封闭」；
@@ -53,21 +53,13 @@ public sealed class SandboxPrimitives
         _match = match;
         _authorized = authorized;
 
-        _instantiate = CreateSealedTrigger("sandbox.instantiate", "instantiate", HandleInstantiateAsync, out var instantiateRegistration);
-        _unitize = CreateSealedTrigger("sandbox.unitize", "unitize", HandleUnitizeAsync, out _);
-        _move = CreateSealedTrigger("sandbox.move", "move", HandleMoveAsync, out _);
-        _remove = CreateSealedTrigger("sandbox.remove", "remove", HandleRemoveAsync, out _);
-        _setPoints = CreateSealedTrigger("sandbox.points", "set_points", HandleSetPointsAsync, out _);
-        _draw = CreateSealedTrigger("sandbox.draw", "draw", HandleDrawAsync, out _);
-
-        InstantiateRegistration = instantiateRegistration;
+        _instantiate = CreateHandler("sandbox.instantiate", HandleInstantiateAsync);
+        _unitize = CreateHandler("sandbox.unitize", HandleUnitizeAsync);
+        _move = CreateHandler("sandbox.move", HandleMoveAsync);
+        _remove = CreateHandler("sandbox.remove", HandleRemoveAsync);
+        _setPoints = CreateHandler("sandbox.points", HandleSetPointsAsync);
+        _draw = CreateHandler("sandbox.draw", HandleDrawAsync);
     }
-
-    /// <summary>
-    /// instantiate 触发器内置注册项的句柄（**仅测试可达**：用于断言封闭后包装器注册被拒；
-    /// 不构成对外注册入口——触发器已封闭，任何注册调用一律抛）。
-    /// </summary>
-    internal TriggerRegistration InstantiateRegistration { get; }
 
     // ═════════════════════════════════════════════════════════════════════════
     // 公开入口（六个原语）
@@ -115,7 +107,7 @@ public sealed class SandboxPrimitives
             ["Result"] = result,
         };
 
-        await _instantiate.InvokeAsync(_match.Engine, data, ct).ConfigureAwait(false);
+        await RunAsync(_instantiate, data, ct).ConfigureAwait(false);
         WriteAudit(primitive, $"{summary} → {Describe(result)}");
         return result;
     }
@@ -157,7 +149,7 @@ public sealed class SandboxPrimitives
             ["Result"] = result,
         };
 
-        await _unitize.InvokeAsync(_match.Engine, data, ct).ConfigureAwait(false);
+        await RunAsync(_unitize, data, ct).ConfigureAwait(false);
         WriteAudit(primitive, $"{summary} → {Describe(result)}");
         return result;
     }
@@ -196,7 +188,7 @@ public sealed class SandboxPrimitives
             ["Result"] = result,
         };
 
-        await _move.InvokeAsync(_match.Engine, data, ct).ConfigureAwait(false);
+        await RunAsync(_move, data, ct).ConfigureAwait(false);
         WriteAudit(primitive, $"{summary} → {Describe(result)}");
         return result;
     }
@@ -233,7 +225,7 @@ public sealed class SandboxPrimitives
             ["Result"] = result,
         };
 
-        await _remove.InvokeAsync(_match.Engine, data, ct).ConfigureAwait(false);
+        await RunAsync(_remove, data, ct).ConfigureAwait(false);
         WriteAudit(primitive, $"{summary} → {Describe(result)}");
         return result;
     }
@@ -272,7 +264,7 @@ public sealed class SandboxPrimitives
             ["Result"] = result,
         };
 
-        await _setPoints.InvokeAsync(_match.Engine, data, ct).ConfigureAwait(false);
+        await RunAsync(_setPoints, data, ct).ConfigureAwait(false);
         WriteAudit(primitive, $"{summary} → {Describe(result)}");
         return result;
     }
@@ -315,7 +307,7 @@ public sealed class SandboxPrimitives
             ["Result"] = result,
         };
 
-        await _draw.InvokeAsync(_match.Engine, data, ct).ConfigureAwait(false);
+        await RunAsync(_draw, data, ct).ConfigureAwait(false);
         WriteAudit(primitive, $"{summary} → {Describe(result)}");
         return result;
     }
@@ -927,8 +919,8 @@ public sealed class SandboxPrimitives
             : $"rejected({result.Reason})";
 
     /// <summary>
-    /// 审计留痕（R4 D3）：每次原语调用恰一条 Log 级条目——只进日志、不进总线（不用 <c>Bus.Emit</c>）、
-    /// 不 <c>BeginAction</c>（不产段）。写当前执行者流语义＝原语入口是顶层调用 ⇒ 总流（与 Bus.WriteTrace 同口径）。
+    /// 审计留痕（R4 D3）：每次原语调用恰一条 Log 级条目——只进日志、不进信号通路（不发射信号）、
+    /// 不 <c>BeginAction</c>（不产段）。写当前执行者流语义＝原语入口是顶层调用 ⇒ 总流（与挂载留痕同口径）。
     /// </summary>
     private void WriteAudit(string primitive, string message)
         => _match.Engine.RootStream.WriteLog(
@@ -942,24 +934,39 @@ public sealed class SandboxPrimitives
     // ═════════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// 「注册唯一内置 handler → 封闭」的一次性装配单元：handler 为 null（装配性错误）＝ 调用期即抛、
-    /// 实例不产出；注册成功后再 <see cref="Trigger{TView}.Seal"/>，不存在可注册窗口。
+    /// 一个原语的执行体（沙盒原语是**自带唯一 handler 的封闭单元**：没有可注册窗口、没有第二处调用点）。
+    /// <para>
+    /// 批次 7（§27）：原语不再是触发器实例——它就是这一个处理器；调用面 <see cref="RunAsync(SandboxPrimitiveHandler, IDictionary{string, object?}, CancellationToken)"/>
+    /// 按承载视图绑定一次并执行（与成员边的绑定方式同源：同一份数据面、同一视图绑定器）。
+    /// </para>
     /// </summary>
-    /// <exception cref="ArgumentNullException">handler 为 null（handler 集不齐 ⇒ fail-fast）。</exception>
-    internal static Trigger<SandboxPrimitiveView> CreateSealedTrigger(
-        string triggerName,
-        string eventName,
-        Func<SandboxPrimitiveView, Context, CancellationToken, Task>? handler,
-        out TriggerRegistration registration)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(triggerName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(eventName);
-        ArgumentNullException.ThrowIfNull(handler, $"保留触发器 '{triggerName}' 缺少内置 handler（装配性错误——实例不产出）。");
+    internal delegate Task SandboxPrimitiveHandler(
+        SandboxPrimitiveView view, Context ctx, CancellationToken ct);
 
-        var trigger = new Trigger<SandboxPrimitiveView>(triggerName);
-        registration = trigger.Register(eventName, handler);
-        trigger.Seal();
-        return trigger;
+    /// <summary>装配一个原语的执行体（handler 为 null＝装配性错误：调用期即抛、实例不产出）。</summary>
+    /// <exception cref="ArgumentNullException">handler 为 null（handler 集不齐 ⇒ fail-fast）。</exception>
+    private static SandboxPrimitiveHandler CreateHandler(
+        string primitiveName, SandboxPrimitiveHandler? handler)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(primitiveName);
+        ArgumentNullException.ThrowIfNull(handler, $"沙盒原语 '{primitiveName}' 缺少内置 handler（装配性错误——实例不产出）。");
+        return handler;
+    }
+
+    /// <summary>执行一个原语（绑定承载视图 → 执行 → 封视图）。</summary>
+    private static async Task RunAsync(
+        SandboxPrimitiveHandler handler, IDictionary<string, object?> data, CancellationToken ct)
+    {
+        var ctx = new Context(data);
+        var view = ContextViewBinder.Create<SandboxPrimitiveView>(ctx);
+        try
+        {
+            await handler(view, ctx, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            ((IContextView)(object)view).Seal();
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -969,8 +976,8 @@ public sealed class SandboxPrimitives
     /// <summary>授权事实（只读；诊断面导出用）。</summary>
     internal bool IsAuthorized => _authorized;
 
-    /// <summary>六个保留触发器（诊断面导出用；顺序＝装配序）。</summary>
-    internal IReadOnlyList<(string Name, Trigger<SandboxPrimitiveView> Trigger)> ReservedTriggers => new[]
+    /// <summary>六个原语（诊断面导出用；顺序＝装配序）。</summary>
+    internal IReadOnlyList<(string Name, SandboxPrimitiveHandler Handler)> ReservedTriggers => new[]
     {
         ("sandbox.instantiate", _instantiate),
         ("sandbox.unitize", _unitize),
@@ -987,20 +994,15 @@ public sealed class SandboxPrimitives
     public string ExportReservedTriggersJson()
     {
         var items = new List<object>(6);
-        foreach (var (name, trigger) in ReservedTriggers)
+        foreach (var (name, handler) in ReservedTriggers)
         {
-            var handlers = new List<string>();
-            foreach (var entry in trigger.Events)
-            {
-                handlers.Add(entry.Name);
-            }
-
+            // 原语＝自带唯一 handler 的封闭单元：诊断面报"恰一个处理器、无注册窗口"。
             items.Add(new
             {
                 name,
-                @sealed = trigger.IsSealed,
+                @sealed = true,
                 authorized = _authorized,
-                handlers,
+                handlers = new[] { handler.Method.Name },
             });
         }
 

@@ -1,4 +1,6 @@
-﻿using Orc.Game.Actions;
+﻿using Orc.Core;
+using Orc.Core.Model;
+using Orc.Game.Actions;
 using Orc.Game.Triggers;
 using Xunit;
 
@@ -118,7 +120,7 @@ public class P5ActionCatalogTests
             dependencies,
             new[]
             {
-                new ActionTriggerEnd("触发端", new object(), (_, _) => { }),
-                new ActionTriggerEnd(ActionTriggerEnd.HandleRole, new object(), (_, _) => { }),
+                new ActionTriggerEnd("触发端", MemberAddress.Create(AddressScope.Engine, "test.trigger")),
+                new ActionTriggerEnd(ActionTriggerEnd.HandleRole, MemberAddress.Create(AddressScope.Engine, "test.handle")),
             });
 }

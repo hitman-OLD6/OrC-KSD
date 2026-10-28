@@ -399,7 +399,9 @@ public static class GameUpdates
             new Dictionary<string, object?>
             {
                 [PayloadCard] = card,
-                [PayloadChangedFields] = changedFields,
+                // 载荷值归一到封闭内建类型（视图声明的 ChangedFields 为 string[]）：
+                // 传入 IReadOnlyList<string> 时物化为数组，避免"声明是数组、实际是列表"导致投影期类型不符。
+                [PayloadChangedFields] = changedFields as string[] ?? changedFields.ToArray(),
                 [PayloadSource] = source,
             },
             ct);

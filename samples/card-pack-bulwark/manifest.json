@@ -4,13 +4,10 @@
   "guid": "0c7a0000-0000-4000-8000-000000000001",
   "kind": "cardpack",
   "name": "铜墙铁壁系列",
-  "version": "aa86ab63ae100737646dbd712dd1fb23",
+  "version": "eecf7c69b0ebfd5ecde6da6a1b93ba00",
   "metadata": [
     "cards/bulwark.entrench-infantry.card.json.meta.json",
     "cards/bulwark.field-repair.card.json.meta.json",
-    "cards/bulwark.mobile-infantry.card.json.meta.json",
-    "effects/keyword.entrench.prefab.json.meta.json",
-    "effects/keyword.mobility.prefab.json.meta.json",
-    "effects/keyword.repair.prefab.json.meta.json"
+    "cards/bulwark.mobile-infantry.card.json.meta.json"
   ]
 }

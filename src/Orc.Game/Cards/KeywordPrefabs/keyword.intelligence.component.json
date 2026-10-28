@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 4,
+  "asset": {
+    "kind": "component",
+    "id": "keyword.intelligence",
+    "requires-host": "any",
+    "active-when": "loaded",
+    "one-shot": false,
+    "private-fields": [],
+    "members": [
+      {
+        "name": "onCardPlayed",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Card",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "Player",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            }
+          ]
+        },
+        "handler": {
+          "id": "keyword.intelligence#onCardPlayed",
+          "entry": "HandleAsync",
+          "script": "Func<dynamic, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Cards.Card host) { return; }\n    if (view.Card is not Orc.Cards.Card played || !object.ReferenceEquals(played, host)) { return; }\n\n    var amount = Orc.Game.Cards.KeywordRules.GetKeywordValue(host, Orc.Game.Cards.KeywordIds.Intelligence) ?? 0;\n    await Orc.Game.Cards.IntelligenceRules.InvokePendingRevealAsync(host, amount, host.Engine, ct);\n};\n"
+        }
+      }
+    ],
+    "mounts": [
+      {
+        "target": "engine#card.played",
+        "member": "onCardPlayed"
+      }
+    ],
+    "wraps": []
+  }
+}

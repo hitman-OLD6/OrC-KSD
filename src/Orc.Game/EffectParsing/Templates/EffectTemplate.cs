@@ -150,7 +150,7 @@ public sealed class EffectTemplateTrigger
     public EffectTemplateTrigger(
         string id,
         string stableKey,
-        TriggerKind kind = TriggerKind.Active,
+        bool isPassive = false,
         IEnumerable<string>? hooks = null,
         IEnumerable<EffectTemplateEvent>? events = null,
         string viewTypeName = "Orc.Cards.CardEventView")
@@ -172,7 +172,7 @@ public sealed class EffectTemplateTrigger
             }
         }
 
-        if (hookList.Count > 0 && kind == TriggerKind.Active)
+        if (hookList.Count > 0 && !isPassive)
         {
             throw new ArgumentException("主动触发器预制体不能声明 hooks。", nameof(hooks));
         }
@@ -193,7 +193,7 @@ public sealed class EffectTemplateTrigger
 
         Id = id;
         StableKey = stableKey;
-        Kind = kind;
+        IsPassive = isPassive;
         Hooks = hookList;
         Events = eventList;
         ViewTypeName = viewTypeName;
@@ -205,8 +205,8 @@ public sealed class EffectTemplateTrigger
     /// <summary>稳定键。</summary>
     public string StableKey { get; }
 
-    /// <summary>种类。</summary>
-    public TriggerKind Kind { get; }
+    /// <summary>是否被动（被动＝可挂到信号上）。</summary>
+    public bool IsPassive { get; }
 
     /// <summary>hook 名（声明序）。</summary>
     public IReadOnlyList<string> Hooks { get; }

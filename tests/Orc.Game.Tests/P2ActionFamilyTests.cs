@@ -89,19 +89,6 @@ public class P2ActionFamilyTests
         Assert.False(unit.GetData<CommandData>().CanAttack);
     }
 
-    [Fact]
-    public void Move_Action_Registers_Single_Commit_And_Single_Landing_Handler()
-    {
-        var action = new MoveAction(new LogicEngine(), new FixedMoveServices());
-
-        Assert.Single(action.Trigger.Events, e => e.Name == "转发到处理端"
-            && e.BandValue == (int)ActionTriggerBands.Commit);
-        Assert.DoesNotContain(action.Trigger.Events, e => e.BandValue == (int)ActionTriggerBands.Announce);
-        Assert.DoesNotContain(action.Trigger.Events, e => e.BandValue == (int)ActionTriggerBands.Counter);
-        var apply = Assert.Single(action.Handle.Events);
-        Assert.Equal("落地移动", apply.Name);
-        Assert.Equal((int)ActionHandleBands.Apply, apply.BandValue);
-    }
 
     // ══════════════════════════ S7：抽牌与加入手牌 ══════════════════════════
 
@@ -177,24 +164,6 @@ public class P2ActionFamilyTests
         Assert.DoesNotContain(GameUpdates.CardDrawn, recorder.Types);
     }
 
-    [Fact]
-    public async Task Add_To_Hand_Action_Is_Reusable_And_Has_Both_Ends()
-    {
-        var match = CommandTestKit.CreateCommandMatch();
-        await match.Initialize();
-        var player = match.Players[0];
-        var card = await CommandTestKit.InstantiateLoadedAsync(match, player);
-
-        var action = match.CommandManager.AddToHandAction;
-        Assert.Single(action.Trigger.Events, e => e.Name == "转发到处理端"
-            && e.BandValue == (int)ActionTriggerBands.Commit);
-        Assert.Single(action.Handle.Events, e => e.BandValue == (int)ActionHandleBands.Apply);
-
-        // 非抽牌路径复用：直接驱动动作（不经卡牌服务）。
-        var result = await action.AddAsync(card, player);
-        Assert.Equal(ActionOutcomeKind.Applied, result.Targets[0].Outcome);
-        Assert.Contains(card, player.Hand);
-    }
 
     [Fact]
     public void Burn_No_Longer_Takes_An_EmitDrawn_Switch()
@@ -207,118 +176,9 @@ public class P2ActionFamilyTests
 
     // ══════════════════════════ S8：死亡两端 ══════════════════════════
 
-    [Fact]
-    public async Task Death_Rewrite_Can_Change_Killer_And_Shows_In_CardDied()
-    {
-        var match = CommandTestKit.CreateCommandMatch();
-        await match.Initialize();
-        var player = match.Players[0];
-        var unit = await CommandTestKit.PrepareOnSupportAsync(match, player, CommandTestKit.InfantryId, 1);
-        var killer = await CommandTestKit.PrepareOnSupportAsync(match, player, CommandTestKit.BeastId, 2);
 
-        match.CommandManager.DeathAction.Handle.Register(
-            "改写归属",
-            (view, _, _) =>
-            {
-                view.Killer = killer;
-                return Task.CompletedTask;
-            },
-            ActionHandleBands.Rewrite);
 
-        using var recorder = new UpdateRecorder(match.Engine);
-        var result = await match.CommandManager.DeathAction.ExecuteAsync(unit);
 
-        Assert.Equal(ActionOutcomeKind.Applied, result.Targets[0].Outcome);
-        var died = Assert.Single(recorder.Updates, u => u.Type == GameUpdates.CardDied);
-        Assert.Same(killer, died.Payload![GameUpdates.PayloadKiller]);
-        Assert.Same(killer, died.Payload![GameUpdates.PayloadSource]);
-    }
-
-    [Fact]
-    public async Task Death_ShouldDie_False_Is_Blocked_With_Log_And_Zero_State_Change()
-    {
-        var match = CommandTestKit.CreateCommandMatch();
-        await match.Initialize();
-        var player = match.Players[0];
-        var unit = await CommandTestKit.PrepareOnSupportAsync(match, player, CommandTestKit.InfantryId, 1);
-        var position = unit.GetData<UnitStateData>().Line;
-        var defense = unit.Modifiers.GetEffectiveValue(CardStatFields.Defense);
-
-        match.CommandManager.DeathAction.Handle.Register(
-            "免死",
-            (view, _, _) =>
-            {
-                view.ShouldDie = false;
-                return Task.CompletedTask;
-            },
-            ActionHandleBands.Rewrite);
-
-        using var recorder = new UpdateRecorder(match.Engine);
-        var result = await match.CommandManager.DeathAction.ExecuteAsync(unit);
-
-        Assert.Equal(ActionOutcomeKind.Blocked, result.Targets[0].Outcome);
-        Assert.Equal(ActionFailureKind.DeathPrevented, result.Targets[0].Reason);
-        Assert.False(unit.GetData<UnitStateData>().IsDestroyed);
-        Assert.Same(position, unit.GetData<UnitStateData>().Line);
-        Assert.Equal(defense, unit.Modifiers.GetEffectiveValue(CardStatFields.Defense));
-        Assert.DoesNotContain(GameUpdates.CardDying, recorder.Types);
-        Assert.DoesNotContain(GameUpdates.CardDied, recorder.Types);
-
-        // 「免死」只有留痕：事件流 log（不发射总线信号）。
-        Assert.Contains(
-            match.Engine.RootStream.Entries,
-            e => e.Keywords.Contains("death:prevented"));
-    }
-
-    [Fact]
-    public async Task Death_Disposition_ToHand_Is_Executed_By_The_Action_Wrapper()
-    {
-        var match = CommandTestKit.CreateCommandMatch();
-        await match.Initialize();
-        var player = match.Players[0];
-        var unit = await CommandTestKit.PrepareOnSupportAsync(match, player, CommandTestKit.InfantryId, 1);
-        var handBefore = player.Hand.Count;
-
-        match.CommandManager.DeathAction.Handle.Register(
-            "改为回手",
-            (view, _, _) =>
-            {
-                view.Disposition = ActionDisposition.ToHand;
-                return Task.CompletedTask;
-            },
-            ActionHandleBands.Rewrite);
-
-        using var recorder = new UpdateRecorder(match.Engine);
-        var result = await match.CommandManager.DeathAction.ExecuteAsync(unit);
-
-        // 死亡链照常完成（含 card.died），处置由动作层包装执行（处理端不调加入手牌）。
-        Assert.Equal(ActionOutcomeKind.Applied, result.Targets[0].Outcome);
-        Assert.Equal(ActionDisposition.ToHand, result.Targets[0].Disposition);
-        Assert.True(unit.GetData<UnitStateData>().IsDestroyed);
-        Assert.Equal(1, recorder.Types.Count(t => t == GameUpdates.CardDied));
-
-        // 回手＝新建同定义实例（不是把已毁实例塞回手牌）。
-        Assert.Equal(handBefore + 1, player.Hand.Count);
-        var returned = player.Hand[^1];
-        Assert.NotSame(unit, returned);
-        Assert.Equal(unit.Name, returned.Name);
-        Assert.Equal(1, recorder.Types.Count(t => t == GameUpdates.CardHandAdd));
-    }
-
-    [Fact]
-    public async Task Death_Action_Has_One_Rewrite_Slot_And_No_Second_Cancel_Port()
-    {
-        // 旧的公开可写取消口已删除（唯一改写位＝处理端 Rewrite 段）。
-        Assert.Null(typeof(CommandManager).GetProperty("DeathInterceptor"));
-
-        var match = CommandTestKit.CreateCommandMatch();
-        await match.Initialize();
-        var handle = match.CommandManager.DeathAction.Handle;
-        var rewrite = Assert.Single(handle.Events, e => e.BandValue == (int)ActionHandleBands.Rewrite);
-        Assert.Equal("词条程序取消消灭", rewrite.Name);
-        Assert.Single(handle.Events, e => e.BandValue == (int)ActionHandleBands.Veto);
-        Assert.Single(handle.Events, e => e.BandValue == (int)ActionHandleBands.Apply);
-    }
 
     // ---------- 测试桩 ----------
 

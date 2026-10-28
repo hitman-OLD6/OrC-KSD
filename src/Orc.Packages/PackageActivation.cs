@@ -1,17 +1,34 @@
-using Orc.Cards;
+﻿using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Plugins;
 
 namespace Orc.Packages;
 
-/// <summary>装配报告：已激活包（装配序）／条目级依赖声明／失败明细（隔离整包）。</summary>
+/// <summary>被跳过的包（S14 第 2–3 条）：包 id ＋ 必需/可选 ＋ 失败项。</summary>
+/// <param name="PackageLabel">包标签（<c>id@version</c>）。</param>
+/// <param name="Required">是否必需包。</param>
+/// <param name="Failures">失败项。</param>
+public sealed record PackageLoadSkip(string PackageLabel, bool Required, IReadOnlyList<string> Failures);
+
+/// <summary>装配报告：已激活包（装配序）／条目级依赖声明／失败明细／被跳过的包（S14）。</summary>
 /// <param name="ActivatedPackages">已激活包（<c>id@version</c>；装配序）。</param>
 /// <param name="DeclaredDependencies">条目级依赖声明（声明序）。</param>
-/// <param name="Failures">失败明细。</param>
+/// <param name="Failures">失败明细（全部，含必需包）。</param>
+/// <param name="Skipped">被跳过的**可选**包（必需包失败另经 <see cref="RequiredFailures"/> 表达）。</param>
 public sealed record PackageActivationReport(
     IReadOnlyList<string> ActivatedPackages,
     IReadOnlyList<string> DeclaredDependencies,
-    IReadOnlyList<string> Failures);
+    IReadOnlyList<string> Failures,
+    IReadOnlyList<PackageLoadSkip> Skipped)
+{
+    /// <summary>失败的必需包（非空＝对局不开局，S14 第 2 条）。</summary>
+    public IReadOnlyList<PackageLoadSkip> RequiredFailures
+        => Skipped.Where(static s => s.Required).ToArray();
+
+    /// <summary>被跳过的可选包。</summary>
+    public IReadOnlyList<PackageLoadSkip> SkippedOptional
+        => Skipped.Where(static s => !s.Required).ToArray();
+}
 
 /// <summary>
 /// 对局级包激活（S10／P11 甲）：把快照中**属于给定执行相**的对局级脚本按
@@ -37,7 +54,7 @@ public static class PackageActivation
         AssetCatalogSnapshot snapshot,
         AssetServiceRegistry assetServices,
         JudicatorRegistry judicators,
-        PrefabManager prefabs,
+        SnapshotStore prefabs,
         IMatchServices? matchServices = null,
         IMatchBindingServices? bindingServices = null,
         AssetActivationPhase phase = AssetActivationPhase.PreCommand,
@@ -53,6 +70,7 @@ public static class PackageActivation
         var activated = new List<string>();
         var dependencies = new List<string>();
         var failures = new List<string>();
+        var skipped = new List<PackageLoadSkip>();
 
         foreach (var package in snapshot.Packages)
         {
@@ -96,9 +114,13 @@ public static class PackageActivation
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 failures.Add($"{label}：{ex.Message}");
+
+                // S14 第 2 条：必需包失败＝对局不开局（由装配段按 RequiredFailures 上抛）；
+                // 可选包失败＝跳过该包并留痕（报告＋审查面）。这里只分类，不吞、不抛。
+                skipped.Add(new PackageLoadSkip(label, package.Manifest.Required, new[] { ex.Message }));
             }
         }
 
-        return new PackageActivationReport(activated, dependencies, failures);
+        return new PackageActivationReport(activated, dependencies, failures, skipped);
     }
 }

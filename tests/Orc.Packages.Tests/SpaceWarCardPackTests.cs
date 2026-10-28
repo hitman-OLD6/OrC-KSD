@@ -1,4 +1,5 @@
-using Orc.Cards;
+using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Cards;
 using Orc.Packages;
 using Xunit;
@@ -50,8 +51,10 @@ public sealed class SpaceWarCardPackTests
         Assert.Empty(guerrilla.Bindings);
         Assert.False(string.IsNullOrWhiteSpace(guerrilla.Program));
 
-        Assert.NotNull(content.EffectsDirectory);
-        Assert.True(Directory.Exists(content.EffectsDirectory));
+        // v4-only：行为制品的装载目录是 components 目录（旧 effects 目录已退场，本包不再提供）。
+        Assert.NotNull(content.ComponentsDirectory);
+        Assert.True(Directory.Exists(content.ComponentsDirectory));
+        Assert.Null(content.EffectsDirectory);
     }
 
     [Fact]
@@ -74,41 +77,37 @@ public sealed class SpaceWarCardPackTests
     }
 
     [Fact]
-    public void 行为制品_可解析为预制体_且声明正确()
+    public void 行为制品_可解析为组件资产_且声明正确()
     {
         foreach (var id in new[] { "keyword.magnetic-shield", "keyword.magnetic-reaction", "keyword.sponge-armor" })
         {
-            var snapshot = PrefabJson.Deserialize(
-                File.ReadAllText(Path.Combine(PackRoot, "effects", id + ".prefab.json")));
-            Assert.Equal(id, snapshot.Root.Id);
+            Assert.Equal(id, ReadComponent(id).Id);
         }
 
-        // 三条伤害规则：都在伤害处理端 Rewrite 段，按 10 → 20 → 30 分层。
-        var expected = new (string Id, int Priority)[]
+        // 三条伤害规则：都在伤害处理成员上作 before 包装（旧「伤害处理触发器 + Rewrite 段」的等价落点）。
+        // 旧 priority 10/20/30 的「分层」在新模型**没有对应物**（R1i：band 与 priority 数值退役，
+        // 同相位内相对次序一律由声明序推出）——因此这里只断言结构，不再断言数值分层。
+        foreach (var id in new[] { "keyword.magnetic-shield", "keyword.magnetic-reaction", "keyword.sponge-armor" })
         {
-            ("keyword.magnetic-shield", 10),
-            ("keyword.magnetic-reaction", 20),
-            ("keyword.sponge-armor", 30),
-        };
-        foreach (var (id, priority) in expected)
-        {
-            var snapshot = PrefabJson.Deserialize(
-                File.ReadAllText(Path.Combine(PackRoot, "effects", id + ".prefab.json")));
-            var inject = snapshot.Root.Injects.Single(i => i.TargetTriggerName == "伤害处理触发器");
-            Assert.Equal("Rewrite", inject.BandName);
-            Assert.Equal(priority, inject.Priority);
+            var wrap = Assert.Single(ReadComponent(id).Wraps.Where(w => w.Target.Address.ToString() == "engine#damage-apply"));
+            Assert.Equal(WrapperPhase.Before, wrap.Phase);
         }
 
-        // 强磁护盾：指挥攻击 Commit 段（晚于默认转发）失去。
-        var shield = PrefabJson.Deserialize(
-            File.ReadAllText(Path.Combine(PackRoot, "effects", "keyword.magnetic-shield.prefab.json")));
-        var attackInject = shield.Root.Injects.Single(i => i.TargetTriggerName == "单位攻击触发器");
-        Assert.Equal("Commit", attackInject.BandName);
-        Assert.Equal(200, attackInject.Priority);
+        // 强磁护盾：单位攻击成员上的 after 包装（旧「单位攻击触发器 + Commit 段 + priority 200」的等价落点；
+        // Commit ＝「默认转发之后」，与 after 相位同义）。
+        var shield = ReadComponent("keyword.magnetic-shield");
+        var attackWrap = Assert.Single(shield.Wraps.Where(w => w.Target.Address.ToString() == "engine#unit-attack"));
+        Assert.Equal(WrapperPhase.After, attackWrap.Phase);
 
-        // 磁反应装甲：订阅指向触发器。
-        var reaction = PrefabJson.Deserialize(
-            File.ReadAllText(Path.Combine(PackRoot, "effects", "keyword.magnetic-reaction.prefab.json")));
-        Assert.Contains(reaction.Root.Injects, i => i.TargetTriggerName == "指向触发器");
+        // 磁反应装甲：挂到宿主指向成员上（旧「订阅指向触发器」的等价落点：订阅＝挂载）。
+        var reaction = ReadComponent("keyword.magnetic-reaction");
+        var mount = Assert.Single(reaction.Mounts);
+        Assert.Equal("host#targeting", mount.Target);
+        Assert.Equal("onTargeted", mount.Member);
     }
+
+    private static ComponentAsset ReadComponent(string id)
+        => AssetSchema.Read(
+            File.ReadAllText(Path.Combine(PackRoot, "effects-v4", id + ".component.json")),
+            id + ".component.json");
 }

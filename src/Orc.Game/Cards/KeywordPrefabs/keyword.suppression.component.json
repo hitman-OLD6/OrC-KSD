@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 4,
+  "asset": {
+    "kind": "component",
+    "id": "keyword.suppression",
+    "requires-host": "any",
+    "active-when": "loaded",
+    "one-shot": false,
+    "private-fields": [
+      {
+        "name": "firstOwnerTurnEnd",
+        "type": "boolean",
+        "initial": true
+      }
+    ],
+    "members": [
+      {
+        "name": "onTurnEnd",
+        "visibility": [
+          "callable",
+          "mountable"
+        ],
+        "view": {
+          "fields": [
+            {
+              "name": "Player",
+              "type": "entity",
+              "writable": false,
+              "required": false
+            },
+            {
+              "name": "TurnNumber",
+              "type": "number",
+              "writable": false,
+              "required": false
+            }
+          ]
+        },
+        "handler": {
+          "id": "keyword.suppression#onTurnEnd",
+          "entry": "HandleAsync",
+          "script": "Func<dynamic, Context, CancellationToken, Task> HandleAsync = async (view, ctx, ct) =>\n{\n    if (view.Host is not Orc.Game.Cards.CardBase host) { return; }\n    if (view.Player is not Orc.Game.Players.Player ended) { return; }\n\n    dynamic self = view.Owner;\n\n    if (!object.ReferenceEquals(host.Owner, ended))\n    {\n        // 首个回合边界不是拥有者的：施加发生在对手回合——其后拥有者回合结束即递减。\n        self.firstOwnerTurnEnd = false;\n        return;\n    }\n\n    if ((bool)self.firstOwnerTurnEnd)\n    {\n        // 施加时正处于拥有者回合：本回合结束不递减（skip 消费一次、不进参值面）。\n        self.firstOwnerTurnEnd = false;\n        return;\n    }\n\n    var remaining = Orc.Game.Cards.KeywordRules.GetKeywordValue(host, Orc.Game.Cards.KeywordIds.Suppressed)\n        ?? Orc.Game.Cards.SuppressRules.SuppressedDefaultTurns;\n    var next = remaining - 1;\n    if (next <= 0)\n    {\n        await host.Keywords.RevokeAsync(Orc.Game.Cards.KeywordIds.Suppressed);\n        return;\n    }\n\n    host.Keywords.SetValue(Orc.Game.Cards.KeywordIds.Suppressed, next);\n};\n"
+        }
+      }
+    ],
+    "mounts": [
+      {
+        "target": "engine#turn.end",
+        "member": "onTurnEnd"
+      }
+    ],
+    "wraps": []
+  }
+}

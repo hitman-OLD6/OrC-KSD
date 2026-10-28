@@ -1,5 +1,6 @@
-﻿using Orc.Cards;
+using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Cards;
 using Orc.Game.Commanding;
 
@@ -15,11 +16,11 @@ namespace Orc.Game.Actions;
 /// </summary>
 public interface IAttackAction
 {
-    /// <summary>攻击**触发端**（<c>unit.attack</c>；与宿主 <c>UnitAttackTrigger</c> 同一实例）。</summary>
-    Trigger<UnitAttackTriggerView> Trigger { get; }
+    /// <summary>攻击**触发端**（<c>engine#unit-attack</c>）。</summary>
+    MemberAddress Trigger { get; }
 
-    /// <summary>攻击**处理端**（<c>Rewrite</c>/<c>Veto</c>/<c>Apply</c>；与宿主 <c>AttackDamageTrigger</c> 同一实例）。</summary>
-    Trigger<AttackDamageTriggerView> Handle { get; }
+    /// <summary>攻击**处理端**（<c>engine#attack-damage</c>）。</summary>
+    MemberAddress Handle { get; }
 
     /// <summary>构造注入的伤害动作（互伤的唯一结算通道；替换实现后仍可读）。</summary>
     IDamageAction Damage { get; }

@@ -223,7 +223,8 @@ internal static class ViewProxyFactory
         if (property.Access != ViewPropertyAccess.Mutate)
         {
             // 仅 [Mutate] 可写；[Read] 与无特性一律拒绝（权限矩阵闸门）。
-            EmitThrow(il, PermissionDeniedCtor, $"视图属性 '{display}' 未声明 [Mutate]，禁止写入。");
+            // 消息要点明"只读"：作者看到的不是"缺一个特性"，而是"这个字段本来就只读，写它属于越权"。
+            EmitThrow(il, PermissionDeniedCtor, $"视图属性 '{display}' 是只读的（未声明 [Mutate]），禁止写入。");
             return;
         }
 

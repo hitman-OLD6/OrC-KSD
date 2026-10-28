@@ -21,7 +21,7 @@ public class DiyExample02_RandomSplitTests
         }
 
         var pack = DiyExampleKit.LoadPack(cardsDirectory);
-        var match = await DiyExampleKit.CreateMatchAsync(pack, effectsDirectory);
+        var match = await DiyExampleKit.CreateMatchAsync(pack, effectsDirectory, allowRandomTargeting: true);
         var playerA = match.Players[0];
         var playerB = match.Players[1];
 
@@ -58,7 +58,7 @@ public class DiyExample02_RandomSplitTests
         }
 
         var pack = DiyExampleKit.LoadPack(cardsDirectory);
-        var match = await DiyExampleKit.CreateMatchAsync(pack, effectsDirectory);
+        var match = await DiyExampleKit.CreateMatchAsync(pack, effectsDirectory, allowRandomTargeting: true);
         var playerA = match.Players[0];
 
         var command = await DiyExampleKit.PrepareCommandAsync(match, playerA, CardId);

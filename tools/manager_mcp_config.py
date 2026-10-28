@@ -21,7 +21,7 @@ import time
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_DLL = os.path.join(
-    REPO_ROOT, "src", "Orc.Manager", "bin", "Debug", "net8.0", "Orc.Manager.dll"
+    REPO_ROOT, "artifacts", "slot", "bin", "Orc.Manager", "debug", "Orc.Manager.dll"
 )
 DEFAULT_CONFIG = os.path.join(os.path.expanduser("~"), ".workbuddy", "mcp.json")
 ENTRY_NAME = "orc-manager"

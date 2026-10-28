@@ -434,6 +434,7 @@ public class EffectRuntimeEndToEndTests
         registry.DeclarePrefab(parserCardId, new[] { snapshot.Root.Id });
 
         var match = CommandTestKit.CreateCommandMatch(
+            bridge: CommandTestKit.AutoPickBridge(), // S9／R2：sel=one 需提交通道（用例扮演前端）
             effectRegistry: registry,
             extraDefinitions: new[]
             {

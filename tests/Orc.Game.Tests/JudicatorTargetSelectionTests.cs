@@ -254,7 +254,7 @@ public class JudicatorTargetSelectionTests
 
         try
         {
-            var task = match.EffectRuntime.BeginTargetSelectionAsync(enemyUnit, new EffectSelector("all"));
+            var task = match.EffectRuntime.SelectAsync(enemyUnit, new EffectSelector("one"));
             var (description, responder) = await bridge.WaitForNextBeginAsync();
 
             Assert.DoesNotContain(protectedUnit.Ref, description.AllowedTargets);

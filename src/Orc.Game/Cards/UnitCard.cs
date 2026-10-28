@@ -1,8 +1,10 @@
-using Orc.Cards;
+﻿using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Actions;
 using Orc.Game.Board;
 using Orc.Game.Managers;
+using Orc.Game.Model;
 using Orc.Game.Players;
 using Orc.Game.Targeting;
 using Orc.Game.Triggers;
@@ -56,80 +58,91 @@ public class UnitCard : CardBase
 
         // 对战数据组件由基类构造期组件 loader 装配（battleStats 组件定义驱动——P4；单位卡组件集含该定义）。
 
-        // 触发器（预打出/打出＝费用校验触发器——合法性验证承载；部署/加入/单位化＝链触发器）。
-        PrePlayTrigger = new CostCheckTrigger("预打出触发器", this, validationJudicatorResolver);
-        PlayTrigger = new CostCheckTrigger("打出触发器", this, validationJudicatorResolver);
-        DeployTrigger = new Trigger<CardTriggerView>("部署触发器");
-        DeployKeywordTrigger = new Trigger<CardTriggerView>("部署词条触发器");
-        JoinTrigger = new Trigger<CardTriggerView>("加入触发器");
-        UnitizeTrigger = new Trigger<CardTriggerView>("单位化触发器");
-        // S1：老兵触发器（升级动作的唯一标准发动入口——「专属触发器」；触发它＝发动升级）。
-        VeteranTrigger = new Trigger<CardTriggerView>(VeteranRules.TriggerName);
-        // S2：揭示触发器（揭示动作的内容承载面——「揭示：X」内容经效果预制体按名注入；触发它＝执行揭示内容，
-        // 由 CovertRules.RevealAsync 统一发动；无注入＝空转、无副作用）。
-        RevealTrigger = new Trigger<CardTriggerView>(CovertRules.TriggerName);
-        // 通用接入点：指向触发器（默认 handler 声明具名动作缝；词条经 injects 按名订阅）。
-        TargetingTrigger = new Trigger<TargetingView>(TargetingRules.TriggerName);
+        // S8（批次 3）：成员表由类型预制体 `card.unit` 声明；批次 7（§27）起本类只持**成员地址**，
+        // 执行体＝宿主实体上的自有边（默认链）——不再有触发器实例。
+        var members = BindMembers(engine, HostKind.Unit, validationJudicatorResolver);
 
-        // S5：具名触发器登记（供效果预制体 injects 声明按名解析注入目标）。
-        RegisterNamedTrigger(TargetingRules.TriggerName, TargetingTrigger, typeof(TargetingView));
-        RegisterNamedTrigger("打出触发器", PlayTrigger, typeof(CardTriggerView));
-        RegisterNamedTrigger("部署触发器", DeployTrigger, typeof(CardTriggerView));
-        RegisterNamedTrigger("部署词条触发器", DeployKeywordTrigger, typeof(CardTriggerView));
-        RegisterNamedTrigger("加入触发器", JoinTrigger, typeof(CardTriggerView));
-        RegisterNamedTrigger("单位化触发器", UnitizeTrigger, typeof(CardTriggerView));
-        RegisterNamedTrigger(VeteranRules.TriggerName, VeteranTrigger, typeof(CardTriggerView));
-        RegisterNamedTrigger(CovertRules.TriggerName, RevealTrigger, typeof(CardTriggerView));
+        PrePlayTrigger = members.AddressOf(CardProcesses.PrePlay);
+        PlayTrigger = members.AddressOf(CardProcesses.Play);
+        DeployTrigger = members.AddressOf(CardProcesses.Deploy);
+        DeployKeywordTrigger = members.AddressOf(CardProcesses.DeployKeyword);
+        JoinTrigger = members.AddressOf(CardProcesses.Join);
+        UnitizeTrigger = members.AddressOf(CardProcesses.Unitize);
+        // S1：老兵成员（升级动作的唯一标准发动入口——「专属触发器」；触发它＝发动升级）。
+        VeteranTrigger = members.AddressOf(CardProcesses.Veteran);
+        // S2：揭示成员（揭示动作的内容承载面——「揭示：X」内容按身份挂到该成员；触发它＝执行揭示内容，
+        // 由 CovertRules.RevealAsync 统一发动；无内容＝空转、无副作用）。
+        RevealTrigger = members.AddressOf(CardProcesses.Reveal);
+        // 通用接入点：指向成员（默认边声明具名动作缝；词条经组件挂载订阅）。
+        TargetingTrigger = members.AddressOf(CardProcesses.Targeting);
 
-        // 默认链事件（构造期装配；装配方扩展事件按注册序追加于其后——闪击等词条注入属 2C）。
-        // R9：内置链 handler 归因于本卡（registrant: this）——进入 handler 时帧触发者＝本卡，
-        // 链内发信号以 view.TriggerCard 为 Source（卡自身注册 ⇒ 恒为本卡）。
-        // S9：部署/加入的**执行**已下沉到加入战场动作（`JoinBattlefieldAction`）——本卡只保留入口收尾
-        // （unit.deployed／unit.joined、扣费、离手、OnDeployChainFinalized）。
-        PlayTrigger.Register("打出链", HandlePlayChainAsync, registrant: this);
-        DeployTrigger.Register("部署链", HandleDeployChainAsync, registrant: this);
-        JoinTrigger.Register("加入链", HandleJoinChainAsync, registrant: this);
-        UnitizeTrigger.Register("单位化", HandleUnitizeAsync, registrant: this);
-        VeteranTrigger.Register("升级链", HandleVeteranChainAsync, registrant: this);
-        // 指向默认链＝声明具名动作缝（C# wrapper 插入点；词条订阅经 injects 另注册 handler）。
-        TargetingTrigger.Register("指向", HandleTargetingAsync, seams: [TargetingRules.SeamName], registrant: this);
+        // 守卫边（费用校验：预打出＋打出各一条；位次＝自有边首条 ⇒ 先于链执行、不合法即本级停止）。
+        CardPlayGuards.AttachCostGuard(this, CardProcesses.PrePlay, validationJudicatorResolver);
+        CardPlayGuards.AttachCostGuard(this, CardProcesses.Play, validationJudicatorResolver);
+
+        // 默认链（自有边；接入序＝执行序）。S9：部署/加入的**执行**已下沉到加入战场动作
+        // （`JoinBattlefieldAction`）——本卡只保留入口收尾（unit.deployed／unit.joined、扣费、离手）。
+        AttachMemberEdge(CardProcesses.Play, MemberEdges.For<CardTriggerView>(HandlePlayChainAsync));
+        AttachMemberEdge(CardProcesses.Deploy, MemberEdges.For<CardTriggerView>(HandleDeployChainAsync));
+        AttachMemberEdge(CardProcesses.Join, MemberEdges.For<CardTriggerView>(HandleJoinChainAsync));
+        AttachMemberEdge(CardProcesses.Unitize, MemberEdges.For<CardTriggerView>(HandleUnitizeAsync));
+        AttachMemberEdge(CardProcesses.Veteran, MemberEdges.For<CardTriggerView>(HandleVeteranChainAsync));
+        // 指向默认链＝声明具名动作缝（C# wrapper 插入点；词条订阅经组件另挂外来边）。
+        AttachMemberEdge(CardProcesses.Targeting, MemberEdges.For<TargetingView>(HandleTargetingAsync));
     }
 
-    /// <summary>指向默认 handler：只暴露具名动作缝（无业务逻辑）。</summary>
+    /// <summary>
+    /// 指向成员默认 handler：**无业务逻辑**（指向的语义全部由订阅方表达）。
+    /// <para>
+    /// v4 收口：旧实现在这里调 <c>ctx.SeamAsync("指向后")</c>，把"指向后"当成 C# wrapper 的插入点。
+    /// 动作缝随旧触发器机制一并下线（新资产 schema 明确拒绝 <c>seam</c> 字段），订阅方的逻辑
+    /// 改为该成员上的**包装边**（<c>wraps.before</c>）与外来挂载边——由编排运行时在自有边前后执行。
+    /// 因此本 handler 保留为空转（成员仍须存在：它是订阅点的地址）。
+    /// </para>
+    /// </summary>
     private static Task HandleTargetingAsync(TargetingView view, Context ctx, CancellationToken ct)
-        => ctx.SeamAsync(TargetingRules.SeamName, ct);
+        => Task.CompletedTask;
 
     /// <summary>
     /// 发动指向通知（通用接入点的内部导航面——由 <see cref="TargetingRules.NotifyAsync"/> 调用）：
     /// 载荷＝{ Source, Target, Kind, TriggerCard, Host }。
     /// </summary>
-    internal Task InvokeTargetingTriggerAsync(Card? source, string kind, Card? triggerCard, CancellationToken ct)
-        => TargetingTrigger.InvokeAsync(
-            _chainEngine,
-            new Dictionary<string, object?>
-            {
-                [nameof(TargetingView.Source)] = source,
-                [nameof(TargetingView.Target)] = this,
-                [nameof(TargetingView.Kind)] = kind,
-                [nameof(TargetingView.TriggerCard)] = triggerCard,
-                [nameof(TargetingView.Host)] = this,
-            },
-            ct);
+    internal async Task InvokeTargetingTriggerAsync(Card? source, string kind, Card? triggerCard, CancellationToken ct)
+    {
+        var data = new Dictionary<string, object?>
+        {
+            [nameof(TargetingView.Source)] = source,
+            [nameof(TargetingView.Target)] = this,
+            [nameof(TargetingView.Kind)] = kind,
+            [nameof(TargetingView.TriggerCard)] = triggerCard,
+            [nameof(TargetingView.Host)] = this,
+        };
+
+        // **生产端发射（b4）**：跑宿主实例成员 <c>host#targeting</c>（v4 组件形态的「指向触发器」订阅，
+        // 如磁反应装甲"被指向扣层"）。成员执行＝该成员上的**全部边**：自有边（默认 handler，空转）＋
+        // 组件外来挂载边——因此这里只能调**一次**：再调一次 `InvokeMemberAsync` 会把同一条挂载边跑两遍
+        // （磁反应装甲一次指向扣两层、起始 2 层直接归零）。旧代码里的"成员＋旧具名触发器"两段式随旧触发器
+        // 机制一起下线，两个世代只剩这一条路径。
+        // 无实体（未加载／未装配运行时）＝静默跳过，保持旧路径"未装配即空转"的口径。
+        await ModelMemberDispatch
+            .InvokeHostMemberAsync(_chainEngine, ModelEntity, CardProcesses.Targeting, data, ct)
+            .ConfigureAwait(false);
+    }
 
     /// <summary>预打出触发器（费用校验：指挥点验证；开始/交互编排由打出管理器驱动；装配方扩展点保留）。</summary>
-    public Trigger<CardTriggerView> PrePlayTrigger { get; }
+    public MemberAddress PrePlayTrigger { get; }
 
     /// <summary>打出触发器（费用校验＋默认链：外层复验＋打出宣告＋部署链＋收尾〔扣费→离手〕）。</summary>
-    public Trigger<CardTriggerView> PlayTrigger { get; }
+    public MemberAddress PlayTrigger { get; }
 
     /// <summary>部署触发器（部署链：部署逻辑检查＋词条效果按序 → 单位化 → unit.deployed）。</summary>
-    public Trigger<CardTriggerView> DeployTrigger { get; }
+    public MemberAddress DeployTrigger { get; }
 
     /// <summary>加入触发器（加入链：单位化 → unit.joined；不扣费、不走部署词条）。</summary>
-    public Trigger<CardTriggerView> JoinTrigger { get; }
+    public MemberAddress JoinTrigger { get; }
 
     /// <summary>单位化触发器（部署/加入共用：加单位组件＋指挥组件＋实际加入空槽位）。</summary>
-    public Trigger<CardTriggerView> UnitizeTrigger { get; }
+    public MemberAddress UnitizeTrigger { get; }
 
     /// <summary>
     /// 老兵触发器（S1；升级动作的**唯一标准发动入口**——「专属触发器」）：触发它＝发动升级
@@ -138,7 +151,7 @@ public class UnitCard : CardBase
     /// 标识名＝<see cref="VeteranRules.TriggerName"/>（S1 定稿——对 S3 契约；并已具名登记，
     /// 供效果预制体 <c>injects</c> 按名解析）。
     /// </summary>
-    public Trigger<CardTriggerView> VeteranTrigger { get; }
+    public MemberAddress VeteranTrigger { get; }
 
     /// <summary>
     /// 揭示触发器（S2；揭示动作的**内容承载面**——「揭示：X」内容经效果预制体 <c>injects</c> 按名注入；
@@ -148,7 +161,7 @@ public class UnitCard : CardBase
     /// 标识名＝<see cref="CovertRules.TriggerName"/>（S2 定稿——对 S3 契约；并已具名登记，
     /// 供效果预制体 <c>injects</c> 按名解析）。
     /// </summary>
-    public Trigger<CardTriggerView> RevealTrigger { get; }
+    public MemberAddress RevealTrigger { get; }
 
     /// <summary>
     /// 指向触发器（通用接入点；「某方指向本卡」的最终确定面）：效果选靶最终名单 / 交互落定、
@@ -156,7 +169,7 @@ public class UnitCard : CardBase
     /// <see cref="TargetingRules.SeamName"/>（C# 侧 wrapper 插入点）；词条行为经效果预制体
     /// <c>injects</c> 按名订阅。标识名＝<see cref="TargetingRules.TriggerName"/>（已具名登记）。
     /// </summary>
-    public Trigger<TargetingView> TargetingTrigger { get; }
+    public MemberAddress TargetingTrigger { get; }
 
     /// <summary>
     /// 部署词条触发器（S6／R12；默认 band）：部署时执行的"部署词条效果"的触发面——
@@ -164,16 +177,15 @@ public class UnitCard : CardBase
     /// 部署链①段与再触发「部署重放」共用 <see cref="InvokeDeployKeywordAsync"/> 单一入口。
     /// 无注入＝空转（部署不因此失败）。
     /// </summary>
-    public Trigger<CardTriggerView> DeployKeywordTrigger { get; }
+    public MemberAddress DeployKeywordTrigger { get; }
 
     /// <summary>
     /// 触发部署词条效果（S6 单源入口）：部署链与「部署重放」共用；载荷＝{ Card, Player?, Position }。
     /// </summary>
-    internal async Task<EventStream> InvokeDeployKeywordAsync(Player? player, FormationGap? gap, CancellationToken ct)
+    internal async Task InvokeDeployKeywordAsync(Player? player, FormationGap? gap, CancellationToken ct)
     {
-        var result=await DeployKeywordTrigger.InvokeAsync(_chainEngine, BuildUnitData(this, player, gap), ct);
-        if(result.Outcome==ExecutionOutcome.Normal)await KeywordProgramRuntime.ReplayDeployment(this,ct);
-        return result;
+        await InvokeMemberAsync(CardProcesses.DeployKeyword, new Context(BuildUnitData(this, player, gap)), ct);
+        await KeywordProgramRuntime.ReplayDeployment(this, ct);
     }
 
     /// <summary>
@@ -202,7 +214,7 @@ public class UnitCard : CardBase
         if (gap is null) { ctx.Interrupt(); return; }
 
         // 内层部署链（部署词条 → 单位化 → card.placed）——S9：执行全部下沉到「加入战场」动作的部署触发端。
-        await unit.DeployTrigger.InvokeAsync(_chainEngine, BuildUnitData(unit, player, gap), ct);
+        await unit.InvokeMemberAsync(CardProcesses.Deploy, new Context(BuildUnitData(unit, player, gap)), ct);
         if (ctx.Interrupted)
         {
             return; // 部署链未完成（代价不足/结构拒绝）：不进入收尾（不扣费、不离手、不发 unit.deployed）
@@ -327,13 +339,13 @@ public class UnitCard : CardBase
     /// （载荷＝{ Card, Position }），由默认链执行单位化；注入该触发器的效果照常参与。
     /// </summary>
     internal Task InvokeUnitizeAsync(FormationGap gap, CancellationToken ct = default)
-        => UnitizeTrigger.InvokeAsync(
-            _chainEngine,
-            new Dictionary<string, object?>
+        => InvokeMemberAsync(
+            CardProcesses.Unitize,
+            new Context(new Dictionary<string, object?>
             {
                 [GameUpdates.PayloadCard] = this,
                 [GameUpdates.PayloadPosition] = gap!,
-            },
+            }),
             ct);
 
     // ---------- S2 隐蔽机制（揭示导航面——由 CovertRules.RevealAsync 服务调用、不对外） ----------
@@ -344,9 +356,9 @@ public class UnitCard : CardBase
     /// 未注入 handler＝空转（返回空流、无副作用——本人无「揭示：」内容即此态）。
     /// </summary>
     internal Task InvokeRevealTriggerAsync(CancellationToken ct = default)
-        => RevealTrigger.InvokeAsync(
-            _chainEngine,
-            new Dictionary<string, object?> { [GameUpdates.PayloadCard] = this },
+        => InvokeMemberAsync(
+            CardProcesses.Reveal,
+            new Context(new Dictionary<string, object?> { [GameUpdates.PayloadCard] = this }),
             ct);
 
     /// <summary>
@@ -387,7 +399,7 @@ public class UnitCard : CardBase
             [VeteranPromotionCapture.PayloadKey] = capture,
         };
 
-        await VeteranTrigger.InvokeAsync(_chainEngine, data, ct).ConfigureAwait(false);
+        await InvokeMemberAsync(CardProcesses.Veteran, new Context(data), ct).ConfigureAwait(false);
 
         if (capture.Failure is { } failure)
         {
