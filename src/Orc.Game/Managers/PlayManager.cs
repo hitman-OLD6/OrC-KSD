@@ -84,15 +84,19 @@ public sealed class PlayManager
         // S13 第 6 条：指令施放经**唯一动作入口**（IOrderAction 包装 OrderFlow）——不直调 flow。
         _orderAction = orderAction ?? ActionRuntime.ResolveOrder(engine);
 
-        // S13：游戏层向内核 OrderFlow 注入语义（每条引擎恰注册一次）。批次 7（§27）起不再是 band 注册，
-        // 而是两条**外来边**（挂到引擎成员上，位次＝声明序优先级）：
-        // ① order.cast / 优先级 100＝打出宣告（card.played；OrderCard 守卫——内核测试的裸卡不受影响）；
-        //    反制检查边优先级 0 ⇒ 恒在宣告点之前：反制 Stop 使宣告与结算都不执行，被反制的指令因此**不发**
-        //    card.played（视为未成功打出）。
-        // ② order.finalize / 优先级 100＝打出收尾（扣费 → 离手；Stop 不阻止本段，两阶段语义不变）。
+        // S13：游戏层向内核 OrderFlow 注入语义（每条引擎恰注册一次）。批次 7（§27）起不再是 band 枚举注册，
+        // 而是两条**外来边**（挂到引擎成员上，段名＋声明序优先级共同定位）：
+        // ① order.cast / 段 Counter、优先级 100＝打出宣告（card.played；OrderCard 守卫——内核测试的裸卡不受影响）；
+        //    反制检查边同为 Counter 段、优先级 0 ⇒ 恒在宣告点之前：反制 Stop 使宣告与结算都不执行，
+        //    被反制的指令因此**不发** card.played（视为未成功打出）。
+        //    为什么宣告点落在 Counter 段而不是结算所在的 Resolve 段：同段内自有边在前（R1i band 修订），
+        //    宣告点必须早于"施放结算"这条自有边——只有更早的段能表达这一点。
+        // ② order.finalize / 优先级 100＝打出收尾（扣费 → 离手；Stop 不阻止本段，两阶段语义不变）；
+        //    收尾是独立成员，其自有边段名＝Finalize，本边缺省同段（同一阶段内按声明序执行）。
         engine.SubscribeMember(
             OrderFlow.CastMember, "打出宣告", this, MemberEdges.For<OrderFlowView>(HandleOrderAnnouncedAsync),
-            priority: 100); // 旧 Resolve 段的默认事件优先级
+            priority: 100,
+            band: BandSchemes.Counter); // 旧 Resolve 段的宣告点（现落 Counter 段：早于结算自有边）
         engine.SubscribeMember(
             OrderFlow.FinalizeMember, "打出收尾", this, MemberEdges.For<OrderFlowView>(HandleOrderFinalizedAsync),
             priority: 100); // 旧 Finalize 段的游戏层优先级

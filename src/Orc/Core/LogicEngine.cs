@@ -255,8 +255,8 @@ public sealed class LogicEngine
     /// <summary>
     /// 往**任意引擎成员**上挂一条外来边（信号＝订阅、流程成员＝检查位／守卫），返回撤销句柄。
     /// <para>
-    /// 反制的使用检查＝<c>engine#order.cast</c> 上的一条外来边（该成员声明为 last 位次：外来边先跑、结算最后跑）；
-    /// 句柄 Dispose 即撤销——与旧实现"注册一个 Counter 段事件再 Unregister"逐项等价。
+    /// 反制的使用检查＝<c>engine#order.cast</c> 上的一条外来边（<c>Counter</c> 段＝早于结算的
+    /// <c>Resolve</c> 段）；句柄 Dispose 即撤销——与旧实现"注册一个 Counter 段事件再 Unregister"逐项等价。
     /// </para>
     /// </summary>
     /// <param name="memberName">目标成员名（<c>engine#&lt;成员名&gt;</c> 的成员名段）。</param>
@@ -264,6 +264,7 @@ public sealed class LogicEngine
     /// <param name="owner">所有者（引用相等卸载的依据；可为 null）。</param>
     /// <param name="handler">边体。</param>
     /// <param name="priority">位次优先级（同一位次内先小后大）。</param>
+    /// <param name="band">外来边在目标成员段序方案里的段名（null＝与目标成员自有边同段）。</param>
     /// <exception cref="ArgumentException">memberName／displayName 为空。</exception>
     /// <exception cref="ArgumentNullException">handler 为 null。</exception>
     /// <summary>
@@ -275,13 +276,25 @@ public sealed class LogicEngine
     /// <param name="owner">所有者（引用相等卸载依据）。</param>
     /// <param name="edge">订阅体（一条边）。</param>
     /// <param name="priority">位次优先级（旧挂载优先级）。</param>
+    /// <param name="band">外来边在目标成员段序方案里的段名（null＝与目标成员自有边同段）。</param>
     public void SubscribeMember(
-        string signal, string displayName, object? owner, Orc.Core.Model.OwnedEdge edge, int priority = UpdatePriorities.Normal)
-        => _signals.SubscribeSignal(signal, displayName, priority, owner, edge);
+        string signal,
+        string displayName,
+        object? owner,
+        Orc.Core.Model.OwnedEdge edge,
+        int priority = UpdatePriorities.Normal,
+        string? band = null)
+        => _signals.SubscribeSignal(signal, displayName, priority, owner, edge, band);
 
+    /// <inheritdoc cref="SubscribeMember"/>
     public IDisposable AttachMemberEdge(
-        string memberName, string displayName, object? owner, Orc.Core.Model.OwnedEdge edge, int priority = 0)
-        => _signals.Attach(memberName, displayName, priority, owner, edge);
+        string memberName,
+        string displayName,
+        object? owner,
+        Orc.Core.Model.OwnedEdge edge,
+        int priority = 0,
+        string? band = null)
+        => _signals.Attach(memberName, displayName, priority, owner, edge, band: band);
 
     // ---------- ④卡牌 ----------
 

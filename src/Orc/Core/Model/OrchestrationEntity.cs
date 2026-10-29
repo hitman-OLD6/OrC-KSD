@@ -62,9 +62,11 @@ public readonly record struct MemberExecutionResult(bool Executed, bool Stopped,
 /// 私有状态（R3e）落在 <c>_state</c>，只经 <c>owner.&lt;Name&gt;</c>（动态）或 <see cref="GetPrivateField"/> 访问，**不进数据面**。
 /// </para>
 /// <para>
-/// **执行序（R1i）**：位次由成员声明决定（<see cref="OwnEdgePosition"/>）——
-/// <c>first</c>（流程型，默认）自有边 → 外来挂载边；<c>last</c>（管道型）外来挂载边 → 自有边。
-/// 外来边内部按声明序 → 追加序；框架注销边作为声明序边的一部分，位次最后。
+/// **执行序（R1i／band）**：成员的边集合按 **band（段名）** 排序——
+/// 段下标来自成员的 <see cref="MemberDefinition.Bands"/> 方案（自有边＝<see cref="MemberDefinition.Band"/>，
+/// 外来边＝<see cref="MountEdge.Band"/>，缺省与自有边同段），同段内**自有边在前**（声明序 → 运行期接入序）、
+/// 外来边按声明序 → 追加序；框架注销边作为声明序边的一部分，位次最后。
+/// "自有边最前／最后"是结果而非概念：落在首段即最前，落在末段即最后。
 /// 包装（S2a）：<c>before</c>（FIFO）→ 边集合（或被 <c>replace</c> 接管）→ <c>after</c>（FIFO）。
 /// </para>
 /// </summary>
@@ -339,6 +341,19 @@ public sealed class OrchestrationEntity : Entity
         ctx.PushMemberScope(scope);
         var view = ViewCarrier.Bind(member.View, ctx, this, HostForView, member.Name);
 
+        // 具名缝执行器收窄到**当前**成员（R1i 修订 2026-10-29：seam 恢复）：帧级默认由建帧点给出，
+        // 而挂载成员／嵌套成员与宿主共用同一个执行帧——不收窄就会把组件的缝调用解析到**外层成员**的缝上
+        // （要么静默跑错包装，要么误报"未声明"）。未声明缝的成员＝执行器置 null（保持
+        // `ctx.SeamAsync` 的 InvalidOperationException，与"只能在已声明 seams 的 handler 内调用"一致）。
+        var frame = ctx.Frame;
+        var outerSeamExecutor = frame?.SeamExecutor;
+        if (frame is not null)
+        {
+            frame.SeamExecutor = member.Seams.Count > 0
+                ? (seam, seamCt) => Runtime.ExecuteSeamAsync(this, member, seam, ctx, seamCt)
+                : null;
+        }
+
         // 包装器视图：归属实体与被执行成员不同时（引擎成员上的组件包装），owner／host 回填为**声明该包装的实体**
         // （R4 的 owner 回填；等价于旧 injects 把宿主卡放进载荷的 `Host`）。数据面仍是同一份（写回对后续步骤可见）。
         var wrapperViews = new List<ViewCarrier>(2);
@@ -383,7 +398,7 @@ public sealed class OrchestrationEntity : Entity
                 await wrapper.Handler.InvokeAsync(ViewFor(wrapper), ctx, ct).ConfigureAwait(false);
             }
 
-            // ② 边集合：replace 最后声明者接管整个边集合；否则按成员声明的自有边位次排列。
+            // ② 边集合：replace 最后声明者接管整个边集合；否则按 band（段序）排列自有边与外来边。
             if (!scope.Stopped && !ctx.Interrupted)
             {
                 var replace = wraps.LastReplace(target);
@@ -427,82 +442,97 @@ public sealed class OrchestrationEntity : Entity
             }
 
             view.Seal();
+            if (frame is not null)
+            {
+                frame.SeamExecutor = outerSeamExecutor;
+            }
+
             ctx.PopMemberScope(scope);
         }
     }
 
     /// <summary>
-    /// 执行边集合：位次由成员的 <see cref="MemberDefinition.OwnEdgePosition"/> 决定——
-    /// <see cref="OwnEdgePosition.First"/>（流程型，默认）＝自有边 → 外来挂载边；
-    /// <see cref="OwnEdgePosition.Last"/>（管道型）＝外来挂载边 → 自有边。
-    /// 外来边内部按声明序 → 追加序。每个单元前检查停止。
+    /// 执行边集合：**统一按 band 排序**（R1i 修订 2026-10-29）。
+    /// <para>
+    /// 每条执行单元的段名＝自有边取 <see cref="MemberDefinition.Band"/>、外来边取
+    /// <see cref="MountEdge.Band"/>（null＝与成员自有边同段）；段下标＝该段名在
+    /// <see cref="MemberDefinition.Bands"/> 里的下标（null 方案／null 段名＝0）。
+    /// 排序键＝<c>(段下标, 同段内序)</c>，同段内序＝自有边（声明序 → 运行期接入序）在前，
+    /// 外来边（表内快照序：声明序 → 追加序）在后。
+    /// </para>
+    /// <para>
+    /// 于是"自有边最前／最后"不再是独立概念：自有边落在首段＝最前，落在末段（且外来边在更早的段）＝最后。
+    /// 每个执行单元前检查停止（本级 <c>Stop</c>）与链级中断（<c>Interrupt</c>）。
+    /// </para>
     /// </summary>
     private async Task RunEdgesAsync(
         MemberDefinition member, ViewCarrier view, Context ctx, MemberExecutionScope scope, CancellationToken ct)
     {
-        var ownEdgesLast = member.OwnEdgePosition == OwnEdgePosition.Last;
+        var units = CollectUnits(member);
 
-        if (!ownEdgesLast)
+        foreach (var unit in units)
         {
-            await RunOwnEdgesAsync(member, view, ctx, scope, ct).ConfigureAwait(false);
-        }
-
-        if (_edgeTables.TryGetValue(member.Name, out var table))
-        {
-            foreach (var edge in table.Snapshot())
+            if (scope.Stopped || ctx.Interrupted)
             {
-                if (scope.Stopped || ctx.Interrupted)
-                {
-                    return; // 本级停止（Stop）或链级中断（Interrupt）：不再推进后续边
-                }
-
-                // 被挂载成员保留自己的视图与合法性检验；数据面仍是**宿主**这一份（R1c：写回对后续步骤可见）。
-                await edge.Declaring
-                    .ExecuteMemberAsync(edge.Member, edge.Declaring.AddressOf(edge.Member.Name), ctx, ct)
-                    .ConfigureAwait(false);
+                return; // 本级停止（Stop）或链级中断（Interrupt）：不再推进后续单元
             }
-        }
 
-        if (ownEdgesLast)
-        {
-            await RunOwnEdgesAsync(member, view, ctx, scope, ct).ConfigureAwait(false);
+            if (unit.Owned is { } owned)
+            {
+                await owned.InvokeAsync(view, ctx, ct).ConfigureAwait(false);
+                continue;
+            }
+
+            var edge = unit.Edge!;
+
+            // 被挂载成员保留自己的视图与合法性检验；数据面仍是**宿主**这一份（R1c：写回对后续步骤可见）。
+            await edge.Declaring
+                .ExecuteMemberAsync(edge.Member, edge.Declaring.AddressOf(edge.Member.Name), ctx, ct)
+                .ConfigureAwait(false);
         }
     }
 
     /// <summary>
-    /// 执行自有边（声明序；每个单元前检查停止）。
-    /// <para>
-    /// 顺序＝**声明边**（预制体里写的）→ **运行期接入边**（<see cref="AttachOwnedEdge"/>）：前者是静态声明的事实，
-    /// 后者是"由 C# 动作实现补上的默认流程"，两者都在自有边段内按接入先后执行。
-    /// </para>
+    /// 把成员的边集合摊成按 band 排好序的执行单元（排序在**执行前一次算定**，不边跑边排）。
     /// </summary>
-    private async Task RunOwnEdgesAsync(
-        MemberDefinition member, ViewCarrier view, Context ctx, MemberExecutionScope scope, CancellationToken ct)
+    private List<(int Segment, int Kind, int Index, OwnedEdge? Owned, MountEdge? Edge)> CollectUnits(
+        MemberDefinition member)
     {
+        var units = new List<(int Segment, int Kind, int Index, OwnedEdge? Owned, MountEdge? Edge)>();
+
+        // ① 自有边：段名＝成员的 Band；同段内序＝声明序（OwnEdges）→ 运行期接入序（覆盖层）。
+        var segment = member.BandIndexOf(member.Band);
+        var index = 0;
         foreach (var owned in member.OwnEdges)
         {
-            if (scope.Stopped || ctx.Interrupted)
-            {
-                return;
-            }
-
-            await owned.InvokeAsync(view, ctx, ct).ConfigureAwait(false);
+            units.Add((segment, 0, index++, owned, null));
         }
 
-        if (!_ownedEdgeOverlay.TryGetValue(member.Name, out var overlay))
+        if (_ownedEdgeOverlay.TryGetValue(member.Name, out var overlay))
         {
-            return;
-        }
-
-        foreach (var owned in overlay)
-        {
-            if (scope.Stopped)
+            foreach (var owned in overlay)
             {
-                return;
+                units.Add((segment, 0, index++, owned, null));
             }
-
-            await owned.InvokeAsync(view, ctx, ct).ConfigureAwait(false);
         }
+
+        // ② 外来边：段名＝边自己声明的 Band，缺省则与成员自有边同段；同段内序＝边表快照序。
+        if (_edgeTables.TryGetValue(member.Name, out var table))
+        {
+            var snapshot = table.Snapshot();
+            for (var i = 0; i < snapshot.Count; i++)
+            {
+                var edge = snapshot[i];
+                units.Add((member.BandIndexOf(edge.Band ?? member.Band), 1, i, null, edge));
+            }
+        }
+
+        // 稳定排序（OrderBy 系列是稳定排序：(Kind, Index) 已足以在同段内保持既有次序）。
+        return units
+            .OrderBy(static u => u.Segment)
+            .ThenBy(static u => u.Kind)
+            .ThenBy(static u => u.Index)
+            .ToList();
     }
 
     /// <summary>
@@ -510,8 +540,8 @@ public sealed class OrchestrationEntity : Entity
     /// <para>
     /// 为什么需要这条通道：动作实现（伤害／攻击）的"默认流程"是 **C# 闭包**（需要本对局的
     /// <c>IDamageActionServices</c>／攻击结算依赖），无法写进**跨对局共享**的静态
-    /// <see cref="PrefabType"/> 声明里；而它又必须落在**成员自己的位次**上（<c>OwnEdgePosition.Last</c>：
-    /// 外来改写／包装先跑、默认流程最后跑），否则"包装整个成员"没有着力点。
+    /// <see cref="PrefabType"/> 声明里；而它又必须落在**成员自己的段**上（例：处理端的 <c>Apply</c> 段——
+    /// 外来改写边与包装先跑、默认流程最后跑），否则"包装整个成员"没有着力点。
     /// </para>
     /// <para>
     /// 与 <see cref="RegisterMember"/> 的分工：后者新增**可寻址成员**（R1e），本方法只给**已存在**的成员

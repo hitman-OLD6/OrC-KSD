@@ -7,7 +7,8 @@ namespace Orc.Tests.Model;
 /// <summary>
 /// S2a 验收（包装通道）：
 /// 包装只指向成员（无二级地址）、before FIFO／after FIFO／replace 最后声明者、
-/// 无接缝概念、判定器包装器共用同一相位语义与同一注册面、
+/// 具名缝（seam）与成员外围包装不共键（R1i 修订 2026-10-29：seam 恢复，见 <see cref="SeamTests"/>）、
+/// 判定器包装器共用同一相位语义与同一注册面、
 /// 免疫（before + Stop）后 after 与后续边不执行、<c>ctx.Stop()</c> 作用域限于当前成员。
 /// </summary>
 public class WrapChannelTests
@@ -195,23 +196,28 @@ public class WrapChannelTests
     }
 
     [Fact]
-    public void 模型里不存在接缝概念()
+    public void 具名缝挂在成员目标上_不引入二级地址且与成员外围包装不共键()
     {
-        var types = new[] { typeof(WrapDeclaration), typeof(WrapTarget), typeof(WrapRegistry), typeof(WrapEntry) };
+        // R1i 修订 2026-10-29（用户裁决）：seam 恢复，不是退役。
+        // 形态未变：包装目标仍是**成员**（无"成员＋来源"的二级地址）；缝名是包装声明上的一个附加维度，
+        // 只在成员外围包装之外多出一个"handler 内部的插入点"口径。
+        var address = MemberAddress.Parse("engine#flow");
+        var seamWrap = WrapDeclaration.ForSeam("engine#flow", "指向后", "h.wrap");
 
-        foreach (var type in types)
-        {
-            Assert.DoesNotContain(
-                type.GetProperties(),
-                static p => p.Name.Contains("Seam", StringComparison.Ordinal));
-            Assert.DoesNotContain(
-                type.GetMethods(),
-                static m => m.Name.Contains("Seam", StringComparison.Ordinal));
-        }
+        Assert.Equal("指向后", seamWrap.Seam);
+        Assert.Equal(WrapperPhase.Before, seamWrap.Phase);
+        Assert.Equal(address, seamWrap.Target.Address);
+        Assert.True(seamWrap.Target.IsMember);
+        Assert.NotEqual(WrapTarget.ForMember(address).Key, seamWrap.Target.Key);
 
-        // 包装器不携带"成员＋来源"的二级地址：只有目标＋相位＋资产。
+        // 成员外围包装：缝为 null（走 phase 语义），键与旧口径一致。
+        var outerWrap = WrapDeclaration.ForMember("engine#flow", WrapperPhase.After, "h.outer");
+        Assert.Null(outerWrap.Seam);
+        Assert.Equal(WrapTarget.ForMember(address).Key, outerWrap.Target.Key);
+
+        // 包装器不携带"成员＋来源"的二级地址：只有目标＋相位＋资产（＋缝名这一维度）。
         Assert.Equal(
-            new[] { "HandlerId", "Phase", "Target" },
+            new[] { "HandlerId", "Phase", "Seam", "Target" },
             typeof(WrapDeclaration).GetProperties().Select(static p => p.Name).OrderBy(static n => n, StringComparer.Ordinal).ToArray());
     }
 

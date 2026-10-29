@@ -10,8 +10,11 @@ namespace Orc.Core.Model;
 /// </para>
 /// <para>
 /// **这不是兼容桥**：视图绑定器从来是内核的公共件（csx／判定器／旧动作端共用同一份 <c>ctx.Data</c>）；
-/// 这里只是把"处理器"与"边"两种形态对上，边的位次、停止语义、包装相位仍全部由
-/// <see cref="OrchestrationEntity"/> 的成员执行序决定。
+/// 这里只是把"处理器"与"边"两种形态对上，边的段序（band）、停止语义、包装相位仍全部由
+/// <see cref="OrchestrationEntity"/> 的成员执行序决定——自有边吃成员的
+/// <see cref="MemberDefinition.Band"/>，外来边的段名经
+/// <see cref="OrchestrationRuntime.MountAtRuntime(OrchestrationEntity, string, string, string?)"/>／
+/// <see cref="MemberEdgeTable.Attach"/> 的 <c>band</c> 参数给出。
 /// </para>
 /// </summary>
 public static class MemberEdges

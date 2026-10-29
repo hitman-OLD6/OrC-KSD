@@ -58,24 +58,24 @@ public sealed class EngineEntityTests
         Assert.True(fromPrefab.SetEquals(fromConstants));
         Assert.Equal(fromPrefab.Count, runtime.Engine.Members.Count);
 
-        // 39 个信号＋24 个流程成员（9 个批次 2 成员 ＋ U1 的 13 个动作管道成员 ＋ U3 的 2 个指令流程成员）。
+        // 39 个信号＋25 个流程成员（9 个批次 2 成员 ＋ U1 的 13 个动作管道成员 ＋ U3 的 2 个指令流程成员
+        // ＋ U4 拆出的死亡免死守卫 death.veto）。
         Assert.Equal(39, runtime.Signals.Count);
-        Assert.Equal(24, runtime.Engine.Members.Count(static m => !m.IsSignal));
+        Assert.Equal(25, runtime.Engine.Members.Count(static m => !m.IsSignal));
     }
 
     /// <summary>
-    /// U4（S13 位次落地）：**21 个动作端点**逐条按 <see cref="EngineProcesses.ActionEndPositions"/> 声明，
-    /// 位次＝<c>last</c>（转发／落地是链上末步：外来挂载边与 <c>before</c> 包装先跑，自有边最后跑）。
+    /// U4（S13 位次落地）＋ R1i band 修订（2026-10-29）：**21 个动作端点**逐条按
+    /// <see cref="EngineProcesses.ActionEndPositions"/> 声明，自有边段的段名一律来自旧末步段
+    /// （转发＝Commit／落地＝Apply／结算＝Resolve），因此"本成员的末步"恒晚于承载门禁与改写的段。
     /// <para>
-    /// **改写理由（U1 断言 → U4 断言）**：U1 按"触发端＝流程型 <c>first</c>／处理端＝落地型 <c>last</c>"
-    /// 分组（8 first ＋ 7 last），判据是**端在动作里的位置**；U4 的判据是**自有边是否为链上末步**——
-    /// 触发端的最后一条自有边正是"转发"（旧 <c>Commit</c>，旧链上最后一步），因此 13 个触发端由
-    /// <c>first</c> 改为 <c>last</c>。断言对象从"端类型"换成"末步语义"，条数 15→**21**、逐条断言，
-    /// 并新增"表／成员表／端清单三方同源"，强度只增不减。
+    /// **断言对象沿革**：U1 按"触发端＝流程型／处理端＝落地型"分组；U4 换成"自有边是否为链上末步"（<c>last</c>）；
+    /// 本批 <c>own-edge-position</c> 被 <c>band</c> 取代——"最前／最后"不再独立存在，只问"自有边落在哪一段"。
+    /// 强度只增：逐条比对段序方案＋段名，并要求段名确实在该方案里（构造期即 fail-fast）。
     /// </para>
     /// </summary>
     [Fact]
-    public void ActionPipelineMembers_AreDeclared_WithOwnEdgePositionByKind()
+    public void ActionPipelineMembers_AreDeclared_WithBandByKind()
     {
         var engine = GameEnginePrefabs.CreateRuntime().Engine;
         var table = EngineProcesses.ActionEndPositions;
@@ -85,30 +85,61 @@ public sealed class EngineEntityTests
         Assert.Equal(EngineProcesses.ActionEndCount, table.Count);
         Assert.Equal(table.Count, table.Select(static e => e.Member).Distinct(StringComparer.Ordinal).Count());
 
-        // 逐条：引擎实体上确有该成员，且位次与表一致（漂移即红）。
+        // 逐条：引擎实体上确有该成员，且段序方案／段名与表一致（漂移即红）。
         foreach (var end in table)
         {
             var member = engine.FindMember(end.Member);
             Assert.NotNull(member);
-            Assert.Equal(end.Position, member!.OwnEdgePosition);
+            Assert.Equal(end.Bands, member!.Bands!);
+            Assert.Equal(end.Band, member.Band);
+            Assert.Contains(end.Band, member.Bands!);
+            Assert.True(member.BandIndexOf(member.Band) >= 0, "段名未在成员自己的方案里（构造期本应 fail-fast）");
             Assert.False(string.IsNullOrWhiteSpace(end.Role));
             Assert.False(string.IsNullOrWhiteSpace(end.OldTail));
             Assert.False(string.IsNullOrWhiteSpace(end.Rationale));
         }
 
-        // 21/21＝last（末步型）：转发（旧 Commit）／落地（旧 Apply）都是链上最后一步。
-        Assert.All(table, static end => Assert.Equal(OwnEdgePosition.Last, end.Position));
+        // 自有边都**不在首段**（转发／落地／结算是本成员的末步），因此"更早的段"承载门禁与改写。
+        // 其中 20/21 恰落在方案末段（触发端 Commit／处理端 Apply）；order.cast 是例外：它的末步是
+        // Resolve（结算），而 Finalize（收尾）是**另一个成员** order.finalize 的段——成员拆分的直接结果。
+        foreach (var end in table)
+        {
+            Assert.True(end.Bands.ToList().IndexOf(end.Band) > 0, $"'{end.Member}' 的自有边落在首段，早于它的门禁/改写将无处安放");
+            if (string.Equals(end.Member, EngineProcesses.OrderCast, StringComparison.Ordinal))
+            {
+                Assert.Equal(BandSchemes.Resolve, end.Band);
+                continue;
+            }
 
-        // 端清单＝引擎成员表 − 3 个非动作流程成员（同源，防"表里有、预制体没有"）。
-        var nonAction = new[] { EngineProcesses.Command, EngineProcesses.UnitMove, EngineProcesses.ActionBudget };
+            Assert.Equal(end.Bands[^1], end.Band);
+        }
+
+        // 端清单＝引擎成员表 − 4 个非端成员（同源，防"表里有、预制体没有"）。
+        var nonAction = new[]
+        {
+            EngineProcesses.Command,
+            EngineProcesses.UnitMove,
+            EngineProcesses.ActionBudget,
+            EngineProcesses.DeathVeto, // 死亡处理端拆出的免死守卫：处理端的内部步骤，不是新的端
+        };
         var expected = EngineProcesses.MemberNames.Except(nonAction, StringComparer.Ordinal).ToHashSet(StringComparer.Ordinal);
         Assert.True(expected.SetEquals(table.Select(static e => e.Member)), "动作端清单与引擎流程成员表不同源");
 
-        // 非动作端点保持默认 first（不受动作位次表影响）。
-        foreach (var name in nonAction)
+        // 非端成员：三个引擎级流程成员保持**单段方案**（null＝所有边同段、按声明序，等价旧默认 first）。
+        foreach (var name in new[]
+                 {
+                     EngineProcesses.Command, EngineProcesses.UnitMove, EngineProcesses.ActionBudget,
+                 })
         {
-            Assert.Equal(OwnEdgePosition.First, engine.FindMember(name)!.OwnEdgePosition);
+            var member = engine.FindMember(name)!;
+            Assert.Null(member.Band);
+            Assert.Null(member.Bands);
         }
+
+        // 死亡免死守卫：处理端方案里的 Veto 段（拆成员前它是同一成员内的一道守卫）。
+        var veto = engine.FindMember(EngineProcesses.DeathVeto)!;
+        Assert.Equal(BandSchemes.ActionHandle, veto.Bands!);
+        Assert.Equal(BandSchemes.Veto, veto.Band);
     }
 
     // ==================== ② 旧显示名映射（R1j） ====================

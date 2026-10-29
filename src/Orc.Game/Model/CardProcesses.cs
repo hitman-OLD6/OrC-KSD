@@ -1,4 +1,5 @@
 using Orc.Core.Model;
+using Orc.Game.Cards;
 
 namespace Orc.Game.Model;
 
@@ -87,25 +88,55 @@ public static class CardProcesses
     /// <summary>薄基类成员（卡与 HQ 共有：指向接入点）。</summary>
     public static IReadOnlyList<MemberDefinition> BaseMembers { get; } = new[]
     {
-        // 旧 TargetingView 的载荷字段（`Host` 由承载视图内建，不来自数据面）。
         new MemberDefinition(
             Targeting,
-            SignalMember.Payload(
-                ("Source", ViewFieldType.Entity),
-                ("Target", ViewFieldType.Entity),
-                ("Kind", ViewFieldType.String),
-                ("TriggerCard", ViewFieldType.Entity)),
+            TargetingPayload(),
             MemberVisibility.Hostable | MemberVisibility.Callable,
             layer: PrefabLayer.Game),
     };
 
-    /// <summary>单位卡成员（卡级 8 项；视图声明随 S11 资产迁移落表）。</summary>
+    /// <summary>
+    /// 指向成员的视图声明（旧 TargetingView 的载荷字段；<c>Host</c> 由承载视图内建，不来自数据面）。
+    /// <para>基类与单位卡覆写共用同一份声明——两处各写一遍会让 <c>host#targeting</c> 的载荷在两型之间漂移。</para>
+    /// </summary>
+    private static ViewSpec TargetingPayload()
+        => SignalMember.Payload(
+            ("Source", ViewFieldType.Entity),
+            ("Target", ViewFieldType.Entity),
+            ("Kind", ViewFieldType.String),
+            ("TriggerCard", ViewFieldType.Entity));
+
+    /// <summary>
+    /// 单位卡的指向成员：视图与基类**同形**，差别只在声明了具名缝
+    /// <see cref="TargetingRules.SeamName"/>（＝<c>指向后</c>）。
+    /// <para>
+    /// 为什么覆写在 <c>card.unit</c> 而不是 <c>card.base</c>：缝是**handler 内部的插入点**，而调用
+    /// <c>ctx.SeamAsync("指向后")</c> 的 handler（<c>UnitCard.HandleTargetingAsync</c>）只挂在单位卡的指向成员上；
+    /// 声明在基类上会让 HQ／指令卡／反制卡也声明一条无人调用的缝（虽无副作用，但声明与使用者不符）。
+    /// </para>
+    /// <para>
+    /// 当前**没有任何资产往"指向后"缝上挂包装器**＝空缝：调用不报错、不执行任何包装、无副作用
+    /// （能力恢复但暂无用例的预期状态）。
+    /// </para>
+    /// </summary>
+    private static MemberDefinition UnitTargetingMember() => new(
+        Targeting,
+        TargetingPayload(),
+        MemberVisibility.Hostable | MemberVisibility.Callable,
+        layer: PrefabLayer.Game,
+        seams: new[] { TargetingRules.SeamName });
+
+    /// <summary>
+    /// 单位卡成员（卡级 8 项；视图声明随 S11 资产迁移落表）＋指向成员的**覆写**
+    /// （追加具名缝声明；成员名与基类相同 ⇒ 整段覆写、位次不变）。
+    /// </summary>
     public static IReadOnlyList<MemberDefinition> UnitMembers { get; } = UnitMemberNames
         .Select(static name => new MemberDefinition(
             name,
             ViewSpec.Empty,
             MemberVisibility.Hostable | MemberVisibility.Callable,
             layer: PrefabLayer.Game))
+        .Append(UnitTargetingMember())
         .ToArray();
 
     /// <summary>指令卡成员（预打出／打出：费用校验的承载面）。</summary>

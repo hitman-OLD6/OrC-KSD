@@ -42,13 +42,14 @@ internal static class KernelTestKit
         return runtime.RunMemberAsync(runtime.Engine, memberName, new Context(), engine, ct);
     }
 
-    /// <summary>单条自有边的成员（可指定视图／可见性／位次／合法性检验）。</summary>
+    /// <summary>单条自有边的成员（可指定视图／可见性／段声明／合法性检验）。</summary>
     internal static MemberDefinition Member(
         string name,
         OwnedEdge edge,
         ViewSpec? view = null,
         MemberVisibility visibility = MemberVisibility.Callable,
-        OwnEdgePosition position = OwnEdgePosition.First,
+        string? band = null,
+        IReadOnlyList<string>? bands = null,
         IMemberValidation? validation = null)
         => new(
             name,
@@ -56,5 +57,6 @@ internal static class KernelTestKit
             visibility,
             new[] { edge },
             validation: validation,
-            ownEdgePosition: position);
+            band: band,
+            bands: bands);
 }

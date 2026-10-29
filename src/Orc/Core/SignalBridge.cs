@@ -141,13 +141,15 @@ internal sealed class SignalBridge
     /// <param name="priority">旧挂载优先级（折进边的声明序第一键，见类型注释）。</param>
     /// <param name="owner">所有者（引用相等卸载的依据；可为 null＝不可按所有者卸载）。</param>
     /// <param name="edge">订阅体。</param>
+    /// <param name="band">外来边在目标成员段序方案里的段名（null＝与目标成员自有边同段）。</param>
     internal void SubscribeSignal(
         string signal,
         string displayName,
         int priority,
         object? owner,
-        OwnedEdge edge)
-        => Attach(signal, displayName, priority, owner, edge, registerHook: true);
+        OwnedEdge edge,
+        string? band = null)
+        => Attach(signal, displayName, priority, owner, edge, registerHook: true, band: band);
 
     /// <summary>
     /// 往**任意引擎成员**上挂一条外来边（信号＝订阅；流程成员＝检查位／守卫）。
@@ -159,13 +161,18 @@ internal sealed class SignalBridge
     /// <param name="owner">所有者（引用相等卸载的依据；可为 null＝只经返回句柄撤销）。</param>
     /// <param name="edge">边体。</param>
     /// <param name="registerHook">是否把成员名登记进 hook 词汇表（信号＝true；流程成员＝false）。</param>
+    /// <param name="band">
+    /// 外来边在**目标成员**段序方案里的段名（null＝与目标成员的自有边同段）。
+    /// 例：死亡处理端的词条改写走 <c>Rewrite</c> 段（早于免死守卫的 <c>Veto</c> 段）。
+    /// </param>
     internal IDisposable Attach(
         string memberName,
         string displayName,
         int priority,
         object? owner,
         OwnedEdge edge,
-        bool registerHook = false)
+        bool registerHook = false,
+        string? band = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(memberName);
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
@@ -206,7 +213,8 @@ internal sealed class SignalBridge
             source,
             EdgeOrderSource.Declared,
             new DeclarationOrder(priority, (int)sequence, 0),
-            $"engine#{memberName}");
+            $"engine#{memberName}",
+            band);
 
         endpoint.Track(handle);
         record.Handles.Add(handle);

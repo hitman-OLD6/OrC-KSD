@@ -55,7 +55,7 @@ public static class ModelMemberDispatch
         ArgumentNullException.ThrowIfNull(data);
 
         return engine.Model is { } runtime
-            ? InvokeAsync(runtime, runtime.Engine, memberName, data, ct)
+            ? InvokeAsync(runtime, engine, runtime.Engine, memberName, data, ct)
             : Task.CompletedTask;
     }
 
@@ -76,7 +76,7 @@ public static class ModelMemberDispatch
         ArgumentNullException.ThrowIfNull(data);
 
         return engine.Model is { } runtime && host is not null
-            ? InvokeAsync(runtime, host, memberName, data, ct)
+            ? InvokeAsync(runtime, engine, host, memberName, data, ct)
             : Task.CompletedTask;
     }
 
@@ -115,8 +115,13 @@ public static class ModelMemberDispatch
         return true;
     }
 
+    /// <summary>
+    /// 在成员上执行一次（**建帧路径**）：必须走带 <see cref="Context"/> 与引擎的重载——只有它会补建执行帧，
+    /// 而 <c>ctx.SeamAsync</c>（成员具名缝，R1i 修订 2026-10-29）与 <c>ctx.Engine</c>／<c>Stop</c>／<c>Interrupt</c>
+    /// 全部读执行帧：走无帧重载会让 handler 内的缝调用抛 <see cref="InvalidOperationException"/>。
+    /// </summary>
     private static Task InvokeAsync(
-        OrchestrationRuntime runtime, OrchestrationEntity entity, string memberName,
+        OrchestrationRuntime runtime, LogicEngine engine, OrchestrationEntity entity, string memberName,
         IDictionary<string, object?> data, CancellationToken ct)
     {
         // 未声明的成员＝该面在本对局不存在（旧包／裁剪过的预制体）。静默跳过，不引入新的失败面。
@@ -125,6 +130,6 @@ public static class ModelMemberDispatch
             return Task.CompletedTask;
         }
 
-        return runtime.RunMemberAsync(entity, memberName, data, ct);
+        return runtime.RunMemberAsync(entity, memberName, new Context(data), engine, ct);
     }
 }

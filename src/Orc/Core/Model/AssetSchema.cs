@@ -7,10 +7,14 @@ namespace Orc.Core.Model;
 /// <summary>
 /// 组件资产 schema（S11：新资产 schema，<c>schemaVersion = 4</c>）。
 /// <para>
-/// 一份资产＝**一个组件实体预制体**：成员（视图声明 + 可选 handler）、挂载声明、包装声明、
-/// 私有字段、装配时点、一次性标记、兜底信号。全部字段都是**模型里的名字**（<c>requires-host</c>／
+/// 一份资产＝**一个组件实体预制体**：成员（视图声明 + 可选 handler + 可选段声明 + 可选具名缝声明）、挂载声明、
+/// 包装声明、私有字段、装配时点、一次性标记、兜底信号。全部字段都是**模型里的名字**（<c>requires-host</c>／
 /// <c>active-when</c>／<c>one-shot</c>／<c>mounted</c>…），旧 schema 的
-/// <c>viewType</c>／<c>hooks</c>／<c>injects</c>／<c>band</c>／<c>seam</c> 一律**不可表达**。
+/// <c>viewType</c>／<c>hooks</c>／<c>injects</c> 等一律**不可表达**
+/// （<c>band</c> 例外：R1i 修订 2026-10-29 起<b>合法</b>，但形态是新模型的成员级段名——字符串，
+/// 见 <see cref="MemberDefinition.Band"/>；<c>seam</c>／<c>seams</c> 同理恢复为合法概念，
+/// 形态是 <c>members[].seams</c>（<see cref="MemberDefinition.Seams"/>）＋ <c>wraps[].seam</c>
+/// （<see cref="WrapDeclaration.Seam"/>）；旧 schema 的数值型 band／handler 级 seam 属旧格式，由迁移器转换）。
 /// </para>
 /// <para>
 /// 与旧 <c>EffectSnapshot</c> 的关系（R8）：新 schema **不做旧格式兼容读取**——读到旧字段名即
@@ -31,10 +35,19 @@ public static class AssetSchema
     /// <summary>
     /// 旧 schema 的字段名（任一出现＝拒绝装载）：它们是"名字字符串挂载"时代的产物，
     /// 新 schema 里由成员地址／相位／视图字段清单取代（R1d／R1e／R1i）。
+    /// <para>
+    /// <c>band</c> **不在此列**（R1i 修订 2026-10-29）：band 恢复为合法概念，形态是成员级段名字符串
+    /// （<c>members[].band</c> ＋ 可选 <c>members[].bands</c>）。段序由成员的 bands 方案给出，
+    /// 不再有数值型旧枚举。
+    /// </para>
+    /// <para>
+    /// <c>seam</c>／<c>seams</c> **亦不在此列**（R1i 修订 2026-10-29：seam 恢复，不是退役）：
+    /// 形态是成员级缝名（<c>members[].seams</c>）＋包装声明上的缝名（<c>wraps[].seam</c>）。
+    /// </para>
     /// </summary>
     public static IReadOnlyList<string> LegacyFields { get; } = new[]
     {
-        "viewType", "hooks", "band", "injects", "wrappers", "seam", "seams",
+        "viewType", "hooks", "injects", "wrappers",
         "mainTrigger", "otherTriggers", "disposingTrigger", "judicatorWrappers",
         "stableKey", "priority", "oneShot",
     };
@@ -174,9 +187,18 @@ public static class AssetSchema
             {
                 var phase = ParsePhase(RequiredString(wrap, "phase", source), source);
                 var handler = RequiredString(wrap, "handler", source);
+                var seam = OptionalString(wrap, "seam");
                 var judge = OptionalString(wrap, "judge");
                 if (judge is not null)
                 {
+                    if (seam is not null)
+                    {
+                        throw Error(
+                            PrefabErrorCategories.Structure,
+                            source,
+                            $"wraps[].seam='{seam}' 不能与 judge 同时出现：具名缝只能挂在成员目标上（判定器没有 handler 内部插入点）。");
+                    }
+
                     wraps.Add(new WrapDeclaration(WrapTarget.ForJudicator(judge), phase, handler));
                     continue;
                 }
@@ -190,7 +212,22 @@ public static class AssetSchema
                         $"wraps[].target='{target}' 缺少作用域前缀（形态＝作用域#成员名，R1i）。");
                 }
 
-                wraps.Add(WrapDeclaration.ForMember(target, phase, handler));
+                if (seam is null)
+                {
+                    wraps.Add(WrapDeclaration.ForMember(target, phase, handler));
+                    continue;
+                }
+
+                // 缝内包装只有「前置」一种相位（缝在 handler 内部，"成员落地之后"在这里没有位置）。
+                if (phase != WrapperPhase.Before)
+                {
+                    throw Error(
+                        PrefabErrorCategories.Structure,
+                        source,
+                        $"wraps[].seam='{seam}' 只允许 phase=before（缝内包装恒为前置）；收到 phase='{FormatPhase(phase)}'。");
+                }
+
+                wraps.Add(WrapDeclaration.ForSeam(target, seam, handler));
             }
         }
 
@@ -265,7 +302,95 @@ public static class AssetSchema
             handler = new ComponentHandlerAsset(id, entry, script, assemblyKey);
         }
 
-        return new ComponentMemberAsset(name, visibility, view, handler);
+        var band = OptionalString(member, "band");
+        var bands = ReadBands(member, source, $"成员 '{name}' 的 bands");
+        if (band is not null && (bands is null || !bands.Contains(band, StringComparer.Ordinal)))
+        {
+            throw Error(
+                PrefabErrorCategories.Structure,
+                source,
+                $"成员 '{name}' 的 band='{band}' 未在成员的 bands 方案中声明"
+                + (bands is null ? "（未声明 bands：band 只能在段序方案内取值）。" : $"（已声明：{string.Join("／", bands)}）。"));
+        }
+
+        var seams = ReadSeams(member, source, $"成员 '{name}' 的 seams");
+
+        return new ComponentMemberAsset(name, visibility, view, handler, band, bands, seams);
+    }
+
+    /// <summary>
+    /// 读取可选的具名缝声明 <c>seams</c>（缝名数组；缺省＝null＝不声明任何缝）。
+    /// <para>R1i 修订 2026-10-29：seam 恢复——缝是 handler 内部的插入点，包装可挂到 <c>(成员, 缝名)</c> 上。</para>
+    /// </summary>
+    /// <exception cref="PrefabLoadException">不是字符串数组，或含空白项／重复名／空数组。</exception>
+    private static IReadOnlyList<string>? ReadSeams(JsonElement element, string source, string where)
+    {
+        if (!element.TryGetProperty("seams", out var seamsElement))
+        {
+            return null;
+        }
+
+        if (seamsElement.ValueKind != JsonValueKind.Array)
+        {
+            throw Error(PrefabErrorCategories.Structure, source, $"{where} 必须是字符串数组。");
+        }
+
+        var names = new List<string>();
+        foreach (var item in seamsElement.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(item.GetString()))
+            {
+                throw Error(PrefabErrorCategories.Structure, source, $"{where} 的每一项必须是非空字符串（缝名）。");
+            }
+
+            if (names.Contains(item.GetString()!, StringComparer.Ordinal))
+            {
+                throw Error(
+                    PrefabErrorCategories.Structure, source, $"{where} 含重复缝名 '{item.GetString()}'（缝名必须唯一）。");
+            }
+
+            names.Add(item.GetString()!);
+        }
+
+        return names.Count == 0
+            ? throw Error(
+                PrefabErrorCategories.Structure, source, $"{where} 不能为空数组（省略该字段＝不声明任何缝）。")
+            : names;
+    }
+
+    /// <summary>
+    /// 读取可选的段序声明 <c>bands</c>（有序段名数组；缺省＝null＝单段方案）。
+    /// </summary>
+    /// <exception cref="PrefabLoadException">不是字符串数组，或含空白项／重复名／空数组。</exception>
+    private static IReadOnlyList<string>? ReadBands(JsonElement element, string source, string where)
+    {
+        if (!element.TryGetProperty("bands", out var bandsElement))
+        {
+            return null;
+        }
+
+        if (bandsElement.ValueKind != JsonValueKind.Array)
+        {
+            throw Error(PrefabErrorCategories.Structure, source, $"{where} 必须是字符串数组。");
+        }
+
+        var segments = new List<string>();
+        foreach (var item in bandsElement.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(item.GetString()))
+            {
+                throw Error(PrefabErrorCategories.Structure, source, $"{where} 的每一项必须是非空字符串（段名）。");
+            }
+
+            segments.Add(item.GetString()!);
+        }
+
+        return segments.Count == 0
+            ? throw Error(
+                PrefabErrorCategories.Structure,
+                source,
+                $"{where} 不能为空数组（省略该字段＝单段方案：所有边同段、按声明序）。")
+            : segments;
     }
 
     private static object? ReadInitial(JsonElement element, ViewFieldType type, string field, string source)
@@ -354,6 +479,35 @@ public static class AssetSchema
                 writer.WriteEndArray();
                 writer.WriteEndObject();
 
+                // 段声明（R1i band 修订）：只在作者显式声明时写出（缺省＝单段方案，不写＝不引入噪声）。
+                if (member.Bands is { } bands)
+                {
+                    writer.WriteStartArray("bands");
+                    foreach (var segment in bands)
+                    {
+                        writer.WriteStringValue(segment);
+                    }
+
+                    writer.WriteEndArray();
+                }
+
+                if (member.Band is { } band)
+                {
+                    writer.WriteString("band", band);
+                }
+
+                // 具名缝（R1i 修订 2026-10-29：seam 恢复）：与 band 同口径——只在作者声明时写出。
+                if (member.Seams is { Count: > 0 } seams)
+                {
+                    writer.WriteStartArray("seams");
+                    foreach (var seam in seams)
+                    {
+                        writer.WriteStringValue(seam);
+                    }
+
+                    writer.WriteEndArray();
+                }
+
                 if (member.Handler is { } handler)
                 {
                     writer.WriteStartObject("handler");
@@ -403,6 +557,11 @@ public static class AssetSchema
 
                 writer.WriteString("phase", FormatPhase(wrap.Phase));
                 writer.WriteString("handler", wrap.HandlerId);
+                if (wrap.Seam is { } seam)
+                {
+                    writer.WriteString("seam", seam);
+                }
+
                 writer.WriteEndObject();
             }
 

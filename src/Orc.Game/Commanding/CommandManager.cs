@@ -246,14 +246,17 @@ public sealed class CommandManager
         // S8：死亡处理端的改写位是**唯一**改写口——旧的「拦截器属性 + 词条 death.cancel」两个并列取消口
         // 收敛为同一条外来挂载边。内置词条 handler 用较高 priority：插件/注册面（默认 0）先判定，
         // 保持「注册面在前、内置词条面在后、任一取消即终止」的既有裁决次序。
-        // §27：改用**外来挂载边**表达（R1i 迁移规则 `Rewrite → wrap before`）——位次＝自有边（免死守卫/死亡链）之前；
-        // priority 语义不变。
+        // §27／R1i band 修订（2026-10-29）：段名显式声明为 `Rewrite`——死亡处理端拆成 death.veto（Veto 段免死守卫）
+        // 与 death.handle（Apply 段死亡链）后，改写位挂在**守卫成员**上并落在其首段，故改写仍旧早于免死守卫；
+        // 取消（ShouldDie=false ＋ ctx.Stop()）沿端点 Stop 穿透停掉守卫，触发端读 Stopped 后不再发死亡链。
+        // priority 语义不变（同段内先小后大）。
         _engine.AttachMemberEdge(
-            EngineProcesses.DeathHandle,
+            EngineProcesses.DeathVeto,
             "词条程序取消消灭",
             this,
             MemberEdges.For<DeathHandleView>(HandleKeywordDeathCancelAsync),
-            priority: DeathRewritePriority);
+            priority: DeathRewritePriority,
+            band: BandSchemes.Rewrite);
 
         // S5a/P5：管道只是目录中伤害动作的门面（同一实例；既不自建扣数值实体，也不接受目录外实例）。
         DamagePipeline = new DamagePipeline(Actions.Damage);

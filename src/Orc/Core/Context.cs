@@ -133,6 +133,12 @@ public sealed class Context
     internal void AttachFrame(ExecutionFrame frame) => _frame = frame;
 
     /// <summary>
+    /// 当前执行帧（框架内部；未关联＝null）。成员执行面用它把 <see cref="SeamAsync"/> 的执行器
+    /// 收窄到**当前**成员（挂载成员在自己的作用域内调用时不得解析到外层成员的缝）。
+    /// </summary>
+    internal ExecutionFrame? Frame => _frame;
+
+    /// <summary>
     /// 是否已关联执行会话（框架内部；成员执行面据此判断"要不要补建帧"）。
     /// <para>
     /// 用途：**沿用调用方上下文**执行成员时，若该上下文还没有帧，必须在进入成员前补建一个——

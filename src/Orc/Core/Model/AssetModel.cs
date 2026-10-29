@@ -107,7 +107,10 @@ public sealed class ComponentAsset
                 member.Visibility,
                 ownEdges,
                 layer: PrefabLayer.Asset,
-                declaredBy: Id));
+                declaredBy: Id,
+                band: member.Band,
+                bands: member.Bands,
+                seams: member.Seams));
         }
 
         var wraps = new List<WrapDeclaration>(Wraps.Count + JudgeWraps.Count);
@@ -135,16 +138,22 @@ public sealed class ComponentAsset
     }
 }
 
-/// <summary>组件成员资产：成员名 ＋ 可见性 ＋ 视图声明 ＋ 可选 handler 源码。</summary>
+/// <summary>组件成员资产：成员名 ＋ 可见性 ＋ 视图声明 ＋ 可选 handler 源码 ＋ 可选段声明 ＋ 可选具名缝声明。</summary>
 /// <param name="Name">成员名（寻址用的成员名段；零转换，允许含 <c>.</c>）。</param>
 /// <param name="Visibility">可见性位标志。</param>
 /// <param name="View">视图声明（封闭内建集）。</param>
 /// <param name="Handler">handler 声明（null＝纯编排成员，无自有边）。</param>
+/// <param name="Band">自有边所属段名（null＝默认段；R1i band 修订）。</param>
+/// <param name="Bands">段序声明（有序段名；null＝单段方案）。</param>
+/// <param name="Seams">handler 内部的具名插入点（null／空＝不声明；R1i 修订 2026-10-29：seam 恢复）。</param>
 public sealed record ComponentMemberAsset(
     string Name,
     MemberVisibility Visibility,
     ViewSpec View,
-    ComponentHandlerAsset? Handler);
+    ComponentHandlerAsset? Handler,
+    string? Band = null,
+    IReadOnlyList<string>? Bands = null,
+    IReadOnlyList<string>? Seams = null);
 
 /// <summary>handler 资产声明：id ＋ 入口名 ＋ （csx 源码 或 程序集键）。</summary>
 /// <param name="Id">资产 id（全局唯一；多份资产可引用同一 id）。</param>

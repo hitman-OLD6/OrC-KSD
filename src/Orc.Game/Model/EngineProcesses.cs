@@ -65,7 +65,10 @@ public static class EngineProcesses
     /// <summary>成员名：死亡触发端。</summary>
     public const string Death = "death";
 
-    /// <summary>成员名：死亡处理端（落地型，自有边最后）。</summary>
+    /// <summary>成员名：死亡处理端**免死守卫**（<see cref="BandSchemes.Veto"/> 段；旧 <c>DeathHandle</c> 的 Veto 段）。</summary>
+    public const string DeathVeto = "death.veto";
+
+    /// <summary>成员名：死亡处理端**死亡链落地**（<see cref="BandSchemes.Apply"/> 段）。</summary>
     public const string DeathHandle = "death.handle";
 
     /// <summary>成员名：卡牌移动触发端。</summary>
@@ -98,60 +101,71 @@ public static class EngineProcesses
     public const string OrderFinalize = "order.finalize";
 
     // ── 动作端点位次表（U4／D1；21 端，与 MatchActionCatalog 装配的端清单同源） ──
-    // 判据（R1i 修订／D1-D2）：**自有边是链上末步的端＝last**（外来挂载边与 before 包装先跑，再跑自有边）；
-    // 只有"该端整体就是一道前置门禁、没有末步落地"时才用 first。动作管道的"转发"（旧 Commit）与
-    // "落地"（旧 Apply）都是末步，因此 **21 个动作端全部是 last**——这不是"没有 first 组"，而是
-    // "门禁相位不是独立端"：旧 Initiate／Announce／CounterGuard 的每一条都挂在这些端内部，
-    // 迁移到新模型后由 `before` 相位承载（R1i 的 `Veto → before+Stop`／`Rewrite → before` 规则同源）。
-    // 21 端的"整端就是门禁"反例不存在；若将来拆出独立的门禁成员（R1i「需要中间插入就拆成员」），
-    // 它才应标 first。守护测试锁住这 21 条（EngineEntityTests 与 ActionEdgeOrderTests）。
+    // 位次语言＝**band**（R1i 修订 2026-10-29）：成员用一套段序方案（BandSchemes）给自己的自有边挑一段。
+    // 旧模型只有 own-edge-position 二值（first／last）；现在"自有边最前／最后"是结果——自有边落在首段即最前、
+    // 落在末段即最后。21 端的段名一律取自该端的**旧末步段**（OldTail 的首个段名）：转发＝Commit、落地＝Apply、
+    // 结算＝Resolve。触发端／处理端的末步恰是各自方案的末段；指令施放端的末步是 Resolve（中段），
+    // 因为 Finalize（收尾）已拆成独立成员 order.finalize。门禁与改写（旧 Initiate／Announce／Counter／Rewrite／Veto）
+    // 由外来边或包装落在更早的段。
 
     /// <summary>
-    /// 动作端点位次表（U4）：<b>21 端</b>逐条给出角色、旧末步段与自有边位次。
+    /// 动作端点位次表（U4）：<b>21 端</b>逐条给出角色、段序方案、自有边段名与旧段名留档。
     /// <para>
-    /// **唯一真源**：<see cref="Members"/> 的自有边位次由此表推出（不在 <c>Build</c> 里另写一份），
-    /// 因此"哪一端是 last"与"为什么"始终同处可读；守护测试逐条比对预制体成员声明。
+    /// **唯一真源**：<see cref="Members"/> 的 <c>Bands</c>／<c>Band</c> 由此表推出（不在 <c>Build</c> 里另写一份），
+    /// 因此"这一段是什么、为什么"始终同处可读；守护测试逐条比对预制体成员声明。
+    /// </para>
+    /// <para>
+    /// <b>死亡处理端拆成两个成员</b>（用户裁决 A，2026-10-29）：旧的单成员 <c>death.handle</c> 横跨两个段
+    /// （<c>Veto</c> 免死守卫 ＋ <c>Apply</c> 死亡链），band 模型下"一个成员只落一段"，故拆为
+    /// <see cref="DeathVeto"/>（Veto 段）与 <see cref="DeathHandle"/>（Apply 段）。本表仍记一条处理端（<c>death.handle</c>）：
+    /// 动作目录的"端"＝触发端＋处理端，免死守卫是该端拆出的内部步骤，不是新的端（端数不变量仍＝21）。
     /// </para>
     /// </summary>
     public static IReadOnlyList<ActionEndPosition> ActionEndPositions { get; } = new ActionEndPosition[]
     {
-        new(HandAdd, "触发端", OwnEdgePosition.Last, "Commit 转发",
-            "转发是末步：外来挂载边（含门禁）先跑，自有边最后跑"),
-        new(HandAddHandle, "处理端", OwnEdgePosition.Last, "Apply 落地", "落地是末步"),
-        new(DrawTop, "触发端（卡组顶）", OwnEdgePosition.Last, "Commit 转发", "同上：转发末步"),
-        new(DrawSpecific, "触发端（指定牌）", OwnEdgePosition.Last, "Commit 转发", "同上：转发末步"),
-        new(DrawHandle, "处理端", OwnEdgePosition.Last, "Apply 落地", "同上：落地末步"),
-        new(Death, "触发端", OwnEdgePosition.Last, "Commit 转发", "同上：转发末步"),
-        new(DeathHandle, "处理端", OwnEdgePosition.Last, "Veto 免死／Apply 死亡链",
-            "免死守卫与死亡链同属末步段（旧 Veto＞Rewrite 的外来改写先跑）"),
-        new(Move, "触发端", OwnEdgePosition.Last, "Commit 转发", "同上：转发末步"),
-        new(MoveHandle, "处理端", OwnEdgePosition.Last, "Apply 落地", "同上：落地末步"),
-        new(JoinDeploy, "触发端（部署）", OwnEdgePosition.Last, "Commit 词条＋转发",
-            "词条与转发同段，按声明序（词条先）；代价校验／宣告同端 before 相位"),
-        new(JoinFrontline, "触发端（加入前线）", OwnEdgePosition.Last, "Commit 转发", "同上：转发末步"),
-        new(JoinSupport, "触发端（加入支援阵线）", OwnEdgePosition.Last, "Commit 转发", "同上：转发末步"),
-        new(JoinHandle, "处理端", OwnEdgePosition.Last, "Apply 落地", "同上：落地末步"),
-        new(CombatDamage, "触发端（对战伤害）", OwnEdgePosition.Last, "Commit 转发",
-            "重甲等 foreign 改写先跑（旧 Initiate），转发末步"),
-        new(EffectDamage, "触发端（效果伤害）", OwnEdgePosition.Last, "Commit 转发", "同上：转发末步"),
-        new(BattleDamage, "触发端（战斗伤害）", OwnEdgePosition.Last, "Commit 转发", "同上：转发末步"),
-        new(DamageApply, "处理端", OwnEdgePosition.Last, "Apply 落地",
-            "免疫等 foreign 改写先跑（旧 Rewrite），扣数值末步"),
-        new(UnitAttack, "触发端（单位攻击）", OwnEdgePosition.Last, "Commit 转发", "同上：转发末步"),
-        new(AttackDamage, "处理端", OwnEdgePosition.Last, "Apply 落地",
-            "伏击等 foreign 改写先跑（旧 Rewrite），结算末步"),
-        new(OrderCast, "触发端（指令施放）", OwnEdgePosition.Last, "Resolve 结算",
-            "反制（旧 Counter）与宣告点先跑，施放结算末步"),
-        new(OrderFinalize, "处理端（指令收尾）", OwnEdgePosition.Last, "Finalize 收尾", "收尾是末步"),
+        new(HandAdd, "触发端", BandSchemes.ActionTrigger, BandSchemes.Commit, "Commit 转发",
+            "转发是末步：更早的段（Initiate／Announce）承载门禁与改写，转发最后跑"),
+        new(HandAddHandle, "处理端", BandSchemes.ActionHandle, BandSchemes.Apply, "Apply 落地", "落地是末步"),
+        new(DrawTop, "触发端（卡组顶）", BandSchemes.ActionTrigger, BandSchemes.Commit, "Commit 转发", "同上：转发末步"),
+        new(DrawSpecific, "触发端（指定牌）", BandSchemes.ActionTrigger, BandSchemes.Commit, "Commit 转发", "同上：转发末步"),
+        new(DrawHandle, "处理端", BandSchemes.ActionHandle, BandSchemes.Apply, "Apply 落地", "同上：落地末步"),
+        new(Death, "触发端", BandSchemes.ActionTrigger, BandSchemes.Commit, "Commit 转发", "同上：转发末步"),
+        new(DeathHandle, "处理端（死亡链）", BandSchemes.ActionHandle, BandSchemes.Apply, "Apply 死亡链",
+            "死亡链落地末段；免死守卫拆为 death.veto（Veto 段，见本表上方说明）"),
+        new(Move, "触发端", BandSchemes.ActionTrigger, BandSchemes.Commit, "Commit 转发", "同上：转发末步"),
+        new(MoveHandle, "处理端", BandSchemes.ActionHandle, BandSchemes.Apply, "Apply 落地", "同上：落地末步"),
+        new(JoinDeploy, "触发端（部署）", BandSchemes.ActionTrigger, BandSchemes.Commit, "Commit 词条＋转发",
+            "词条与转发同段，按声明序（词条先）；代价校验／宣告在更早的段（Initiate／Announce）"),
+        new(JoinFrontline, "触发端（加入前线）", BandSchemes.ActionTrigger, BandSchemes.Commit, "Commit 转发", "同上：转发末步"),
+        new(JoinSupport, "触发端（加入支援阵线）", BandSchemes.ActionTrigger, BandSchemes.Commit, "Commit 转发", "同上：转发末步"),
+        new(JoinHandle, "处理端", BandSchemes.ActionHandle, BandSchemes.Apply, "Apply 落地", "同上：落地末步"),
+        new(CombatDamage, "触发端（对战伤害）", BandSchemes.ActionTrigger, BandSchemes.Commit, "Commit 转发",
+            "重甲等外来改写走包装/更早段（旧 Initiate），转发末步"),
+        new(EffectDamage, "触发端（效果伤害）", BandSchemes.ActionTrigger, BandSchemes.Commit, "Commit 转发", "同上：转发末步"),
+        new(BattleDamage, "触发端（战斗伤害）", BandSchemes.ActionTrigger, BandSchemes.Commit, "Commit 转发", "同上：转发末步"),
+        new(DamageApply, "处理端", BandSchemes.ActionHandle, BandSchemes.Apply, "Apply 落地",
+            "免疫等外来改写段（旧 Rewrite）在前，扣数值末步"),
+        new(UnitAttack, "触发端（单位攻击）", BandSchemes.ActionTrigger, BandSchemes.Commit, "Commit 转发", "同上：转发末步"),
+        new(AttackDamage, "处理端", BandSchemes.ActionHandle, BandSchemes.Apply, "Apply 落地",
+            "伏击等外来改写段（旧 Rewrite）在前，结算末步"),
+        new(OrderCast, "触发端（指令施放）", BandSchemes.OrderFlow, BandSchemes.Resolve, "Resolve 结算",
+            "反制（Counter 段）与宣告点先跑，施放结算末段"),
+        new(OrderFinalize, "处理端（指令收尾）", BandSchemes.OrderFlow, BandSchemes.Finalize, "Finalize 收尾", "收尾是末步"),
     };
 
-    /// <summary>动作端点数（U4 的不变量：21）。</summary>
+    /// <summary>动作端点数（U4 的不变量：21；死亡处理端拆成员不改变端数）。</summary>
     public const int ActionEndCount = 21;
 
-    /// <summary>按成员名查动作端点位次（不在表内＝非动作端点，抛错）。</summary>
+    /// <summary>按成员名查动作端点的自有边段名（不在表内＝非动作端点，抛错）。</summary>
     /// <exception cref="KeyNotFoundException">该成员不是动作端点。</exception>
-    public static OwnEdgePosition PositionOf(string member)
-        => ActionEndPositions.FirstOrDefault(e => string.Equals(e.Member, member, StringComparison.Ordinal))?.Position
+    public static string BandOf(string member)
+        => ActionEndPositions.FirstOrDefault(e => string.Equals(e.Member, member, StringComparison.Ordinal))?.Band
+            ?? throw new KeyNotFoundException($"'{member}' 不是动作端点（{ActionEndCount} 端见 {nameof(ActionEndPositions)}）。");
+
+    /// <summary>按成员名查动作端点的段序方案（不在表内＝非动作端点，抛错）。</summary>
+    /// <exception cref="KeyNotFoundException">该成员不是动作端点。</exception>
+    public static IReadOnlyList<string> BandsOf(string member)
+        => ActionEndPositions.FirstOrDefault(e => string.Equals(e.Member, member, StringComparison.Ordinal))?.Bands
             ?? throw new KeyNotFoundException($"'{member}' 不是动作端点（{ActionEndCount} 端见 {nameof(ActionEndPositions)}）。");
 
     /// <summary>引擎流程成员名（声明序；与预制体成员集合同源，守护测试锁漂移）。</summary>
@@ -172,6 +186,7 @@ public static class EngineProcesses
         DrawSpecific,
         DrawHandle,
         Death,
+        DeathVeto,
         DeathHandle,
         Move,
         MoveHandle,
@@ -271,11 +286,12 @@ public static class EngineProcesses
 
         return new[]
         {
-            // 非动作端点（引擎级流程成员，不参与动作目录装配）：保持默认 first。
+            // 非动作端点（引擎级流程成员，不参与动作目录装配）：单段方案——所有边同段、按声明序
+            // （自有边在前、外来边在后），与旧模型的默认 first 逐项等价。
             Process(Command),
             Process(UnitMove),
 
-            // 动作端点（U4：位次一律取自 ActionEndPositions 表，不在此另写一份）。
+            // 动作端点（U4：段序方案与自有边段名一律取自 ActionEndPositions 表，不在此另写一份）。
             Act(AttackDamage, attackDamage),
             Act(CombatDamage, damageEvent),
             Act(EffectDamage, damageEvent),
@@ -290,7 +306,11 @@ public static class EngineProcesses
             Act(DrawSpecific),
             Act(DrawHandle),
             Act(Death),
+
+            // 死亡处理端＝两个成员（用户裁决 A）：免死守卫落 Veto 段，死亡链落 Apply 段（同属一套处理端方案）。
+            Process(DeathVeto, bands: BandSchemes.ActionHandle, band: BandSchemes.Veto),
             Act(DeathHandle),
+
             Act(Move),
             Act(MoveHandle),
             Act(JoinDeploy),
@@ -302,18 +322,22 @@ public static class EngineProcesses
         };
     }
 
-    /// <summary>声明一个**动作端点**：位次取自 <see cref="ActionEndPositions"/>（U4 的唯一真源）。</summary>
+    /// <summary>声明一个**动作端点**：段序方案与段名取自 <see cref="ActionEndPositions"/>（U4 的唯一真源）。</summary>
     private static MemberDefinition Act(string name, ViewSpec? view = null)
-        => Process(name, view, PositionOf(name));
+        => Process(name, view, BandsOf(name), BandOf(name));
 
     private static MemberDefinition Process(
-        string name, ViewSpec? view = null, OwnEdgePosition ownEdgePosition = OwnEdgePosition.First)
+        string name,
+        ViewSpec? view = null,
+        IReadOnlyList<string>? bands = null,
+        string? band = null)
         => new(
             name,
             view,
             MemberVisibility.Hostable | MemberVisibility.Callable,
             layer: PrefabLayer.Game,
-            ownEdgePosition: ownEdgePosition);
+            band: band,
+            bands: bands);
 }
 
 /// <summary>
@@ -332,20 +356,22 @@ public sealed record LegacyTriggerMapping(
     string? LegacyBand);
 
 /// <summary>
-/// 一个动作端点的位次标注（U4／D1）：成员名 ＋ 角色 ＋ 旧末步段 ＋ 自有边位次 ＋ 判据。
+/// 一个动作端点的位次标注（U4／D1）：成员名 ＋ 角色 ＋ 段序方案 ＋ 自有边段名 ＋ 旧末步段 ＋ 判据。
 /// <para>
-/// <see cref="OldTail"/> 只作迁移期留档（"这一端在旧模型里收尾于哪个段"）；新模型不看段，只看
-/// <see cref="Position"/>。位次一律 <c>last</c> 的判据见 <see cref="EngineProcesses.ActionEndPositions"/>。
+/// <see cref="OldTail"/> 只作迁移期留档（"这一端在旧模型里收尾于哪个段"）；新模型不看旧段名，
+/// 只看 <see cref="Bands"/> 里的 <see cref="Band"/> 下标。段序方案见 <see cref="BandSchemes"/>。
 /// </para>
 /// </summary>
 /// <param name="Member">成员名（<c>EngineProcesses</c> 常量；落地址时为 <c>engine#&lt;成员名&gt;</c>）。</param>
 /// <param name="Role">动作端角色（触发端／处理端；多入口动作带入口名）。</param>
-/// <param name="Position">自有边位次（U4：21 端全为 <see cref="OwnEdgePosition.Last"/>）。</param>
+/// <param name="Bands">段序方案（有序段名，下标即段序）。</param>
+/// <param name="Band">自有边所属段名（必须在该方案里）。</param>
 /// <param name="OldTail">旧模型的末步段（如 <c>Commit 转发</c>／<c>Apply 落地</c>；仅迁移留档）。</param>
 /// <param name="Rationale">判据（一句话；审查面与文档直接引用）。</param>
 public sealed record ActionEndPosition(
     string Member,
     string Role,
-    OwnEdgePosition Position,
+    IReadOnlyList<string> Bands,
+    string Band,
     string OldTail,
     string Rationale);

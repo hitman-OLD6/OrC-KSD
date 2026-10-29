@@ -99,13 +99,17 @@ public sealed class OrderFlow
 
     /// <summary>
     /// 往阶段 1（<c>order.cast</c>）挂一条**反制检查边**；返回的句柄 Dispose＝撤销。
-    /// <para>位次：优先级 0（旧 Counter 段）——恒早于宣告点（优先级 100）。</para>
+    /// <para>
+    /// 段名＝<see cref="OrderFlowBands.Counter"/>（旧 Counter 段）——恒早于结算所在的
+    /// <see cref="OrderFlowBands.Resolve"/> 段（R1i band 修订：段序取代 own-edge-position）。
+    /// </para>
     /// </summary>
     /// <param name="displayName">来源名（留痕/审查用，如"反制检查"）。</param>
     /// <param name="owner">所有者（反制卡实例；撤销依据）。</param>
     /// <param name="edge">检查体（视图 <see cref="OrderFlowView"/>；拒绝＝<c>ctx.Stop()</c>）。</param>
     public IDisposable AttachCounterGuard(string displayName, object owner, OwnedEdge edge)
-        => _engine.AttachMemberEdge(CastMember, displayName, owner, edge, priority: 0);
+        => _engine.AttachMemberEdge(
+            CastMember, displayName, owner, edge, priority: 0, band: nameof(OrderFlowBands.Counter));
 
     /// <summary>
     /// 执行指令流程（单指令便捷重载）：<paramref name="order"/> 为 null＝无主动效果。

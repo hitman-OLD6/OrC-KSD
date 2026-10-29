@@ -53,14 +53,20 @@ public sealed class MountDeclaration
 /// 判定器包装器与本类型的成员目标**共用同一相位语义与同一注册面**（<see cref="WrapRegistry"/>），
 /// 差别只在作用对象（成员 vs 判定器）。
 /// </para>
+/// <para>
+/// <see cref="Seam"/> 非 null＝包装挂在成员的**具名缝**上（handler 内部的插入点，R1i 修订 2026-10-29），
+/// null＝包装成员的**外围**（相位语义见 <see cref="WrapDeclaration"/>）。两者的注册键不同
+/// （<see cref="Key"/> 带缝名），因此缝内包装不会被成员外围的 before／after／replace 循环取到。
+/// </para>
 /// </summary>
 public readonly struct WrapTarget : IEquatable<WrapTarget>
 {
-    private WrapTarget(bool isMember, MemberAddress address, string? judicator)
+    private WrapTarget(bool isMember, MemberAddress address, string? judicator, string? seam = null)
     {
         IsMember = isMember;
         Address = address;
         Judicator = judicator;
+        Seam = seam;
     }
 
     /// <summary>目标是否为成员（false＝判定器）。</summary>
@@ -72,8 +78,22 @@ public readonly struct WrapTarget : IEquatable<WrapTarget>
     /// <summary>判定器名（<see cref="IsMember"/> 为 false 时有效）。</summary>
     public string? Judicator { get; }
 
-    /// <summary>成员包装目标。</summary>
+    /// <summary>
+    /// 成员的具名缝（null＝包在成员**外围**；非 null＝挂在该成员的具名缝上，只参与
+    /// <see cref="Context.SeamAsync"/> 的管道执行）。
+    /// </summary>
+    public string? Seam { get; }
+
+    /// <summary>成员包装目标（成员外围）。</summary>
     public static WrapTarget ForMember(MemberAddress address) => new(true, address, null);
+
+    /// <summary>成员的**具名缝**包装目标（handler 内部的插入点；R1i 修订 2026-10-29）。</summary>
+    /// <exception cref="ArgumentException">seam 为空或纯空白。</exception>
+    public static WrapTarget ForSeam(MemberAddress address, string seam)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(seam);
+        return new WrapTarget(true, address, null, seam);
+    }
 
     /// <summary>判定器包装目标（判定器包装器同属一套相位语义）。</summary>
     /// <exception cref="ArgumentException">name 为空或纯空白。</exception>
@@ -83,19 +103,26 @@ public readonly struct WrapTarget : IEquatable<WrapTarget>
         return new WrapTarget(false, default, name);
     }
 
-    /// <summary>稳定键（审查导出／字典键用）。</summary>
-    public string Key => IsMember ? $"member:{Address}" : $"judicator:{Judicator}";
+    /// <summary>稳定键（审查导出／字典键用；缝内包装带 <c>@缝名</c> 后缀）。</summary>
+    public string Key => IsMember
+        ? (Seam is null ? $"member:{Address}" : $"member:{Address}@{Seam}")
+        : $"judicator:{Judicator}";
 
     /// <inheritdoc />
     public bool Equals(WrapTarget other)
         => IsMember == other.IsMember && Address.Equals(other.Address)
-           && string.Equals(Judicator, other.Judicator, StringComparison.Ordinal);
+           && string.Equals(Judicator, other.Judicator, StringComparison.Ordinal)
+           && string.Equals(Seam, other.Seam, StringComparison.Ordinal);
 
     /// <inheritdoc />
     public override bool Equals(object? obj) => obj is WrapTarget other && Equals(other);
 
     /// <inheritdoc />
-    public override int GetHashCode() => HashCode.Combine(IsMember, Address, Judicator is null ? 0 : StringComparer.Ordinal.GetHashCode(Judicator));
+    public override int GetHashCode() => HashCode.Combine(
+        IsMember,
+        Address,
+        Judicator is null ? 0 : StringComparer.Ordinal.GetHashCode(Judicator),
+        Seam is null ? 0 : StringComparer.Ordinal.GetHashCode(Seam));
 
     /// <summary>相等运算符。</summary>
     public static bool operator ==(WrapTarget left, WrapTarget right) => left.Equals(right);
@@ -108,40 +135,89 @@ public readonly struct WrapTarget : IEquatable<WrapTarget>
 }
 
 /// <summary>
-/// 包装声明（元效果端修改通道，R1b／R1i）：在目标成员的**外围**改写或拦截。
+/// 包装声明（元效果端修改通道，R1b／R1i）：在目标成员的**外围**改写或拦截，或挂到成员的**具名缝**上。
 /// <para>
 /// 相位语义（S2a／R1i 修订 2026-10-26）：<c>before</c>（改写输入，**FIFO**）／<c>after</c>（尾部副作用，**FIFO**）／
 /// <c>replace</c>（替代整个边集合，**最后声明者生效**）。三者先后一律按声明序推出，不引入优先级数字。
+/// </para>
+/// <para>
+/// <see cref="Seam"/> 非 null＝挂在该成员的**具名缝**上（handler 内部的插入点，R1i 修订 2026-10-29）：
+/// 只在 handler 调用 <c>ctx.SeamAsync(缝名)</c> 时执行，相位只能是 <c>before</c>。
 /// </para>
 /// <para>包装不得引入新的编排步骤（那是挂载的事）：本声明只携带目标＋相位＋包装器资产。</para>
 /// </summary>
 public sealed class WrapDeclaration
 {
     /// <summary>创建包装声明。</summary>
-    /// <param name="target">包装目标。</param>
-    /// <param name="phase">相位。</param>
+    /// <param name="target">包装目标（seam 非 null 时必须是成员目标）。</param>
+    /// <param name="phase">相位（seam 非 null 时只能是 <see cref="WrapperPhase.Before"/>）。</param>
     /// <param name="handlerId">包装器 handler 资产 id。</param>
-    /// <exception cref="ArgumentException">handlerId 为空或纯空白。</exception>
-    public WrapDeclaration(WrapTarget target, WrapperPhase phase, string handlerId)
+    /// <param name="seam">
+    /// 成员 handler 内部的**具名缝**名（null＝包在成员外围）。
+    /// <para>
+    /// 为什么缝内只有 <c>before</c>：缝是 handler **内部**的一个插入点，"成员落地之后"在这里没有位置——
+    /// 需要尾部副作用或整段替代，请包在成员外围（<c>phase: after｜replace</c>）。因此"缝内包装＝前置"是唯一形态。
+    /// </para>
+    /// </param>
+    /// <exception cref="ArgumentException">
+    /// handlerId 为空或纯空白；seam 为纯空白；seam 配判定器目标；seam 配 after／replace 相位。
+    /// </exception>
+    public WrapDeclaration(WrapTarget target, WrapperPhase phase, string handlerId, string? seam = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(handlerId);
-        Target = target;
+
+        // `target` 自身也可以已带缝名（WrapTarget.ForSeam）：两种构造写法归一到同一个 `Seam` 面上，
+        // 不允许出现"Target 带缝、Seam 属性为 null"的不一致状态。
+        var effective = seam ?? target.Seam;
+        if (effective is not null)
+        {
+            if (string.IsNullOrWhiteSpace(effective))
+            {
+                throw new ArgumentException("具名缝名不能为空或纯空白（null＝包在成员外围）。", nameof(seam));
+            }
+
+            if (!target.IsMember)
+            {
+                throw new ArgumentException(
+                    "具名缝只能挂在成员目标上（判定器没有 handler 内部的插入点）。", nameof(seam));
+            }
+
+            if (phase != WrapperPhase.Before)
+            {
+                throw new ArgumentException(
+                    $"具名缝的包装相位只能是 before（缝在 handler 内部，只有「前置」一种）：收到 phase={phase}。",
+                    nameof(phase));
+            }
+        }
+
+        Target = effective is null ? target : WrapTarget.ForSeam(target.Address, effective);
         Phase = phase;
         HandlerId = handlerId;
+        Seam = effective;
     }
 
-    /// <summary>包装目标。</summary>
+    /// <summary>包装目标（seam 非 null 时已带缝名，见 <see cref="WrapTarget.Seam"/>）。</summary>
     public WrapTarget Target { get; }
 
-    /// <summary>相位。</summary>
+    /// <summary>相位（缝内包装恒为 <see cref="WrapperPhase.Before"/>）。</summary>
     public WrapperPhase Phase { get; }
 
     /// <summary>包装器 handler 资产 id。</summary>
     public string HandlerId { get; }
 
+    /// <summary>
+    /// 成员的具名缝名（null＝包在成员**外围**，走 <see cref="Phase"/> 语义）。
+    /// <para>非 null 时包装只在 handler 内的 <c>ctx.SeamAsync(缝名)</c> 处执行（LIFO）。</para>
+    /// </summary>
+    public string? Seam { get; }
+
     /// <summary>便捷构造：包装成员。</summary>
     public static WrapDeclaration ForMember(string memberAddress, WrapperPhase phase, string handlerId)
         => new(WrapTarget.ForMember(MemberAddress.Parse(memberAddress)), phase, handlerId);
+
+    /// <summary>便捷构造：包装成员的具名缝（handler 内部的插入点；相位恒为 before）。</summary>
+    public static WrapDeclaration ForSeam(string memberAddress, string seam, string handlerId)
+        => new(WrapTarget.ForMember(MemberAddress.Parse(memberAddress)), WrapperPhase.Before, handlerId, seam);
 }
 
 /// <summary>
@@ -149,6 +225,11 @@ public sealed class WrapDeclaration
 /// <para>
 /// 边指向**一个成员**（不是裸 handler）——被挂载的成员保留自己的视图与合法性检验（R1）；
 /// 执行时 owner 回填为 <see cref="Declaring"/>（它是被挂载成员所属的实体）。
+/// </para>
+/// <para>
+/// <see cref="Band"/> 是这条外来边落在**目标成员**段序方案里的段名（null＝与目标成员的
+/// <see cref="MemberDefinition.Band"/> 同段——同段内自有边在前、外来边在后）。
+/// 用它表达"外来改写先于落地"这类设计端优先级，取代旧的 <c>own-edge-position</c> 二值。
 /// </para>
 /// </summary>
 public sealed class MountEdge
@@ -163,7 +244,8 @@ public sealed class MountEdge
         EdgeOrderSource orderSource,
         DeclarationOrder order,
         long sequence,
-        string? declaration = null)
+        string? declaration = null,
+        string? band = null)
     {
         ArgumentNullException.ThrowIfNull(declaring);
         ArgumentNullException.ThrowIfNull(member);
@@ -176,6 +258,7 @@ public sealed class MountEdge
         Order = order;
         Sequence = sequence;
         Declaration = declaration ?? target.ToString();
+        Band = band;
     }
 
     /// <summary>目标成员地址（这条边挂在谁身上；**边表视角**的地址，可能是 <c>self#…</c>）。</summary>
@@ -208,6 +291,12 @@ public sealed class MountEdge
 
     /// <summary>建边序（同声明序时的稳定兜底；也是撤销句柄的身份）。</summary>
     public long Sequence { get; }
+
+    /// <summary>
+    /// 这条外来边在**目标成员**段序方案里的段名（null＝与目标成员的 <see cref="MemberDefinition.Band"/> 同段）。
+    /// <para>段下标越大越晚执行；同段内自有边在前、外来边按声明序／追加序在后。</para>
+    /// </summary>
+    public string? Band { get; }
 }
 
 /// <summary>
@@ -253,6 +342,9 @@ public sealed class MountHandle
 /// 单个成员上的边表（R1i／R1g）：执行序＝**声明序边**（按 <see cref="MountEdge.Order"/> 有序排列）
 /// → **追加序边**（运行期挂边，按建边序）。
 /// <para>
+/// 本表只负责"同段内的外来边次序"；跨段的合并（自有边／外来边按 band 交错）在
+/// <see cref="OrchestrationEntity"/> 的成员执行序里完成（段下标 → 同段内自有边在前 → 声明序／追加序）。
+/// </para>
 /// 有序插入是硬要求（R1g）：<c>placed</c> 批的边若其组件声明序更靠前，必须插到已存在的 <c>loaded</c> 边之前；
 /// 重建实例产生的边必须回填原位。因此本表**不采用"只追加"实现**——快照时按 (声明序, 建边序) 全排序。
 /// </para>
@@ -276,6 +368,13 @@ public sealed class MemberEdgeTable
     public int Count => _edges.Count;
 
     /// <summary>挂一条边并返回撤销句柄。</summary>
+    /// <param name="declaring">被挂载成员所属实体（owner 回填）。</param>
+    /// <param name="member">被挂载的成员。</param>
+    /// <param name="source">边来源。</param>
+    /// <param name="orderSource">位次来源（声明序／追加序）。</param>
+    /// <param name="order">声明序。</param>
+    /// <param name="declaration">声明原文地址（审查面还原作者写法）。</param>
+    /// <param name="band">外来边在目标成员段序方案里的段名（null＝与目标成员的段同段）。</param>
     /// <exception cref="ArgumentNullException">edge 为 null。</exception>
     public MountHandle Attach(
         OrchestrationEntity declaring,
@@ -283,9 +382,11 @@ public sealed class MemberEdgeTable
         EdgeSource source = EdgeSource.Explicit,
         EdgeOrderSource orderSource = EdgeOrderSource.Declared,
         DeclarationOrder order = default,
-        string? declaration = null)
+        string? declaration = null,
+        string? band = null)
     {
-        var edge = new MountEdge(Address, declaring, member, source, orderSource, order, _sequence++, declaration);
+        var edge = new MountEdge(
+            Address, declaring, member, source, orderSource, order, _sequence++, declaration, band);
         _edges.Add(edge);
         return new MountHandle(this, edge);
     }

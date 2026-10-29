@@ -424,11 +424,20 @@ public sealed partial class OrchestrationRuntime
     /// 运行期挂载（R1h）：往**已声明**的成员上挂一条边，位次追加到末尾（<c>order-source: appended</c>）。
     /// 边必然绑 owner（<paramref name="declaring"/>），随 owner 销毁撤销——不存在无主永久边。
     /// </summary>
+    /// <param name="declaring">被挂载成员所属实体（owner 回填与撤销依据）。</param>
+    /// <param name="memberName">被挂载的自身成员名。</param>
+    /// <param name="target">目标地址（<c>作用域#成员名</c>）。</param>
+    /// <param name="band">
+    /// 外来边在**目标成员**段序方案里的段名（null＝与目标成员的自有边同段）。
+    /// 必须出现在目标成员的 <see cref="MemberDefinition.Bands"/> 里，否则＝<see cref="ArgumentException"/>。
+    /// </param>
     /// <exception cref="ArgumentNullException">declaring 为 null。</exception>
     /// <exception cref="ArgumentOutOfRangeException">地址非法。</exception>
     /// <exception cref="KeyNotFoundException">成员或目标不存在。</exception>
     /// <exception cref="PermissionDeniedException">可见性越界。</exception>
-    public MountHandle MountAtRuntime(OrchestrationEntity declaring, string memberName, string target)
+    /// <exception cref="ArgumentException">band 未在目标成员的段序方案中声明。</exception>
+    public MountHandle MountAtRuntime(
+        OrchestrationEntity declaring, string memberName, string target, string? band = null)
     {
         ArgumentNullException.ThrowIfNull(declaring);
         ArgumentException.ThrowIfNullOrWhiteSpace(memberName);
@@ -441,6 +450,8 @@ public sealed partial class OrchestrationRuntime
         var targetEntity = TargetEntityFor(declaring, address);
         var targetMember = targetEntity.FindMember(address.Member)
             ?? throw new KeyNotFoundException($"目标成员不存在：'{address}'（实体 '{targetEntity.Name}'）。");
+
+        _ = targetMember.BandIndexOf(band); // fail-fast：段名必须已在目标成员的方案里声明
 
         if (address.Scope != AddressScope.Self)
         {
@@ -458,7 +469,8 @@ public sealed partial class OrchestrationRuntime
         }
 
         var table = targetEntity.EdgesFor(address.Member);
-        var handle = table.Attach(declaring, member, EdgeSource.Explicit, EdgeOrderSource.Appended, default, target);
+        var handle = table.Attach(
+            declaring, member, EdgeSource.Explicit, EdgeOrderSource.Appended, default, target, band);
         declaring.Track(handle);
         return handle;
     }
@@ -506,7 +518,26 @@ public sealed partial class OrchestrationRuntime
 
                 // 包装键归一化为**目标实体自身**的地址：执行期用 AddressOf 比对，
                 // 若把 `host#x` 原样登记，宿主执行成员时的键是 `self#x`，该包装会静默不生效。
-                target = WrapTarget.ForMember(targetEntity.AddressOf(target.Address.Member));
+                var normalized = targetEntity.AddressOf(target.Address.Member);
+                if (declaration.Seam is { } seam)
+                {
+                    // 缝内包装：键必须带上缝名（否则会混进成员外围的 before／after／replace 列表）。
+                    // 缝未在该成员上声明＝装载期拒绝（挂到不存在的缝＝永不执行，是静默失效的典型形态）。
+                    if (!targetMember.DeclaresSeam(seam))
+                    {
+                        throw new KeyNotFoundException(
+                            $"包装目标 '{target.Address}' 未声明具名缝 '{seam}'"
+                            + (targetMember.Seams.Count == 0
+                                ? "（该成员没有声明任何缝：seams 为空）。"
+                                : $"（已声明：{string.Join("／", targetMember.Seams)}）。"));
+                    }
+
+                    target = WrapTarget.ForSeam(normalized, seam);
+                }
+                else
+                {
+                    target = WrapTarget.ForMember(normalized);
+                }
             }
 
             pending.Add((target, declaration.Phase, handler));
@@ -598,6 +629,16 @@ public sealed partial class OrchestrationRuntime
                     ? card
                     : parent?.TriggerCard,
         };
+
+        // 具名缝执行器（R1i 修订 2026-10-29：seam 恢复）：帧级默认——只在成员**声明了缝**时注入，
+        // 未声明的成员一律保持 `ctx.SeamAsync` 的 InvalidOperationException（"只能在 handler 内调用"的口径）。
+        // 进入成员时 `ExecuteMemberAsync` 会把执行器收窄到**当前**成员（挂载成员在自己的作用域内调用
+        // `ctx.SeamAsync` 必须解析到自己的缝），执行完恢复本帧级默认。
+        if (member.Seams.Count > 0)
+        {
+            frame.SeamExecutor = (seam, seamCt) => ExecuteSeamAsync(entity, member, seam, ctx, seamCt);
+        }
+
         ExecutionFrame.Current = frame;
 
         // 已有帧的上下文**不覆盖**：帧是调用方会话的一部分（覆盖会让调用方的 Stop／Engine 读面错位）。
@@ -628,6 +669,67 @@ public sealed partial class OrchestrationRuntime
         }
 
         return RunMemberAsync(Engine, address.Member, data, ct);
+    }
+
+    /// <summary>
+    /// 执行成员 handler 内部的一个**具名缝**（R1i 修订 2026-10-29：seam 恢复；<see cref="Context.SeamAsync"/> 的实现体）。
+    /// <para>
+    /// 口径：缝的包装器列表＝**注册面上 <c>(成员, 缝名)</c> 的包装项**（与成员外围包装同一注册面
+    /// <see cref="WrapRegistry"/>、同一取列表入口 <see cref="WrapRegistry.Entries"/>、同一执行入口
+    /// <c>WrapEntry.Handler.InvokeAsync</c>；唯一差别是取列表时目标键带缝名）。
+    /// 执行序＝**声明序 LIFO**（<see cref="Context.SeamAsync"/> 的语义：后声明的包在外层）。
+    /// </para>
+    /// <para>
+    /// 与"未声明"必须区分：**缝已声明但无人挂载＝空缝**，直接返回（不执行、不报错、无副作用）。
+    /// </para>
+    /// </summary>
+    /// <exception cref="KeyNotFoundException">缝未在该成员上声明。</exception>
+    internal async Task ExecuteSeamAsync(
+        OrchestrationEntity entity, MemberDefinition member, string name, Context ctx, CancellationToken ct)
+    {
+        if (!member.DeclaresSeam(name))
+        {
+            throw new KeyNotFoundException(
+                $"成员 '{entity.Name}#{member.Name}' 未声明具名缝 '{name}'"
+                + (member.Seams.Count == 0
+                    ? "（该成员没有声明任何缝：ctx.SeamAsync 只能在已声明 seams 的成员里调用）。"
+                    : $"（已声明：{string.Join("／", member.Seams)}）。"));
+        }
+
+        var entries = Wraps.Entries(WrapTarget.ForSeam(entity.AddressOf(member.Name), name), WrapperPhase.Before);
+        if (entries.Count == 0)
+        {
+            return; // 空缝：声明了但没人挂——合法状态，无副作用（与"未声明"抛错区分）
+        }
+
+        // 包装器视图：归属实体与被执行成员不同时（引擎成员上的组件包装），owner／host 回填为**声明该包装的实体**
+        // （与成员外围 before 的 ViewFor 同一口径）；本方法自建视图、自带封口（成员视图由 ExecuteMemberAsync 负责）。
+        var views = new List<ViewCarrier>(entries.Count);
+        try
+        {
+            for (var i = entries.Count - 1; i >= 0; i--)
+            {
+                // 每个包装器前检查本级停止与链级中断（与 RunEdgesAsync 的单元边界同口径）。
+                if (ctx.CurrentMemberScope?.Stopped == true || ctx.Interrupted)
+                {
+                    return;
+                }
+
+                var entry = entries[i];
+                var view = entry.Declaring is null || ReferenceEquals(entry.Declaring, entity)
+                    ? ViewCarrier.Bind(member.View, ctx, entity, entity.HostForView, member.Name)
+                    : ViewCarrier.Bind(member.View, ctx, entry.Declaring, entry.Declaring.HostForView, member.Name);
+                views.Add(view);
+                await entry.Handler.InvokeAsync(view, ctx, ct).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            foreach (var view in views)
+            {
+                view.Seal();
+            }
+        }
     }
 
     /// <summary>解析地址对应的目标实体（引擎／自身／宿主）。</summary>

@@ -92,16 +92,21 @@ public class UnitCard : CardBase
     }
 
     /// <summary>
-    /// 指向成员默认 handler：**无业务逻辑**（指向的语义全部由订阅方表达）。
+    /// 指向成员默认 handler：**无业务逻辑**（指向的语义全部由订阅方表达），只打开具名动作缝
+    /// <see cref="TargetingRules.SeamName"/>（<c>指向后</c>）——包装器在此插入。
     /// <para>
-    /// v4 收口：旧实现在这里调 <c>ctx.SeamAsync("指向后")</c>，把"指向后"当成 C# wrapper 的插入点。
-    /// 动作缝随旧触发器机制一并下线（新资产 schema 明确拒绝 <c>seam</c> 字段），订阅方的逻辑
-    /// 改为该成员上的**包装边**（<c>wraps.before</c>）与外来挂载边——由编排运行时在自有边前后执行。
-    /// 因此本 handler 保留为空转（成员仍须存在：它是订阅点的地址）。
+    /// **seam 已恢复（2026-10-29 用户裁决）**：band 那一轮曾把它改成空转（当时按"seam 退役"处理）；
+    /// 现按 R1i 修订恢复 <c>ctx.SeamAsync("指向后")</c>——成员的缝在 <c>card.unit</c> 的 targeting 覆写里
+    /// 声明（<see cref="Orc.Game.Model.CardProcesses.UnitMembers"/>），未声明会让这里立刻抛
+    /// <see cref="KeyNotFoundException"/>。
+    /// </para>
+    /// <para>
+    /// **当前无人往"指向后"挂包装器 ⇒ 空缝**：运行时直接返回（不执行包装、无副作用、不抛错）——
+    /// 这正是"能力恢复但暂无用例"的预期状态。订阅方的逻辑仍按原设计走该成员上的**外来挂载边**。
     /// </para>
     /// </summary>
     private static Task HandleTargetingAsync(TargetingView view, Context ctx, CancellationToken ct)
-        => Task.CompletedTask;
+        => ctx.SeamAsync(TargetingRules.SeamName, ct);
 
     /// <summary>
     /// 发动指向通知（通用接入点的内部导航面——由 <see cref="TargetingRules.NotifyAsync"/> 调用）：

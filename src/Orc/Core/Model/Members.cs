@@ -20,30 +20,11 @@ public enum PrefabLayer
 }
 
 /// <summary>
-/// 成员自有边在边集合里的位次（R1i 修订 2026-10-26，S13 第一轮证伪"自有边固定最前"）。
-/// <para>
-/// 旧动作管道的"转发"（`Commit`）与"落地"（`Apply`）都是**链上最后一步**：若自有边一律最前，
-/// 外来边与包装在此类成员上永不执行。因此成员自己声明位次：
-/// </para>
-/// <list type="bullet">
-///   <item><see cref="First"/>（默认）＝流程型（打出／部署／指向）：自有边先跑，外来扩展续后；</item>
-///   <item><see cref="Last"/>＝管道型（伤害处理／动作落地）：外来改写先跑，自有边最后跑。</item>
-/// </list>
-/// </summary>
-public enum OwnEdgePosition
-{
-    /// <summary>自有边先执行（流程型成员的默认位次）。</summary>
-    First,
-
-    /// <summary>自有边最后执行（管道型／落地型成员）。</summary>
-    Last,
-}
-
-/// <summary>
 /// 成员的一条**自有边**（R1i）：成员所属实体自己声明的可执行逻辑。
 /// <para>
-/// 位次由所属成员的 <see cref="MemberDefinition.OwnEdgePosition"/> 决定（默认最前）。
-/// 新模型不存在独立于边集合的 "core" 概念——核心逻辑就是自有边。这样"包装整个成员"才有唯一着力点。
+/// 位次由所属成员的 <see cref="MemberDefinition.Band"/> 在 <see cref="MemberDefinition.Bands"/> 里的下标决定
+/// （band 为空＝默认段＝下标 0）。新模型不存在独立于边集合的 "core" 概念——核心逻辑就是自有边。
+/// 这样"包装整个成员"才有唯一着力点。
 /// </para>
 /// </summary>
 public sealed class OwnedEdge
@@ -130,8 +111,28 @@ public sealed class MemberDefinition
     /// 可被挂载（＝订阅）由 <see cref="MemberVisibility.Hostable"/> 决定，与是否为信号无关。
     /// </para>
     /// </param>
-    /// <param name="ownEdgePosition">自有边位次（默认 <see cref="OwnEdgePosition.First"/>；管道型成员用 Last）。</param>
-    /// <exception cref="ArgumentException">name 为空或纯空白。</exception>
+    /// <param name="band">
+    /// 该成员**自有边**所属的段名（null＝默认段）。必须出现在 <paramref name="bands"/> 声明的方案里。
+    /// </param>
+    /// <param name="bands">
+    /// 该成员的**段序声明**（有序段名，数值/下标小者先执行；null＝单段方案——所有边同段、按声明序）。
+    /// </param>
+    /// <param name="seams">
+    /// 该成员 handler 内部的**具名插入点**声明（null／空＝不声明任何缝）。
+    /// <para>
+    /// 包装器可以挂到 <c>(成员, 缝名)</c> 上（<see cref="WrapDeclaration.Seam"/>）；handler 在内部某处调
+    /// <c>ctx.SeamAsync(缝名)</c>，运行时按该缝的包装器列表**管道式**（LIFO）执行。
+    /// 缝未在此声明＝调用 <c>ctx.SeamAsync</c> 抛 <see cref="KeyNotFoundException"/>；
+    /// 声明了但没人挂＝空缝（调用不报错、无副作用）。
+    /// </para>
+    /// <para>
+    /// 三层分工：<c>wrap.phase</c> 管成员外围、<see cref="Band"/> 管成员内部边次序、本属性管
+    /// **handler 内部的具名插入点**（R1i 修订 2026-10-29：seam 恢复，不是退役）。
+    /// </para>
+    /// </param>
+    /// <exception cref="ArgumentException">
+    /// name 为空或纯空白；band 未在 bands 方案中声明；bands 含空白项或重复名；seams 含空白项或重复名。
+    /// </exception>
     public MemberDefinition(
         string name,
         ViewSpec? view = null,
@@ -141,12 +142,17 @@ public sealed class MemberDefinition
         PrefabLayer layer = PrefabLayer.Kernel,
         string? declaredBy = null,
         SignalTiming? signalTiming = null,
-        OwnEdgePosition ownEdgePosition = OwnEdgePosition.First)
+        string? band = null,
+        IReadOnlyList<string>? bands = null,
+        IReadOnlyList<string>? seams = null)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
             throw new ArgumentException("成员名不能为空或纯空白（成员名即寻址用的 <成员名> 段）。", nameof(name));
         }
+
+        var scheme = ValidateBands(name, bands);
+        ValidateBand(name, band, scheme);
 
         Name = name;
         View = view ?? ViewSpec.Empty;
@@ -156,7 +162,121 @@ public sealed class MemberDefinition
         Layer = layer;
         DeclaredBy = declaredBy;
         SignalTiming = signalTiming;
-        OwnEdgePosition = ownEdgePosition;
+        Band = band;
+        Bands = scheme;
+        Seams = ValidateSeams(name, seams);
+    }
+
+    /// <summary>
+    /// 具名缝声明的合法性校验（fail-fast）：空白项、重复名一律拒绝（重复名会让"按名取包装器列表"变成多解）。
+    /// </summary>
+    /// <exception cref="ArgumentException">含空白项或重复名。</exception>
+    private static IReadOnlyList<string> ValidateSeams(string memberName, IReadOnlyList<string>? seams)
+    {
+        if (seams is null || seams.Count == 0)
+        {
+            return Array.Empty<string>(); // 空／null ＝ 该成员不声明任何缝（与"声明了空缝"同义，见 Seams 注释）
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var seam in seams)
+        {
+            if (string.IsNullOrWhiteSpace(seam))
+            {
+                throw new ArgumentException(
+                    $"成员 '{memberName}' 的 seams 含空白缝名（缝名不能为空或纯空白）。", nameof(seams));
+            }
+
+            if (!seen.Add(seam))
+            {
+                throw new ArgumentException(
+                    $"成员 '{memberName}' 的 seams 含重复缝名 '{seam}'（缝名必须唯一）。", nameof(seams));
+            }
+        }
+
+        return seams.ToArray();
+    }
+
+    /// <summary>
+    /// **段序方案**的合法性校验（fail-fast）：空白项、重复名一律拒绝（重复名会让"段下标"变成多解）。
+    /// </summary>
+    /// <exception cref="ArgumentException">含空白项或重复名。</exception>
+    private static IReadOnlyList<string>? ValidateBands(string memberName, IReadOnlyList<string>? bands)
+    {
+        if (bands is null)
+        {
+            return null;
+        }
+
+        if (bands.Count == 0)
+        {
+            throw new ArgumentException(
+                $"成员 '{memberName}' 的 bands 不能为空数组（null＝单段方案：所有边同段、按声明序）。",
+                nameof(bands));
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var segment in bands)
+        {
+            if (string.IsNullOrWhiteSpace(segment))
+            {
+                throw new ArgumentException(
+                    $"成员 '{memberName}' 的 bands 含空白段名（段名不能为空或纯空白）。", nameof(bands));
+            }
+
+            if (!seen.Add(segment))
+            {
+                throw new ArgumentException(
+                    $"成员 '{memberName}' 的 bands 含重复段名 '{segment}'（段序方案里的段名必须唯一）。", nameof(bands));
+            }
+        }
+
+        return bands.ToArray();
+    }
+
+    /// <summary>自有边段名的合法性校验（fail-fast）：段名必须已在方案中声明。</summary>
+    /// <exception cref="ArgumentException">band 未在方案中声明，或声明了 band 却没有方案。</exception>
+    private static void ValidateBand(string memberName, string? band, IReadOnlyList<string>? bands)
+    {
+        if (band is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(band))
+        {
+            throw new ArgumentException(
+                $"成员 '{memberName}' 的 band 不能为空或纯空白（null＝默认段）。", nameof(band));
+        }
+
+        if (bands is null)
+        {
+            throw new ArgumentException(
+                $"成员 '{memberName}' 声明了 band='{band}' 但没有声明 bands 方案：band 名未在成员的 bands 方案中声明"
+                + "（先声明段序方案，或去掉 band 使用默认段）。",
+                nameof(band));
+        }
+
+        if (!Contains(bands, band))
+        {
+            throw new ArgumentException(
+                $"成员 '{memberName}' 的 band='{band}' 未在成员的 bands 方案中声明"
+                + $"（已声明：{string.Join("／", bands)}）。",
+                nameof(band));
+        }
+    }
+
+    private static bool Contains(IReadOnlyList<string> list, string value)
+    {
+        for (var i = 0; i < list.Count; i++)
+        {
+            if (string.Equals(list[i], value, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>成员名（寻址 <c>作用域#成员名</c> 的成员名段；零转换保留，允许含 <c>.</c>）。</summary>
@@ -168,11 +288,63 @@ public sealed class MemberDefinition
     /// <summary>可见性（位标志；默认全关）。</summary>
     public MemberVisibility Visibility { get; }
 
-    /// <summary>自有边（位次由 <see cref="OwnEdgePosition"/> 决定；默认最前）。</summary>
+    /// <summary>自有边（位次＝<see cref="Band"/> 在 <see cref="Bands"/> 里的下标；同段内按声明序）。</summary>
     public IReadOnlyList<OwnedEdge> OwnEdges { get; }
 
-    /// <summary>自有边位次（默认 <see cref="OwnEdgePosition.First"/>；管道型成员声明 Last）。</summary>
-    public OwnEdgePosition OwnEdgePosition { get; }
+    /// <summary>
+    /// 自有边所属的**段名**（null＝默认段；段下标 0）。
+    /// <para>
+    /// **自有边位次＝<see cref="Band"/> 在 <see cref="Bands"/> 中的下标**——"自有边最前／最后"不再是独立概念，
+    /// 而是"自有边落在首段／末段"的结果。段名合法时也可能落在中间段（旧模型只有 first／last 二值，此处已放开）。
+    /// </para>
+    /// </summary>
+    public string? Band { get; }
+
+    /// <summary>
+    /// 该成员的**段序声明**（有序段名；下标即段序，小者先执行；null＝单段方案）。
+    /// <para>
+    /// 段序来自旧 band 方案的枚举数值序（触发端／处理端／指令流三套，见 <c>BandSchemes</c>）：
+    /// 成员按方案给自己的自有边挑一段，外来挂载边按 <see cref="MountEdge.Band"/> 挑另一段，
+    /// 两者合起来给出成员的完整执行序。
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<string>? Bands { get; }
+
+    /// <summary>
+    /// 该成员 handler 内部的**具名插入点**（声明序；空数组＝不声明任何缝）。
+    /// <para>
+    /// 包装器挂到 <c>(成员, 缝名)</c> 上（<see cref="WrapDeclaration.Seam"/>）；handler 内
+    /// <c>ctx.SeamAsync(缝名)</c> 按该缝的包装器列表 LIFO 执行。未声明＝调用
+    /// <see cref="Context.SeamAsync"/> 抛 <see cref="KeyNotFoundException"/>。
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<string> Seams { get; }
+
+    /// <summary>是否声明了某具名缝（<see cref="Context.SeamAsync"/> 的 fail-fast 依据）。</summary>
+    public bool DeclaresSeam(string name) => Contains(Seams, name);
+
+    /// <summary>
+    /// 段名 → 执行序下标（plan 为 null 或段名为 null 时＝0；段名不在方案里＝<see cref="ArgumentException"/>）。
+    /// </summary>
+    /// <exception cref="ArgumentException">段名未在 <see cref="Bands"/> 中声明。</exception>
+    public int BandIndexOf(string? band)
+    {
+        if (band is null || Bands is null)
+        {
+            return 0;
+        }
+
+        for (var i = 0; i < Bands.Count; i++)
+        {
+            if (string.Equals(Bands[i], band, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+
+        throw new ArgumentException(
+            $"段名 '{band}' 未在成员 '{Name}' 的 bands 方案中声明（已声明：{string.Join("／", Bands)}）。", nameof(band));
+    }
 
     /// <summary>合法性检验（null＝恒合法）。</summary>
     public IMemberValidation? Validation { get; }

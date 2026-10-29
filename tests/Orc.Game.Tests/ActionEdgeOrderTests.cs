@@ -14,18 +14,18 @@ namespace Orc.Game.Tests;
 /// U4（S13 位次落地）**逐组等价证据**：7 组动作（hand.add／draw／death／move／join／damage／order）
 /// 每组 3 条，逐条对应一条语义：
 /// <list type="number">
-/// <item><b>段次序</b>：<c>before</c>（前置／门禁相位）→ 外来挂载边（声明序／追加序）→ 自有边（<c>last</c>）→ <c>after</c>；</item>
+/// <item><b>段次序</b>：<c>before</c>（前置／门禁相位）→ 外来挂载边（首段，声明序／追加序）→ 自有边（末段）→ <c>after</c>；</item>
 /// <item><b><c>ctx.Stop()</c> 语义</b>：命中后同成员的后续外来边、自有边与 <c>after</c> 不执行，已执行的 <c>before</c> 写入保留；</item>
 /// <item><b>结果位</b>：真实动作返回的 <see cref="ActionOutcomeKind"/>／<see cref="ActionFailureKind"/> 与迁移前一致。</item>
 /// </list>
 /// <para>
 /// 前两条在**新模型**（成员＝有序边集合）上验证：被测成员的声明**直接取自** <see cref="EngineProcesses"/>
-/// （名字＋<c>own-edge-position</c>），自有边清单＝该端在旧模型里的段内注册序（迁移映射的一一对照，
+/// （名字＋段序方案＋自有边段名），自有边清单＝该端在旧模型里的段内注册序（迁移映射的一一对照，
 /// 见 <see cref="OwnEdges"/> 的注释）。第三条在**旧执行面**（生产路径未切换）上验证外部行为不变——
-/// 两条证据合起来才构成"位次标注 + 行为等价"，缺任一条都只是自说自话。
+/// 两条证据合起来才构成"段标注 + 行为等价"，缺任一条都只是自说自话。
 /// </para>
 /// <para>
-/// 位次一律 <c>last</c> 的理由见 <see cref="EngineProcesses.ActionEndPositions"/>：转发（旧 <c>Commit</c>）与
+/// 自有边一律落在**末段**的理由见 <see cref="EngineProcesses.ActionEndPositions"/>：转发（旧 <c>Commit</c>）与
 /// 落地（旧 <c>Apply</c>）都是链上末步，外来边与 before 包装必须先跑；<c>first</c> 只留给"整端就是门禁"的成员
 /// （21 端里不存在——门禁挂在端内部，由 <c>before</c> 相位承载）。
 /// </para>
@@ -58,9 +58,9 @@ public sealed class ActionEdgeOrderTests
 
     // ══════════════════════ ① hand.add ══════════════════════
 
-    /// <summary>1／3：段次序＝前置（before）→ 外来甲、外来乙（追加序）→ 自有边（last，声明序）→ after。</summary>
+    /// <summary>1／3：段次序＝前置（before）→ 外来甲、外来乙（首段，追加序）→ 自有边（末段，声明序）→ after。</summary>
     [Fact]
-    public async Task 加入手牌_段次序_前置先于外来挂载边_自有边last收口()
+    public async Task 加入手牌_段次序_前置先于外来挂载边_自有边末段收口()
     {
         var run = await RunOrderAsync(EngineProcesses.HandAdd);
 
@@ -113,9 +113,9 @@ public sealed class ActionEdgeOrderTests
 
     // ══════════════════════ ② draw ══════════════════════
 
-    /// <summary>1／3：段次序＝前置 → 外来甲、外来乙 → 自有边（last）→ after（库顶端；指定牌端同形）。</summary>
+    /// <summary>1／3：段次序＝前置 → 外来甲、外来乙（首段）→ 自有边（末段）→ after（库顶端；指定牌端同形）。</summary>
     [Fact]
-    public async Task 抽牌_段次序_前置先于外来挂载边_自有边last收口()
+    public async Task 抽牌_段次序_前置先于外来挂载边_自有边末段收口()
     {
         var run = await RunOrderAsync(EngineProcesses.DrawTop);
 
@@ -157,9 +157,9 @@ public sealed class ActionEdgeOrderTests
 
     // ══════════════════════ ③ death ══════════════════════
 
-    /// <summary>1／3：段次序＝前置 → 外来甲、外来乙 → 自有边（last）→ after（免死／死亡链在处理端，同形）。</summary>
+    /// <summary>1／3：段次序＝前置 → 外来甲、外来乙（首段）→ 自有边（末段）→ after（免死／死亡链在处理端，同形）。</summary>
     [Fact]
-    public async Task 死亡_段次序_前置先于外来挂载边_自有边last收口()
+    public async Task 死亡_段次序_前置先于外来挂载边_自有边末段收口()
     {
         var run = await RunOrderAsync(EngineProcesses.Death);
 
@@ -200,9 +200,9 @@ public sealed class ActionEdgeOrderTests
 
     // ══════════════════════ ④ move ══════════════════════
 
-    /// <summary>1／3：段次序＝前置 → 外来甲、外来乙 → 自有边（last）→ after（落地在处理端，同形）。</summary>
+    /// <summary>1／3：段次序＝前置 → 外来甲、外来乙（首段）→ 自有边（末段）→ after（落地在处理端，同形）。</summary>
     [Fact]
-    public async Task 移动_段次序_前置先于外来挂载边_自有边last收口()
+    public async Task 移动_段次序_前置先于外来挂载边_自有边末段收口()
     {
         var run = await RunOrderAsync(EngineProcesses.Move);
 
@@ -247,7 +247,7 @@ public sealed class ActionEdgeOrderTests
     // ══════════════════════ ⑤ join ══════════════════════
 
     /// <summary>
-    /// 1／3：段次序＝前置 → 外来甲、外来乙 → 自有边（last，四条按声明序：代价校验 → 宣告 → **词条 → 转发**）→ after。
+    /// 1／3：段次序＝前置 → 外来甲、外来乙（首段）→ 自有边（末段，四条按声明序：代价校验 → 宣告 → **词条 → 转发**）→ after。
     /// <para>词条先于转发＝D2 的"同段相对次序"：两条同 band 同 priority，次序由声明序承担。</para>
     /// </summary>
     [Fact]
@@ -293,11 +293,11 @@ public sealed class ActionEdgeOrderTests
     // ══════════════════════ ⑥ damage ══════════════════════
 
     /// <summary>
-    /// 1／3：段次序＝前置（before）→ 外来甲、外来乙 → 自有边（last）→ after。
-    /// <para>外来边先跑＝重甲（旧 <c>Initiate</c>）在"转发"之前改写数值；扣数值在 <c>damage-apply</c>（同为 last）。</para>
+    /// 1／3：段次序＝前置（before）→ 外来甲、外来乙（首段）→ 自有边（末段）→ after。
+    /// <para>外来边先跑＝重甲（旧 <c>Initiate</c>）在"转发"之前改写数值；扣数值在 <c>damage-apply</c>（同为末段）。</para>
     /// </summary>
     [Fact]
-    public async Task 伤害_段次序_前置先于外来挂载边_自有边last收口()
+    public async Task 伤害_段次序_前置先于外来挂载边_自有边末段收口()
     {
         var run = await RunOrderAsync(EngineProcesses.CombatDamage);
 
@@ -337,10 +337,10 @@ public sealed class ActionEdgeOrderTests
     // ══════════════════════ ⑦ order ══════════════════════
 
     /// <summary>
-    /// 1／3：段次序＝前置（旧宣告点／反制相位）→ 外来甲、外来乙 → 自有边（last＝施放结算）→ after。
+    /// 1／3：段次序＝前置（旧宣告点／反制相位）→ 外来甲、外来乙（首段＝Counter）→ 自有边（末段＝施放结算）→ after。
     /// </summary>
     [Fact]
-    public async Task 指令_段次序_前置先于外来挂载边_自有边last收口()
+    public async Task 指令_段次序_前置先于外来挂载边_自有边末段收口()
     {
         var run = await RunOrderAsync(EngineProcesses.OrderCast);
 
@@ -386,18 +386,23 @@ public sealed class ActionEdgeOrderTests
         List<string> Trace, object? Observed, MemberExecutionResult Result);
 
     /// <summary>
-    /// 在**新模型**上按被测成员的真实声明（名字＋位次）跑一次成员执行：
-    /// 一个 <c>before</c> 前置（写 <c>amount=7</c>）、两条外来挂载边（追加序，第一条可选 <c>Stop</c>）、
-    /// 该端的自有边（声明序）、一个 <c>after</c>。
+    /// 在**新模型**上按被测成员的真实声明（名字＋段序方案＋自有边段名）跑一次成员执行：
+    /// 一个 <c>before</c> 前置（写 <c>amount=7</c>）、两条外来挂载边（追加序、段名＝该方案首段，第一条可选 <c>Stop</c>）、
+    /// 该端的自有边（声明序，段名＝该端在末段）、一个 <c>after</c>。
     /// </summary>
     /// <param name="memberName">被测成员名（<see cref="EngineProcesses"/> 常量）。</param>
     /// <param name="stopInBefore">第二条 <c>before</c>（门禁）是否调用 <c>ctx.Stop()</c>。</param>
     private static async Task<RunResult> RunOrderAsync(string memberName, bool stopInBefore = false)
     {
-        // 被测成员的位次必须来自真实声明（U4 的标注如果有漂移，这两条断言先红）。
+        // 被测成员的段声明必须来自真实声明（U4 的标注如果有漂移，这两条断言先红）。
         var declaration = EngineProcesses.Members.Single(m => m.Name == memberName);
-        Assert.Equal(EngineProcesses.PositionOf(memberName), declaration.OwnEdgePosition);
-        Assert.Equal(OwnEdgePosition.Last, declaration.OwnEdgePosition);
+        Assert.Equal(EngineProcesses.BandsOf(memberName), declaration.Bands!);
+        Assert.Equal(EngineProcesses.BandOf(memberName), declaration.Band);
+
+        // 自有边**不在首段**（转发／落地／结算是本成员的末步）；外来边统一落首段——这正是旧 last 语义的 band 写法。
+        Assert.Contains(declaration.Band, declaration.Bands);
+        Assert.True(declaration.BandIndexOf(declaration.Band) > 0);
+        var foreignBand = declaration.Bands![0];
 
         var trace = new List<string>();
         var handlers = new HandlerRegistry();
@@ -412,7 +417,8 @@ public sealed class ActionEdgeOrderTests
             amount,
             MemberVisibility.All,
             ownEdges: OwnEdges[memberName].Select(label => Own(trace, label)).ToArray(),
-            ownEdgePosition: declaration.OwnEdgePosition);
+            band: declaration.Band,
+            bands: declaration.Bands);
 
         var catalog = new PrefabCatalog()
             .Add(new PrefabDefinition("engine", EntityKind.Engine, members: new[] { member }))
@@ -459,8 +465,8 @@ public sealed class ActionEdgeOrderTests
         var host = runtime.CreateEntity("card.base", "宿主");
         var first = runtime.CreateEntity("comp.a", "甲", host);
         var second = runtime.CreateEntity("comp.b", "乙", host);
-        runtime.MountAtRuntime(first, "probe", "engine#" + memberName);
-        runtime.MountAtRuntime(second, "probe", "engine#" + memberName);
+        runtime.MountAtRuntime(first, "probe", "engine#" + memberName, band: foreignBand);
+        runtime.MountAtRuntime(second, "probe", "engine#" + memberName, band: foreignBand);
 
         var data = new Dictionary<string, object?>(StringComparer.Ordinal);
         var result = await runtime.RunMemberAsync(runtime.Engine, memberName, data);
