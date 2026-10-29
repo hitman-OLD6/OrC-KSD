@@ -1,5 +1,10 @@
 # Implementation — 卡牌 DIY 开发文档
 
+> **⚠ 历史存档（2026-10-29）**：本文件记录 S1–S27 的实施步骤与分步实测记录，属过程留档。
+> v4 编排实体化后大量符号已删除（`Effect`／`PassiveEffect`／`CardLoadout`／`Trigger<TView>`／`PrefabManager`／`EffectSystem`／
+> `ActionTriggerBands`／`OrderFlowBands`），**不要照本文的符号调试**。现状以 [README](./README.md)、[02 章](./02-触发器与handler.md) 与 `src/` 为准。
+
+
 实现 grill 已收敛并进入执行：R9（`Source` / `TriggerCard` 两面）已落地（S1–S7 Done），文档库与八个示例已产出（S8–S20 Done，含偏差记录）。需求新增 **R10 战斗机制** 与 **R11 伤害触发-处理分离**，故追加 **Part C（S21–S27）** 作为本轮执行对象，并同步回改 Part B 的 05/07/08 章、参考层与示例 8。
 
 ## Scope

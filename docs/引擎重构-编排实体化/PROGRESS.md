@@ -3589,3 +3589,282 @@ match.ComponentFailureSink = failures =>
 - 若某种卡**不在任何批次的牌堆里**（例如运行期单卡创建 `MatchCardService.CreateAsync`），报告里自然没有它的卡位：
   那条路径的 `AppId` 命中不了卡位也命中不了条目 ⇒ `WithComponentFailures` 按规则返回原实例（不改），
   失败事实仍在引擎日志与抛出的异常里。**不硬造条目**——冻结 schema 的 `items[].assetGuid` 是资产身份，凭空加一条会污染台账。
+
+## 三十五、band 恢复并取代 `own-edge-position`（R1i 修订块的第一项；seam 不动）
+
+用户裁决（2026-10-29，写在 `requirements.md` R1i 修订块）：**band 恢复**，取代 `own-edge-position` 的
+first／last 二值；`wrap.phase` 保持不变；seam 下一轮做。本节只落 band 这一项，**未碰 wrap／seam**。
+
+### 35.1 三层分工（读代码前先读这段）
+
+| 层 | 管什么 | 载体 |
+| --- | --- | --- |
+| `wrap.phase`（before／after／replace） | 成员的**外围**（改写输入／尾部副作用／整段接管） | `WrapRegistry`（本批零改动） |
+| `band`（段名） | 成员的**内部边次序** | `MemberDefinition.Band`／`Bands`＋`MountEdge.Band` |
+| `seam` | handler 内部的具名插入点 | 下一轮 |
+
+`own-edge-position` 的两个取值在这套语言里是**两个特例**：自有边落首段＝"最前"，落末段（且外来边在更早的段）＝"最后"。
+中间段从此合法（旧模型表达不了）。
+
+### 35.2 模型层改动
+
+| 文件 | 改动 |
+| --- | --- |
+| `src/Orc/Core/Model/Members.cs` | 删 `enum OwnEdgePosition`；`MemberDefinition` 的 `ownEdgePosition` 参数换成 `band`（自有边段名）＋ `bands`（段序方案）；构造期 fail-fast（`band` 不在 `bands` 里／`bands` 有空白项或重复名／声明了 `band` 却没 `bands` ⇒ `ArgumentException`）；新增 `BandIndexOf(string?)`（null 方案或 null 段名＝0；未知段名抛错，供挂载面复用）。`OwnedEdge` 注释改 band 说法。 |
+| `src/Orc/Core/Model/Mounting.cs` | `MountEdge` 加 `Band`（null＝与目标成员同段）；`MemberEdgeTable.Attach(...)` 加可选 `band` 并透传（既有调用点零改动）。 |
+| `src/Orc/Core/Model/OrchestrationEntity.cs` | `RunEdgesAsync` 从"三分支（自有边先／外来边先）"改为**统一按 band 排序**：`CollectUnits` 摊平边集合 → 排序键 `(段下标, 同段内序)`，同段内自有边（声明序→运行期接入序）在前、外来边（表快照序：声明序→追加序）在后；每个单元前检查 `scope.Stopped \|\| ctx.Interrupted`。类头与 `AttachOwnedEdge` 注释同步改写。 |
+| `src/Orc/Core/Model/OrchestrationRuntime.cs` | `MountAtRuntime(...)` 加可选 `band`，并先 `BandIndexOf(band)` 做 fail-fast（段名必须在目标成员的方案里）。 |
+| `src/Orc/Core/SignalBridge.cs`／`src/Orc/Core/LogicEngine.cs` | `Attach`／`SubscribeSignal`／`AttachMemberEdge`／`SubscribeMember` 加可选 `band`（生产挂载点要能指定"挂在目标成员的哪一段"）。 |
+| `src/Orc/Core/Model/MemberEdges.cs` | 该文件只有"强类型处理器 → 边的工厂"，**没有挂载 API**；band 的公开面落在 `MountAtRuntime`／`MemberEdgeTable.Attach`（注释里写清这一点）。 |
+
+`RunEdgesAsync` 的排序是**执行前一次算定**（`CollectUnits` 里排完再跑），不边跑边取——避免"排序键依赖已执行单元"的隐性耦合。
+
+### 35.3 21 端点的 band 映射（逐个核对，非批量替换）
+
+段名一律取旧 `OldTail` 的**首个段名**（`ActionBands.cs` 旧枚举，commit `0ba6ad3^`）：
+
+| 成员 | 方案 | Band（旧末步段） | 旧 OldTail |
+| --- | --- | --- | --- |
+| `hand.add` | ActionTrigger | `Commit` | Commit 转发 |
+| `hand.add.handle` | ActionHandle | `Apply` | Apply 落地 |
+| `draw.top` | ActionTrigger | `Commit` | Commit 转发 |
+| `draw.specific` | ActionTrigger | `Commit` | Commit 转发 |
+| `draw.handle` | ActionHandle | `Apply` | Apply 落地 |
+| `death` | ActionTrigger | `Commit` | Commit 转发 |
+| `death.handle` | ActionHandle | `Apply` | Veto 免死／Apply 死亡链 → **拆分后取 Apply** |
+| `move` | ActionTrigger | `Commit` | Commit 转发 |
+| `move.handle` | ActionHandle | `Apply` | Apply 落地 |
+| `join.deploy` | ActionTrigger | `Commit` | Commit 词条＋转发 |
+| `join.frontline` | ActionTrigger | `Commit` | Commit 转发 |
+| `join.support` | ActionTrigger | `Commit` | Commit 转发 |
+| `join.handle` | ActionHandle | `Apply` | Apply 落地 |
+| `combat-damage` | ActionTrigger | `Commit` | Commit 转发 |
+| `effect-damage` | ActionTrigger | `Commit` | Commit 转发 |
+| `battle-damage` | ActionTrigger | `Commit` | Commit 转发 |
+| `damage-apply` | ActionHandle | `Apply` | Apply 落地 |
+| `unit-attack` | ActionTrigger | `Commit` | Commit 转发 |
+| `attack-damage` | ActionHandle | `Apply` | Apply 落地 |
+| `order.cast` | OrderFlow | `Resolve` | Resolve 结算 |
+| `order.finalize` | OrderFlow | `Finalize` | Finalize 收尾 |
+
+两个"不是批量替换"的坑，写下来防下次抄错：
+
+- **`order.cast` 的自有边不在方案末段**：它的末步是 Resolve（结算），Finalize 段属于**另一个成员** `order.finalize`。
+  因此"自有边落在末段"这句话对 20/21 成立，对 `order.cast` 是"中段"。守护测试按这条口径断言（不是 `Bands[^1]` 一刀切）。
+- **`death.handle` 的 OldTail 有两个段名**，取首个会得到 `Veto`——那属于拆分出去的守卫成员；`death.handle` 自己必须是 `Apply`。
+  这正是"取首个段名"规则的唯一例外，已写在表与代码注释里。
+
+三个非端成员（`command`／`unit-move`／`action-budget`）**不声明方案**（`Bands`/`Band` 皆 null＝单段：所有边同段、
+自有边在前），与旧默认 `first` 逐项等价。
+
+### 35.4 方案载体：`BandSchemes`（唯一真源）
+
+新建 `src/Orc.Game/Model/BandSchemes.cs`：三套有序段名数组 ＋ 段名常量（`Initiate`…`Finalize`）。段名字面量只在这里出现一次；
+`EngineProcesses.ActionEndPositions` 与两处生产挂载点（死亡改写、指令反制／宣告）都引用它。
+内核侧（`src/Orc/Cards/OrderFlow.cs`）不能引用 `Orc.Game`，故用既有的 `OrderFlowBands` 枚举取名字（`nameof(...)`，仍是零字面量）。
+
+**为什么是"成员级"而不是资产级**：`Bands`／`Band` 描述的是**成员自己的边集合怎么分段**，与"哪个组件挂在哪"无关，
+所以承载层必然是 `MemberDefinition`（每个成员一份）。资产里同一成员也要能声明，故 `AssetSchema` 按**成员对象**读 `band`／`bands`。
+
+### 35.5 资产 schema（`band` 解禁）
+
+- `AssetSchema.LegacyFields` 去掉 `"band"`；`seams`／`seam` 等**保持禁止**（下一轮）。
+- 成员对象新增可选 `bands`（有序段名数组，省略＝单段）与 `band`（段名，必须在 `bands` 里）。合法性在读取期就判，
+  报错走 `PrefabLoadException`（`structure`），与 `MemberDefinition` 的 `ArgumentException` 同口径。
+- `ComponentMemberAsset` 加 `Band`／`Bands`（带默认值，既有构造点零改动），`ToPrefabDefinition` 透传。
+- `Write` 只在作者显式声明时写出 `bands`／`band`——缺省不落盘，避免给 151 份活资产添加噪声字段。
+
+### 35.6 `DeathHandle` 拆分（用户裁决 A）与 Stop 的跨成员语义
+
+旧 `death.handle` 一个成员横跨两段：`Veto`（免死守卫）＋ `Apply`（死亡链）。band 模型下"一个成员落一段"，
+故拆成两个成员：
+
+| 成员 | 方案 | Band | 自有边 |
+| --- | --- | --- | --- |
+| `death.veto`（新） | ActionHandle | `Veto` | 免死守卫 `GuardAsync` |
+| `death.handle` | ActionHandle | `Apply` | 死亡链 `HandleApplyAsync` |
+
+`ctx.Stop()` 的作用域仍是**当前成员**（S2a，本批不动这条），所以"守卫停了 ⇒ 死亡链不跑"不能再靠"同一成员内后续边被停"。
+最小正确实现：**触发端的转发读结果位**——
+
+```csharp
+var veto = await _engine.InvokeMemberAsync(EngineProcesses.DeathVeto, new Context(data), ct);
+if (veto.Stopped || veto.ValidationRejected) { return; }   // 免死 ⇒ 不发 death.handle
+await _engine.InvokeMemberAsync(EngineProcesses.DeathHandle, new Context(data), ct);
+```
+
+- 为什么不是"给 scope 加跨成员停止"：那要新增一个传播标记，语义上等于把"当前成员"扩成"当前成员组"，
+  与 S2a 的单成员口径冲突；而这里只有一处需要跨成员，读结果位是零新增概念的写法。
+- 覆盖两种停法：①守卫自己 `Stop`（`ShouldDie=false` 时的 `Veto` 收口）；②**改写方直接 Stop**
+  （`Rewrite` 段外来边——端点实体的 Stop 穿透到 `death.veto`，守卫被跳过，但 `veto.Stopped` 仍为 true，死亡链同样不跑）。
+  两条都与旧"同成员内 Veto 停 Apply"等价。
+- 改写边（词条 `death.cancel`）从 `death.handle` 移到 **`death.veto` 的 `Rewrite` 段**（`CommandManager`），
+  段名显式写出；`priority` 语义不变。
+
+### 35.7 测试
+
+| 用例 | 内容 |
+| --- | --- |
+| `tests/Orc.Tests/Model/MemberBandOrderTests.cs`（新，替换 `OwnEdgePositionTests.cs`，9 条） | ①外来边段早于自有边 ⇒ 外来先（旧 last）；②同段 ⇒ 自有边在前（旧 first）；③显式同段与缺省等价；④`Band` 未在 `Bands` 中声明 ⇒ `ArgumentException`；⑤有 band 无 bands ⇒ `ArgumentException`；⑥bands 重复／空白 ⇒ `ArgumentException`；⑦`BandIndexOf` 取值与未知段名；⑧三段方案下外来边按段插入且同段保持挂载序；⑨单段方案回归旧默认。 |
+| `tests/Orc.Game.Tests/DeathVetoSplitTests.cs`（新，3 条） | ①只改写 `ShouldDie`（不 Stop）⇒ 守卫 Stop ＋ 跨成员判定拦住死亡链，单位未死；②无改写 ⇒ 死亡链照常；③两成员各一条自有边、分属 Veto／Apply 段。 |
+| `tests/Orc.Game.Tests/ActionEdgeOrderTests.cs`（改） | 段声明取自 `EngineProcesses`（`BandsOf`／`BandOf`）；两条外来边显式落**方案首段**，11 条既有断言（7 组×段次序／Stop／结果位）逐条不变。 |
+| `tests/Orc.Game.Tests/EngineEntityTests.cs`（改） | 21 端逐条比对 `Bands`／`Band`；"自有边不在首段"＋"20/21 在末段，`order.cast` 在 Resolve"两条口径；`death.veto` 的结构断言；流程成员数 24→25。 |
+
+### 35.8 实测（本块）
+
+| 项 | 结果 |
+| --- | --- |
+| `dotnet build OrcEngine.sln --no-restore` | **0 错误 0 警告** |
+| `--filter "~MemberBandOrderTests"` | **9 / 9 绿** |
+| `--filter "~DeathVetoSplitTests"` | **3 / 3 绿** |
+| `--filter "~EngineEntityTests\|~ActionEdgeOrderTests"` | **31 / 31 绿**（10 ＋ 21） |
+| `--filter "~Orchestration\|~Member\|~Signal\|~Action\|~Command\|~Keyword\|~Death"` | `Orc.Tests` **72**、`Orc.Game.Tests` **403** 全绿 |
+| `--filter "~ContractFreezeTests"` | **1 / 1 绿（基线零 diff）** |
+| 全量（`dotnet test OrcEngine.sln --no-build`） | **2125 绿 / 0 红**（Game 1116、Packages 371、Tests 330、Mcp 118、Server 118、Script 39、Manager 20、Ai 13） |
+
+### 35.9 契约基线的结论：**零变更，不重生成**
+
+预期"`OwnEdgePosition` 是公共 API ⇒ 契约基线要动"，实测**不动**：`contract-freeze.json` 冻结的是
+`GameUpdates`／`EffectRuntime` 合并面／`GameEntryPoints`／结果形状／schema DTO／预制体 JSON DTO，
+`MemberDefinition` 家族不在其中。所以本块**没有跑** `ORC_WRITE_BASELINE=1` 的生成器——
+按"不盲重生成"的要求，先跑冻结门拿到绿，再确认无需重生成。
+
+### 35.10 未做的（明确留给下一轮／别的任务）
+
+- **seam**：本批完全未触碰（`Context.SeamAsync`／`SeamExecutor`／`AssetSchema.seams` 禁止位保持原样）。
+- **`wrap.phase`**：语义与实现零改动。
+- **作者文档同步**：`docs/卡牌DIY开发文档/*` 仍以 `own-edge-position`／"自有边最前／最后"叙述（面向作者的口径），
+  与实现已不一致——这是文档任务，不在本块的硬约束范围内（`requirements.md` 只读、未改）。
+
+## 三十六、seam 恢复（R1i 修订块的第二项；band 不动）
+
+用户裁决（2026-10-29，`requirements.md` R1i 修订块第二段）：**seam 恢复，不是退役**——
+「保留核心触发器的 seam 声明，作为元效果端的修改路径」。语义：成员可声明具名缝（`seams`），
+handler 内 `ctx.SeamAsync(name)` 按该缝的包装器列表**管道式**执行；`Context.SeamAsync`／
+`ExecutionFrame.SeamExecutor` 保留，**`SeamExecutor` 的写入点随本条一并恢复**。本批只做 seam：
+band（§35）的任何结论均未触碰。
+
+### 36.1 三层分工（§35.1 的表补齐第三行）
+
+| 层 | 管什么 | 载体 |
+| --- | --- | --- |
+| `wrap.phase`（before／after／replace） | 成员的**外围**（改写输入／尾部副作用／整段接管） | `WrapRegistry`＋`WrapTarget`（缝为 null 的那一档） |
+| `band`（段名） | 成员的**内部边次序** | `MemberDefinition.Band`／`Bands`＋`MountEdge.Band`（零改动） |
+| **`seam`（缝名）** | **handler 内部的具名插入点** | `MemberDefinition.Seams`＋`WrapDeclaration.Seam`（`WrapTarget.Seam`） |
+
+### 36.2 模型层改动
+
+| 文件 | 改动 |
+| --- | --- |
+| `src/Orc/Core/Model/Members.cs` | `MemberDefinition` 加 `seams`（末尾可选参数，既有构造点零改动）＋ `Seams`（空数组＝不声明任何缝）＋ `DeclaresSeam(name)`；构造期 fail-fast（含 null／空白项、重复名 ⇒ `ArgumentException`）。 |
+| `src/Orc/Core/Model/Mounting.cs` | `WrapTarget` 加 `Seam`（null＝成员外围）与 `ForSeam(address, seam)`，`Key`／`Equals`／`GetHashCode` 纳入缝名；`WrapDeclaration` 加 `seam`（末尾可选参数）＋ `Seam` 属性＋ `ForSeam(...)` 便捷构造，并校验：纯空白缝名／判定器目标／非 `before` 相位 ⇒ `ArgumentException`。 |
+| `src/Orc/Core/Context.cs` | 加 `internal Frame`（读面）：成员执行面据此把 `SeamExecutor` 收窄到**当前**成员（见 36.4）。`SeamAsync` 本身零改动。 |
+| `src/Orc/Core/Model/OrchestrationEntity.cs` | `ExecuteMemberAsync` 进入成员时把 `frame.SeamExecutor` 设为"本成员"的执行器（未声明缝＝置 null），退出时恢复外层值；`finally` 里恢复，视图封口顺序不变。 |
+| `src/Orc/Core/Model/OrchestrationRuntime.cs` | `RunMemberAsync`（帧创建点）注入 `frame.SeamExecutor`（**仅当** `member.Seams.Count > 0`）；新增 `ExecuteSeamAsync`；`RegisterWraps` 支持缝内包装（归一化地址时保留缝名，并校验缝已在目标成员上声明）。 |
+| `src/Orc/Core/Model/AssetModel.cs`／`AssetSchema.cs` | 见 36.5。 |
+
+`WrapTarget` 加缝名而不是另立一张表：注册面（`WrapRegistry`）本来就是"按目标键聚合"的字典，缝内包装与成员外围包装
+只是**同一个键空间的两种目标**——键不同（`member:engine#flow` vs `member:engine#flow@指向后`）即天然分流，
+`ExecuteMemberAsync` 的 before／after／replace 循环**一行未改**也不会误取缝内包装。
+
+### 36.3 `ExecuteSeamAsync`（包装器执行通道怎么复用）
+
+```
+ctx.SeamAsync(name, ct)
+  → ExecutionFrame.SeamExecutor（当前成员的闭包）
+  → OrchestrationRuntime.ExecuteSeamAsync(entity, member, name, ctx, ct)
+       1. name 不在 member.Seams            ⇒ KeyNotFoundException（消息含成员名＋可用缝名）
+       2. entries = Wraps.Entries(WrapTarget.ForSeam(address, name), WrapperPhase.Before)
+       3. entries 为空                      ⇒ 直接返回（**空缝**：不报错、不执行、无副作用）
+       4. 逆序遍历（声明序 LIFO），每个之前检查 scope.Stopped‖ctx.Interrupted
+       5. entry.Handler.InvokeAsync(view, ctx, ct)  ← 与成员外围 before 同一条执行入口
+```
+
+复用的边界说清（避免被读成"另起一套执行逻辑"）：
+
+- **取列表**：同一个 `WrapRegistry.Entries`。参数化的只是目标键——`WrapTarget.ForSeam(...)`（缝内）或
+  `WrapTarget.ForMember(...)`（成员外围、全局）。（`WrapRegistry.BeforeExecutionOrder` 只是
+  `Entries(target, Before)` 的别名，缝内取列表直接调 `Entries`。）
+- **执行体**：同一个 `WrapEntry.Handler.InvokeAsync`，视图按"声明该包装的实体"回填 owner／host
+  （与 `ExecuteMemberAsync` 里的 `ViewFor` 同口径）；差别只在本方法自建视图、自带封口
+  （成员视图由 `ExecuteMemberAsync` 负责，不能被缝调用提前封掉）。
+- **没走** "从 prefab 的 `Wraps` 里现场筛声明"：`RegisterWraps` 在 `CreateEntity` 期已把 prefab 的声明登记到注册面，
+  执行期查注册面即等价，且**带撤销语义**（`RevokeAll`／组件销毁后缝内的包装同步消失）。装载期还多一道
+  fail-fast：挂到未声明的缝上＝拒绝装载（否则就是"永远不执行"的静默失效）。
+
+顺序为什么是 LIFO：缝是 handler 内部的**装饰器插入点**，`Context.SeamAsync` 的既有注释即"按前置包装器列表 LIFO"；
+与成员外围 `before` 的 FIFO（R1i 2026-10-26 修订，减伤叠加的钳制点依赖它）**刻意不同**——两者语义不同层，不共用次序口径。
+
+### 36.4 帧的两个口径：帧级默认 ＋ 成员级收窄
+
+`RunMemberAsync` 的注入是**帧级默认**（R1i 要求）。但执行帧会被**多个成员共用**：挂载成员在宿主成员的边集合里
+执行（`RunEdgesAsync` → `edge.Declaring.ExecuteMemberAsync(..., 同一个 ctx, ...)`），信号端点的订阅体同理。
+只按帧注入会让组件的缝调用**解析到外层成员**的缝上（要么静默跑错包装，要么误报"未声明"）。
+因此 `ExecuteMemberAsync` 在 `PushMemberScope` 之后把执行器收窄到**当前成员**（未声明缝＝置 null），
+`finally` 里恢复外层值——与 `ctx.SeamAsync` 文档里的"**当前 handler** 的具名动作缝"一致。
+
+### 36.5 资产 schema（`seam`／`seams` 解禁）
+
+- `AssetSchema.LegacyFields` 去掉 `"seam"`／`"seams"`（`"band"` 已在 §35 去掉）。
+- **选成员级**（与 band 同口径，理由同 §35.4）：缝描述的是"**这个成员的 handler 内部有哪些插入点**"，与"谁挂了包装"无关，
+  承载层必然是 `MemberDefinition`；资产里按**成员对象**读 `members[].seams`（字符串数组，省略＝不声明）。
+- 包装侧按现有 `wraps[]` 结构加一个 `seam` 字段（`wraps[].seam`），落到 `WrapDeclaration.Seam`；
+  读取期校验：`seam` 与 `judge` 互斥、`seam` 只允许 `phase: before` ⇒ `PrefabLoadException(structure)`。
+- `ComponentMemberAsset` 加 `Seams`（末尾默认值，既有构造点零改动），`ToPrefabDefinition` 透传；`Write` 只在
+  作者声明时写出 `seams`／`seam`（缺省不落盘，151 份活资产零噪声）。
+- **迁移器本批未扩**（旧 `EventPrefabDto.Seams`→新成员缝的映射不是本条要求）：旧包仍按 `AssetSchema` 拒绝旧字段的口径走迁移器。
+
+### 36.6 生产侧恢复点：`UnitCard` ＋ `unit` prefab 的缝声明
+
+| 位置 | 改动 |
+| --- | --- |
+| `src/Orc.Game/Cards/UnitCard.cs`（`HandleTargetingAsync`） | 空转**恢复**为 `=> ctx.SeamAsync(TargetingRules.SeamName, ct);`（缝名常量仍是 `"指向后"`），注释重写为"seam 已恢复（2026-10-29 用户裁决）＋当前空缝、无副作用"。 |
+| `src/Orc.Game/Model/CardProcesses.cs` | 在 `card.unit` 的成员表里**覆写** `targeting`（`UnitMembers` 追加 `UnitTargetingMember()`，同名⇒整段替换、位次不变）并声明 `seams: [指向后]`。视图声明抽成 `TargetingPayload()`，基类与覆写共用一份，避免两处漂移。 |
+| `src/Orc.Game/Model/ModelMemberDispatch.cs` | `InvokeHostMemberAsync`／`InvokeEngineMemberAsync` 改走**建帧重载**（`RunMemberAsync(entity, name, new Context(data), engine, ct)`）。原来的无帧重载下 `ctx.SeamAsync` 必抛 `InvalidOperationException`——恢复调用点后生产路径必须先有帧。 |
+
+为什么缝声明在 `card.unit` 而不是 `card.base`：`ctx.SeamAsync("指向后")` 的调用者是 `UnitCard` 的 handler，只挂在单位卡的
+`targeting` 成员上；声明在基类上会让 HQ／指令卡／反制卡也声明一条无人调用的缝（无副作用，但声明与使用者不符）。
+
+**当前没有任何资产往"指向后"缝上挂包装器**（`grep wraps[].seam` 零命中）⇒ **空缝**：调用不抛错、不执行任何包装、
+无副作用——这正是"能力恢复但暂无用例"的预期状态。
+
+### 36.7 测试
+
+| 用例 | 内容 |
+| --- | --- |
+| `tests/Orc.Tests/Model/SeamTests.cs`（新，8 条） | ①缝内包装在 handler 的插入点执行（且成员外围 before 与缝内包装互不串味，顺序 `outer→own→seam`）；②同一缝两个包装 ⇒ **LIFO**（`own→s2→s1`）；③成员未声明该缝 ⇒ `KeyNotFoundException`（消息含成员名＋可用缝名，自有边已跑完）；④声明了但没人挂 ⇒ 空缝（不抛、无副作用）；⑤成员未声明任何缝 ⇒ `InvalidOperationException`（执行器未注入）；⑥`seam` 配 `after`／`replace`／判定器目标／纯空白 ⇒ `ArgumentException`，合法形态的键与外围包装不共键；⑦`seams` 空白项／重复名／null 项 ⇒ `ArgumentException`，空数组＝不声明；⑧资产 schema 放开 `members[].seams`／`wraps[].seam` 且 `Write→Read` 往返不丢。 |
+| `tests/Orc.Tests/Model/WrapChannelTests.cs`（改 1 条） | `模型里不存在接缝概念` → `具名缝挂在成员目标上_不引入二级地址且与成员外围包装不共键`：该用例原本钉的是**已被用户推翻的**"seam 退役"结论，现改钉恢复后的形态（仍是成员目标、无二级地址、缝只加在包装声明上）。属**前提被推翻的验收面更新**，未放宽任何断言（属性集断言从 3 项扩到 4 项，多出 `Seam`）。 |
+
+### 36.8 实测（本块）
+
+| 项 | 结果 |
+| --- | --- |
+| `dotnet build OrcEngine.sln --no-restore` | **0 错误** |
+| `--filter "~SeamTests"` | **8 / 8 绿** |
+| `--filter "~SeamTests\|~WrapChannelTests"` | **17 / 17 绿** |
+| `--filter "~Asset\|~Schema\|~Prefab"` | **261 绿 / 0 红**（Tests 44、Game 56、Packages 148、Manager 7、Mcp 5、Server 1） |
+| `--filter "~Orchestration\|~Member\|~Signal\|~Wrap\|~Action\|~Command\|~Unit\|~Targeting"` | **421 绿 / 0 红**（Game 285、Tests 105、Mcp 14、Manager 6、Packages 5、Server 3、Ai 3） |
+| `--filter "~SpaceWarKeyword\|~V4SampleEmission\|~Bulwark"`（生产指向路径） | **19 / 19 绿** |
+| `--filter "~ContractFreezeTests"` | **1 / 1 绿（基线零 diff）** |
+| 全量（`dotnet test OrcEngine.sln --no-build`） | **2133 绿 / 0 红**（Game 1116、Packages 371、Tests 338、Mcp 118、Server 118、Script 39、Manager 20、Ai 13）＝ §35 的 2125 ＋ 本批新增 8 条 |
+
+首次全量跑出现过一次 `Orc.Manager.Tests.InstanceOrchestrationTests.Reload_ReplacesProcess_AndReusesPort`
+（"服务端在 30 秒内未就绪"）——该用例拉起**真进程**并等端口，与并行负载相关：单跑绿、`Orc.Manager.Tests` 整项目 20/20 绿、
+复跑全量绿。本批未触碰 Manager／Server 任何代码（改动只在内核模型面、`Orc.Game` 卡面与测试），故判为环境性超时，不是回归。
+
+### 36.9 契约基线的结论：**零变更，不重生成**
+
+自己核实过冻结面（`tests/Orc.Game.Tests/ContractSnapshot.cs`）：`GameUpdates`／`EffectRuntime` 合并面／
+`GameEntryPoints`／`ResultShapes`／`SchemaDto`（`Orc.Cards.PrefabJson`、`Orc.Game.Cards.CardDefinition`）／
+`PrefabJson` 的私有 DTO 属性集。`MemberDefinition`／`WrapDeclaration`／`WrapTarget`／`ComponentMemberAsset`
+**都不在其中**；`prefabJsonDtos` 里确实有 `EventPrefabDto.Seams`，但那是**旧 prefab JSON DTO**（旧装载器的面），本批未触碰。
+故没有跑 `ORC_WRITE_BASELINE=1`：先跑冻结门拿绿，再确认无需重生成。
+
+### 36.10 已知边界（本批未做，别当成遗漏被"顺手修"）
+
+- **无帧的成员执行没有缝**：`RunMemberAsync` 的 `IDictionary` 重载（无 engine）不建帧，`ctx.SeamAsync` 抛
+  `InvalidOperationException`。这是 R1i 指定的口径（"未关联执行帧 fail-fast"），不是缺陷；需要缝的调用点必须走建帧重载。
+- **迁移器未映射旧 `seams`**：旧 `EventPrefabDto.Seams`（handler 级）→ 新 `members[].seams` 的语义映射需要逐包判断，
+  不在本条要求内；旧包仍由迁移器按既有规则转换（本批只保证新 schema 能表达）。
+- **`docs/卡牌DIY开发文档/*` 的 seam 叙述**未同步（与 §35.10 同一条文档债）。
+

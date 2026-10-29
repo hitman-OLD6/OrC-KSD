@@ -3,15 +3,12 @@
 > **本章解决什么**：讲清「选谁」：选择器怎么声明、候选从哪来、交互怎么跑、三态结果怎么处理。读完你能在 handler 内安全地发起一次选靶，并保证取消零副作用。
 > **前置**：00（五段模型）、02（handler 与上下文）。
 > **读完你能做什么**：①按场景选对选择器模板；②用 `ReferenceSetParameter` 交候选/数量/域校验；③正确处理 Ok/Cancelled/Failed 与重试。
-> **对应代码路径**：`Orc.Game.Targeting.Selector` / `Selector<TResult>` / `ReferenceSetParameter` / `SelectorTemplates` / `ITargeterFlow` / `TargeterManager` / `SelectorResult<T>` / `TargeterResult`；`EffectRuntime.SelectAsync`（唯一选择入口）。
+> **对应代码路径（2026-10-29 核对）**：`Orc.Game.Targeting.Selector` / `Selector<TResult>` / `ReferenceSetParameter` / `SelectorTemplates` / `ITargeterFlow` / `TargeterManager` / `SelectorResult<T>` / `TargeterResult`；`EffectRuntime.SelectAsync`（唯一选择入口）。
 > **本章自检**：能说出「候选由后端给出」的具体含义；能区分 `SelectorStatus` 与 `TargeterStatus`；能解释取消为什么不产生副作用。
 
-> **术语提醒（2026-10-28 核对）**：本章的 targeter 机制**仍然有效**（`TargeterManager`、`Selector`、`EffectRuntime.SelectAsync` 都在）。
-> 唯一要留意的是**示例外层**：若把示例放进预制体，`hooks`／`injects`／`band`／`seam` 这些字段名已属**旧 schema**，
-> v4 组件资产读到即拒绝装载。旧→新映射见 [09-新编排模型与术语迁移](./09-新编排模型与术语迁移.md)。
 ## 状态
 
-- 章节状态：**草稿**
+- 章节状态：**完成**
 - 最近一次证据运行：—（原理章；行为由 `tests/Orc.Game.Tests/TargeterContractTests.cs` / `TargeterFlowTests.cs` 覆盖）
 
 ---

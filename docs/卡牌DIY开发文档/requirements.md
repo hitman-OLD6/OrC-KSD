@@ -1,5 +1,10 @@
 # Requirements — 卡牌 DIY 开发文档
 
+> **⚠ 历史存档（2026-10-29）**：本文件记录 2026-10 期间的需求 grill 过程（R1–R11、S1–S27），
+> 其中提到的 `Effect`／`PassiveEffect`／`CardLoadout`／`Trigger<TView>`／`injects`／`OrderFlowBands` 等符号
+> **已在 v4 编排实体化后删除**。现状以 [README](./README.md) 与 `src/` 为准；本文件只用于追溯「为什么这样设计」。
+
+
 一句话：为「想在本引擎里做卡」的创作者写一份**可照做**的开发文档，覆盖效果原理、扩展语法/机制 API、方法论、8 个典型效果示例与词条/预制效果清单。
 
 > 状态：**需求 grill 进行中**（Draft 条目待用户裁决）。术语见 [CONTEXT.md](./CONTEXT.md)。

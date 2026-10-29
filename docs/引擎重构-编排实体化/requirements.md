@@ -297,8 +297,8 @@ Status: **Confirmed — 需求 grill 已收敛（2026-10-26），待用户最终
 - 决策记录: 2026-10-26，父 agent 依 W-06 裁决。判据：条件装配天然存在（沙盒、临时增益），
   一刀禁掉会让这些场景退化成"永远挂着但内部 if 判断"，反而隐藏了装配关系；而"无主边"是确定的泄漏源。
 
-#### R1i: 包装通道的落地与 band 退役（已确认）
-- Status: Confirmed
+#### R1i: 包装通道的落地与 band 退役（**band／seam 两项已于 2026-10-29 被用户裁决推翻**，见文末修订）
+- Status: Partially-Superseded（`wrap`/`phase` 部分仍有效；`band 退役`／`seam 退役` 两项作废）
 - Scenario/Trigger: 减伤、免疫、反制这类"改写别人结算"的效果要插入别人的执行。
 - Behavior:
   - **`band` / 分段概念退役**：成员内部不再有 `Rewrite`/`Veto`/`Apply` 这类次序枚举。
@@ -307,12 +307,13 @@ Status: **Confirmed — 需求 grill 已收敛（2026-10-26），待用户最终
   - **包装的目标是成员**（包裹该成员的整体执行），不是某一条边；因此不需要"成员＋来源"的二级地址。
   - 相位：`before`（改写输入，LIFO）／`after`（尾部副作用，FIFO）／`replace`（替代整个边集合，最后声明者生效）。
     三者的先后**一律按声明序推出**，不引入优先级数字。
-  - **接缝（seam）退役**：需要"在中间插入"就拆成员（R3a 已定）。包装只能包在成员外围。
+  - **接缝（seam）退役**
+    → **作废（2026-10-29 用户裁决）**：seam 恢复，见文末修订。原条文：需要"在中间插入"就拆成员（R3a 已定），包装只能包在成员外围。
   - **判定器包装器同属这一套**（相位语义相同，作用对象是判定器而非成员）。
   - **迁移规则**：`injects + band: Rewrite` → `wrap: engine#<成员>, phase: before`（改写视图字段）；
     `Veto` → `before` + `ctx.Stop()`；`Apply` 段的外来注册项 → 外来挂载边。
 - Acceptance:
-  - [ ] 模型里不存在 `band` 概念
+  - [x] ~~模型里不存在 `band` 概念~~ → **已推翻**：模型改为以 `band`（段名）**取代** `own-edge-position`
   - [ ] 成员执行序可由"自有边 → 外来边声明序 → 框架边"完整推出
   - [ ] 两个减伤包装器（相邻掩护、海绵装甲）同时生效时，相对次序由声明序推出
   - [ ] 免疫（before + stop）命中后，同成员的 after 包装器与后续边不执行，且行为有明确文档
@@ -321,6 +322,30 @@ Status: **Confirmed — 需求 grill 已收敛（2026-10-26），待用户最终
 - 决策记录: 2026-10-26，父 agent 依 W-20 裁决。判据：band 与包装器在语义上重叠（都是"改变执行次序/内容"），
   R1b 已把"改别人结算"划给包装通道；若保留 band，作者要同时理解"band 值"与"相位"两套次序语言，
   与"更强的抽象"背道而驰。
+- **修订（2026-10-29，用户裁决——推翻上面两条退役决定）**：
+  - **band 恢复，并取代 `own-edge-position`**：用户的原始需求是「保留 band 名优先度作为**设计端的优先级**」。
+    上面"band 退役"是父 agent 依 W-20 自行裁决（决策记录原文即"父 agent 依 W-20 裁决"），
+    却被标成 `Confirmed`——属**需求漂移**，用户未确认过。现改为：
+    - `MemberDefinition` 以 **`Band`（段名）取代 `OwnEdgePosition`（first／last 二值）**；
+    - 段序＝旧 band 方案的枚举数值序（见下表），同段内按声明序；
+    - "自有边最前／最后"不再是独立概念，而是"自有边落在首段／末段"的**结果**。
+  - **seam 恢复（不是退役）**：用户的原始需求是「保留核心触发器的 seam 声明，作为**元效果端的修改路径**」。
+    现改为：成员可声明具名缝（`seams`），handler 内 `ctx.SeamAsync(name)` 按该缝的包装器列表管道式执行；
+    `Context.SeamAsync`／`ExecutionFrame.SeamExecutor` 保留，`SeamExecutor` 的写入点随本条一并恢复。
+  - **保持不变**：`wrap`（包装通道）的 `phase: before｜after｜replace` 与"包装目标＝成员"的裁决依然有效。
+    三层分工：`phase` 管成员外围、`band` 管成员内部边次序、`seam` 管 handler 内部的具名插入点。
+  - 段序（从 git 历史 `src/Orc.Game/Actions/ActionBands.cs` 取回的旧枚举，数值即段序）：
+
+    | 方案 | 段序（数值小者先） | 适用 |
+    | --- | --- | --- |
+    | `ActionTriggerBands` | `Initiate(1)` → `Announce(2)` → `CounterGuard(3)` → `Counter(4)` → `Adjust(5)` → `Commit(6)` | 动作触发端 |
+    | `ActionHandleBands` | `Rewrite(1)` → `Veto(2)` → `Apply(3)` | 动作处理端 |
+    | 指令流 | `Counter(1)` → `Resolve(2)` → `Finalize(3)` | 指令施放 |
+
+  - 迁移映射（`own-edge-position` → `band`）：`first` → 该方案首段（触发端 `Initiate`／处理端 `Rewrite`）；
+    `last` → 该方案末段（触发端 `Commit`／处理端 `Apply`）。`EngineProcesses.ActionEndPositions` 的
+    `OldTail` 字段已逐端点记录了旧段名（`Commit 转发`／`Apply 落地`／`Resolve 结算`／`Finalize 收尾`），
+    可直接作为迁移依据。
 - **修订（2026-10-26，S13 第一轮证伪"自有边固定最前"）**：
   - 成员声明自己的**自有边位次** `own-edge-position: first | last`（默认 `first`）：
     - `first`＝流程型成员（打出／部署／指向）：自有边（核心流程）先跑，外来扩展续后；
