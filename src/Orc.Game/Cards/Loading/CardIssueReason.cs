@@ -45,6 +45,11 @@ public enum CardIssueReason
 
     /// <summary>组件脚本（csx）无法在 v4 承载视图下编译——该卡的效果永远不可能生效。</summary>
     ScriptCompileFailed = 10,
+
+    /// <summary>
+    /// 声明被内建规则覆盖（R9/D23：老兵卡的显式 <c>deckable</c> 无效）——**警报档**，卡照常生成。
+    /// </summary>
+    IgnoredByRule = 11,
 }
 
 /// <summary>原因 token（**冻结契约**：camelCase 字面值，报告序列化与工具面共用）。</summary>
@@ -65,6 +70,7 @@ public static class CardIssueReasonTokens
         CardIssueReason.Conflict => "conflict",
         CardIssueReason.DuplicateGuid => "duplicateGuid",
         CardIssueReason.ScriptCompileFailed => "scriptCompileFailed",
+        CardIssueReason.IgnoredByRule => "ignoredByRule",
         _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, "未定义的问题原因。"),
     };
 

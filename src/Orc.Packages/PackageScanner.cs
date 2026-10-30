@@ -32,6 +32,10 @@ public sealed record ScannedSourceFile(
 /// <param name="TextsFile">卡面文本文件（不存在＝null）。</param>
 /// <param name="KeywordsFile">词条声明文件（不存在＝null）。</param>
 /// <param name="CardFiles">卡源文件（含 sidecar 定位；稳定序）。</param>
+/// <param name="DeckFiles">
+/// 卡组源文件（<c>decks/</c> 顶层；含 sidecar 定位；稳定序）。<see cref="ScannedSourceFile.IsHistorical"/> 恒 false——
+/// 卡组不保留历史版本（R11），「历史卡组」这个概念不存在。
+/// </param>
 /// <param name="ManifestSidecars">`manifest.metadata` 原样（**声明**；B4 的「声明必须落地」契约来源）。</param>
 /// <param name="SidecarFiles">
 /// **完整清单**＝`ManifestSidecars` ∪ 发现面（`cards*` 顶层 ＋ `effects/` 递归的 `*.meta.json`，
@@ -46,6 +50,7 @@ public sealed record PackageScan(
     string? TextsFile,
     string? KeywordsFile,
     IReadOnlyList<ScannedSourceFile> CardFiles,
+    IReadOnlyList<ScannedSourceFile> DeckFiles,
     IReadOnlyList<string> ManifestSidecars,
     IReadOnlyList<string> SidecarFiles);
 
@@ -58,6 +63,18 @@ public static class PackageScanner
 {
     /// <summary>卡目录名前缀（<c>cards</c> / <c>cards-support</c> …）。</summary>
     public const string CardsDirectoryPrefix = "cards";
+
+    /// <summary>
+    /// 卡组目录名（R11/D55）：卡组固定落 <c>decks/</c> **顶层**，文件名为 <c>&lt;局部ID&gt;.deck.json</c>。
+    /// <para>
+    /// 只扫顶层、不认 <c>decks-*</c> 变体（与 <c>cards/</c> 口径一致）：卡组的规模不需要分目录；
+    /// 非约定位置的文件要走 <c>manifest.metadata</c> 显式声明（「声明即落地」通道）。
+    /// </para>
+    /// </summary>
+    public const string DeckDirectoryName = "decks";
+
+    /// <summary>卡组源文件模式串（单处定义——注册面不得散落字面量）。</summary>
+    public const string DeckFilePattern = "*.deck.json";
 
     /// <summary>效果库目录名（旧格式 <c>*.prefab.json</c>；U5-a 起仅作无 v4 包的过渡兼容）。</summary>
     public const string EffectsDirectoryName = "effects";
@@ -106,6 +123,19 @@ public static class PackageScanner
             }
         }
 
+        // 卡组：只扫 decks/ 顶层（D55）。不递归、不认 decks-* 变体——与 cards/ 同口径。
+        var deckFiles = new List<ScannedSourceFile>();
+        var decksDirectory = Path.Combine(root, DeckDirectoryName);
+        if (Directory.Exists(decksDirectory))
+        {
+            foreach (var file in Directory
+                         .EnumerateFiles(decksDirectory, DeckFilePattern, SearchOption.TopDirectoryOnly)
+                         .OrderBy(f => f, StringComparer.Ordinal))
+            {
+                deckFiles.Add(Describe(root, file));
+            }
+        }
+
         var effectsDirectory = Path.Combine(root, EffectsDirectoryName);
         var componentsDirectory = Path.Combine(root, ComponentsDirectoryName);
         var textsFile = Path.Combine(root, TextsFileName);
@@ -113,7 +143,7 @@ public static class PackageScanner
 
         var manifestSidecars = manifest.MetadataList;
         var sidecarFiles = manifestSidecars
-            .Concat(DiscoverSidecars(root, cardDirectories))
+            .Concat(DiscoverSidecars(root, cardDirectories, decksDirectory))
             .Select(relative => relative.Replace('\\', '/'))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(relative => relative, StringComparer.Ordinal)
@@ -128,16 +158,18 @@ public static class PackageScanner
             File.Exists(textsFile) ? textsFile : null,
             File.Exists(keywordsFile) ? keywordsFile : null,
             cardFiles,
+            deckFiles,
             manifestSidecars,
             sidecarFiles);
     }
 
     /// <summary>
-    /// 发现面（F11）：`cards*` **顶层** ＋ `effects/` **递归**的 `*.meta.json`（相对包根、`/` 分隔）。
+    /// 发现面（F11）：`cards*` **顶层** ＋ `decks/` **顶层** ＋ `effects/` **递归**的 `*.meta.json`（相对包根、`/` 分隔）。
     /// 排除插件清单镜像 <see cref="PluginAssetRegistrar.ManifestFileName"/>（常量复用，不另写字面量）；
-    /// 不含 `versions/**`（历史版本仍走卡源文件路径，见已知边界 B-1）。
+    /// 不含 `versions/**`（历史版本仍走卡源文件路径，见已知边界 B-1；卡组更不归档）。
     /// </summary>
-    private static IReadOnlyList<string> DiscoverSidecars(string root, IReadOnlyList<string> cardDirectories)
+    private static IReadOnlyList<string> DiscoverSidecars(
+        string root, IReadOnlyList<string> cardDirectories, string decksDirectory)
     {
         var result = new SortedSet<string>(StringComparer.Ordinal);
         var pattern = "*" + AssetSidecarJson.SidecarExtension;
@@ -145,6 +177,11 @@ public static class PackageScanner
         foreach (var directory in cardDirectories)
         {
             Add(Directory.EnumerateFiles(directory, pattern, SearchOption.TopDirectoryOnly));
+        }
+
+        if (Directory.Exists(decksDirectory))
+        {
+            Add(Directory.EnumerateFiles(decksDirectory, pattern, SearchOption.TopDirectoryOnly));
         }
 
         var effectsDirectory = Path.Combine(root, EffectsDirectoryName);

@@ -62,7 +62,14 @@ public sealed record RoomSeatSnapshot(
     string? DisplayName,
     string? Kind = null,
     IReadOnlyList<string>? Deck = null,
-    IReadOnlyList<RoomPackageSnapshot>? Packages = null);
+    IReadOnlyList<RoomPackageSnapshot>? Packages = null)
+{
+    /// <summary>
+    /// 座位声明的**卡组标识**（D28：快照回显「作者提交的原始形态」，不展开成卡 id 列表）。
+    /// 给了它时 <see cref="Deck"/> 恒为 null——声明形态对对手视图天然安全。
+    /// </summary>
+    public string? DeckId { get; init; }
+}
 
 /// <summary>可连接地址（房主 UI 展示/复制；非回环 IPv4 ＋ 实际端口）。</summary>
 public sealed record RoomListenAddress(string Ip, int Port);

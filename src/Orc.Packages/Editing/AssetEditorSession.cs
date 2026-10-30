@@ -1,7 +1,9 @@
 using System.Text;
 using Orc.Cards;
 using Orc.Core;
+using Orc.Game.Cards;
 using Orc.Game.Cards.Data;
+using Orc.Packages.Decks;
 using Orc.Packages.Fs;
 
 namespace Orc.Packages.Editing;
@@ -56,6 +58,15 @@ internal sealed class AssetEditorSession
     private readonly Dictionary<EditorAssetKey, IReadOnlyList<string>> _tags = new();
     private readonly List<string> _warnings = new();
 
+    /// <summary>
+    /// 提交期判定用的卡池（D36）：会话开始时的 registry 快照 ＋ **本会话已提交卡的内存增量**。
+    /// 与注册期同一语义——不做全根扫描（一次提交读上千文件、99% 无关），也绝不自己扫盘（D38）。
+    /// </summary>
+    private readonly Dictionary<string, CardDefinition> _pool;
+
+    /// <summary>卡组要求张数（D11/D15：与注册期同一口径，故由选项注入而非写死）。</summary>
+    private readonly int _requiredDeckSize;
+
     private AssetEditorSession(
         string packageId,
         Guid packageGuid,
@@ -64,7 +75,9 @@ internal sealed class AssetEditorSession
         bool isNewPackage,
         PackageManifest manifest,
         IReadOnlyList<string> dependsOnPackages,
-        IEditableRootPolicy policy)
+        IEditableRootPolicy policy,
+        IReadOnlyDictionary<string, CardDefinition> pool,
+        int requiredDeckSize)
     {
         PackageId = packageId;
         PackageGuid = packageGuid;
@@ -75,6 +88,8 @@ internal sealed class AssetEditorSession
         Manifest = manifest;
         DependsOnPackages = dependsOnPackages;
         _policy = policy;
+        _pool = new Dictionary<string, CardDefinition>(pool, StringComparer.Ordinal);
+        _requiredDeckSize = requiredDeckSize;
     }
 
     /// <summary>包 id。</summary>
@@ -106,20 +121,42 @@ internal sealed class AssetEditorSession
     public static AssetEditorSession Open(
         EditorSessionRequest request,
         IEditableRootPolicy policy,
-        IReadOnlyCollection<EditablePackageInfo> knownPackages)
+        IReadOnlyCollection<EditablePackageInfo> knownPackages,
+        IReadOnlyDictionary<string, CardDefinition> pool,
+        int requiredDeckSize)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(policy);
+        ArgumentNullException.ThrowIfNull(pool);
 
         return request.IsCreateNew
-            ? CreateNew(request, policy, knownPackages)
-            : OpenExisting(request, policy);
+            ? CreateNew(request, policy, knownPackages, pool, requiredDeckSize)
+            : OpenExisting(request, policy, pool, requiredDeckSize);
+    }
+
+    /// <summary>
+    /// 从注册面快照出卡池（D36）：只取**已通过卡牌判定**的卡（<c>Card</c> 非空）；
+    /// 同 appId 多版本取最高版。判定集合＝会话内可见的全部包（不走 lock——D8：编辑器提交期看注册集合）。
+    /// </summary>
+    public static IReadOnlyDictionary<string, CardDefinition> SnapshotPool(AssetRegistry registry)
+    {
+        ArgumentNullException.ThrowIfNull(registry);
+
+        var pool = new Dictionary<string, CardDefinition>(StringComparer.Ordinal);
+        foreach (var group in registry.All
+                     .Where(asset => asset.Kind == AssetKind.Card && asset.Card is not null)
+                     .GroupBy(asset => asset.AppId, StringComparer.Ordinal))
+        {
+            pool[group.Key] = group.OrderByDescending(asset => asset.Version).First().Card!;
+        }
+
+        return pool;
     }
 
     /// <summary>会话快照。</summary>
     public EditorSessionInfo Describe()
         => new(PackageId, PackageRoot, TemporaryRoot, IsNewPackage, PackageGuid,
-            DependsOnPackages, _assets.Count, _warnings.ToArray());
+            DependsOnPackages, _assets.Count, _warnings.ToArray(), _requiredDeckSize);
 
     /// <summary>当前测试 lock（每次结构变更后已重算）。</summary>
     public AssetLock BuildTestLock()
@@ -146,6 +183,8 @@ internal sealed class AssetEditorSession
     public EditorCommitResult Commit(string relativePath, string? content)
     {
         var absolute = ResolveWritable(relativePath);
+        var existed = File.Exists(absolute);
+        var previous = content is not null && existed ? File.ReadAllBytes(absolute) : null;
         if (content is not null)
         {
             WriteText(absolute, content);
@@ -161,9 +200,25 @@ internal sealed class AssetEditorSession
             ? CommitCard(absolute)
             : absolute.EndsWith(".prefab.json", StringComparison.OrdinalIgnoreCase)
                 ? CommitPrefab(absolute)
-                : throw new AssetEditorException(
-                    AssetEditorErrorCode.InvalidContent,
-                    $"不支持的提交类型：'{relativePath}'（只接受 *.card.json 与 *.prefab.json）。");
+                : absolute.EndsWith(".deck.json", StringComparison.OrdinalIgnoreCase)
+                    ? CommitDeck(absolute)
+                    : throw new AssetEditorException(
+                        AssetEditorErrorCode.InvalidContent,
+                        $"不支持的提交类型：'{relativePath}'（只接受 *.card.json／*.prefab.json／*.deck.json）。");
+
+        // 「拒绝写入」要真的一点都不写（R7/S11）：内容通道已经把文件落盘了，这里把源文件恢复原样。
+        // 文件指针通道（content＝null）不动——那份文件是前端自己写的，撤销它不是我们的职责。
+        if (committed.Violations is not null && content is not null)
+        {
+            if (previous is not null)
+            {
+                File.WriteAllBytes(absolute, previous);
+            }
+            else
+            {
+                File.Delete(absolute);
+            }
+        }
 
         RecomputeLocks();
         return committed;
@@ -188,6 +243,14 @@ internal sealed class AssetEditorSession
                 AssetEditorErrorCode.InvalidContent, $"内含资产（{AssetKindTokens.Token(kind)}）必须指定 anchor 与宿主源文件。");
         }
 
+        if (kind == AssetKind.Deck && (!string.IsNullOrWhiteSpace(anchor) || !string.IsNullOrWhiteSpace(loader)))
+        {
+            // D62：在入口就拒绝，不写进 sidecar 再等注册期报 FieldNotAllowed。
+            throw new AssetEditorException(
+                AssetEditorErrorCode.InvalidContent,
+                "卡组不接受 anchor／loader 参数（卡组不是内含资产，也不参与卡位装载）。");
+        }
+
         var sourceRelative = string.IsNullOrWhiteSpace(sourcePath)
             ? DefaultSourceFor(kind, localId)
             : NormalizeRelative(sourcePath);
@@ -203,6 +266,15 @@ internal sealed class AssetEditorSession
 
         if (!File.Exists(sourceAbsolute))
         {
+            if (kind == AssetKind.Deck)
+            {
+                // D51：卡组**不补骨架**。任何骨架都必然非法（空 cards 张数不足、主国未定归属无从判），
+                // 补一个「新建成功但永远提交不了」的陷阱不如直接把下一步写给作者。
+                throw new AssetEditorException(
+                    AssetEditorErrorCode.InvalidContent,
+                    $"卡组源文件不存在：请先写入 `{sourceRelative}`（含 id／name／deckConfig／cards）再声明。");
+            }
+
             if (kind != AssetKind.Card)
             {
                 throw new AssetEditorException(
@@ -286,6 +358,12 @@ internal sealed class AssetEditorSession
         if (!_assets.Values.Any(item => string.Equals(item.SidecarRelative, entry.SidecarRelative, StringComparison.Ordinal)))
         {
             _pinned.Remove(entry.SidecarRelative); // 组已删空：pin 一并清除；组未删空则保留
+        }
+
+        if (kind == AssetKind.Card)
+        {
+            // D39：删卡必须同时移出卡池——漏掉这一步，「已删的卡」仍能通过卡组判定。
+            UpdatePool(AssetAppId.Compose(PackageId, localId), definition: null);
         }
 
         RecomputeLocks();
@@ -454,7 +532,11 @@ internal sealed class AssetEditorSession
 
     // ── 会话打开 ─────────────────────────────────────────────────────────────
 
-    private static AssetEditorSession OpenExisting(EditorSessionRequest request, IEditableRootPolicy policy)
+    private static AssetEditorSession OpenExisting(
+        EditorSessionRequest request,
+        IEditableRootPolicy policy,
+        IReadOnlyDictionary<string, CardDefinition> pool,
+        int requiredDeckSize)
     {
         var packageRoot = RequireAbsolute(request.PackageRoot, "包目录");
         if (!Directory.Exists(packageRoot.Value))
@@ -493,7 +575,9 @@ internal sealed class AssetEditorSession
                 isNewPackage: false,
                 manifest,
                 Array.Empty<string>(),
-                policy);
+                policy,
+                pool,
+                requiredDeckSize);
 
             session.Refresh();
             session.CaptureBaselines();
@@ -510,7 +594,9 @@ internal sealed class AssetEditorSession
     private static AssetEditorSession CreateNew(
         EditorSessionRequest request,
         IEditableRootPolicy policy,
-        IReadOnlyCollection<EditablePackageInfo> knownPackages)
+        IReadOnlyCollection<EditablePackageInfo> knownPackages,
+        IReadOnlyDictionary<string, CardDefinition> pool,
+        int requiredDeckSize)
     {
         var packageId = request.PackageId?.Trim() ?? string.Empty;
         if (packageId.Length == 0 || packageId.Contains('/') || packageId.Contains('\\')
@@ -574,7 +660,9 @@ internal sealed class AssetEditorSession
                 isNewPackage: true,
                 manifest,
                 request.DependsOnPackages,
-                policy);
+                policy,
+                pool,
+                requiredDeckSize);
 
             foreach (var dependency in request.DependsOnPackages)
             {
@@ -654,6 +742,120 @@ internal sealed class AssetEditorSession
 
         var assets = (sidecar?.Assets ?? Array.Empty<AssetMetadata>())
             .Where(asset => asset.Kind != AssetKind.Card || !string.Equals(asset.Id, localId, StringComparison.Ordinal))
+            .Append(metadata)
+            .ToArray();
+        WriteSidecar(sidecarAbsolute, sourceRelative, assets);
+
+        var entry = new EditorAssetEntry(metadata, sidecarRelative, sidecarAbsolute, sourceRelative, absolutePath);
+        _assets[key] = entry;
+        _tags.Remove(key);
+        UpdatePool(AssetAppId.Compose(PackageId, localId), load.Definition);
+        return new EditorCommitResult(ToInfo(entry), bumped);
+    }
+
+    /// <summary>
+    /// 卡池增量（D39 的三条变更）：新卡／改卡写回，**非法卡移除**（否则已删的卡仍能通过卡组判定）。
+    /// </summary>
+    private void UpdatePool(string appId, CardDefinition? definition)
+    {
+        if (definition is null)
+        {
+            _pool.Remove(appId);
+            return;
+        }
+
+        _pool[appId] = definition;
+    }
+
+    /// <summary>
+    /// 提交卡组（R7/D43/D54）：解析 → 用会话卡池按**恒 strict** 判定 → 合法才写 sidecar（含自动补声明）
+    /// 并派生 <c>dependsOn</c>；非法＝不写、不递增版本，返回全部违规。
+    /// </summary>
+    private EditorCommitResult CommitDeck(string absolutePath)
+    {
+        var sourceRelative = RelativeToTemporary(absolutePath);
+        var sidecarAbsolute = absolutePath + AssetSidecarJson.SidecarExtension;
+        var sidecarRelative = sourceRelative + AssetSidecarJson.SidecarExtension;
+        var sidecar = File.Exists(sidecarAbsolute) ? ReadSidecar(sidecarAbsolute) : null;
+
+        var text = File.ReadAllText(absolutePath);
+        var parsed = DeckDataJson.Parse(text);
+        if (!parsed.IsParsed)
+        {
+            throw new AssetEditorException(
+                AssetEditorErrorCode.InvalidContent, $"卡组数据体不可解析：'{sourceRelative}'：{parsed.Failure}");
+        }
+
+        var declaredDecks = sidecar?.Assets.Where(asset => asset.Kind == AssetKind.Deck).ToArray()
+                            ?? Array.Empty<AssetMetadata>();
+        var localId = parsed.Body?.Id;
+        if (string.IsNullOrWhiteSpace(localId) && declaredDecks.Length == 1)
+        {
+            localId = declaredDecks[0].Id;
+        }
+
+        if (string.IsNullOrWhiteSpace(localId))
+        {
+            throw new AssetEditorException(
+                AssetEditorErrorCode.InvalidContent,
+                $"卡组数据体缺少 id（且 sidecar 无法唯一补位）：'{sourceRelative}'。");
+        }
+
+        if (declaredDecks.Length >= 1 && !declaredDecks.Any(asset => string.Equals(asset.Id, localId, StringComparison.Ordinal)))
+        {
+            throw new AssetEditorException(
+                AssetEditorErrorCode.InvalidContent,
+                $"卡组数据体 id '{localId}' 不在 sidecar 声明集合"
+                + $"（{string.Join("、", declaredDecks.Select(asset => asset.Id))}）：'{sourceRelative}'。");
+        }
+
+        var key = new EditorAssetKey(AssetKind.Deck, localId);
+        _assets.TryGetValue(key, out var existing);
+        if (existing is not null && !string.Equals(existing.SidecarRelative, sidecarRelative, StringComparison.Ordinal))
+        {
+            throw new AssetEditorException(
+                AssetEditorErrorCode.AssetExists,
+                $"资产 deck：{localId} 已由 '{existing.SidecarRelative}' 声明（同 ID 不允许跨文件）。");
+        }
+
+        // 资产通路恒 strict（D10）：档位只服务手写卡列表通路。
+        var compiled = DeckAssetCompiler.Compile(text, localId, PackageId, _pool, _requiredDeckSize);
+        if (compiled.Failure is { } failure)
+        {
+            throw new AssetEditorException(AssetEditorErrorCode.InvalidContent, failure);
+        }
+
+        if (compiled.Violations.Count > 0)
+        {
+            // 拒绝写入：不写 sidecar、不递增版本；违规原样交回调用方分类展示。
+            return new EditorCommitResult(Asset: null, VersionBumped: false)
+            {
+                Violations = compiled.Violations,
+            };
+        }
+
+        var metadata = existing?.Metadata
+                       ?? new AssetMetadata(
+                           Guid.Empty, AssetKind.Deck, localId, EditorVersionRules.Initial,
+                           null, null, Array.Empty<AssetReference>(), Array.Empty<AssetReference>());
+        var previousVersion = metadata.Version;
+        var version = existing is not null ? AutoNext(sidecarRelative, previousVersion) : metadata.Version;
+        var bumped = version != previousVersion;
+
+        metadata = metadata with
+        {
+            Version = version,
+            Guid = DeriveGuid(AssetKind.Deck, localId, version),
+            // 卡组恒不是内含资产、也不参与卡位装载（D59/D63）：声明面把这三个字段钉成 null。
+            Anchor = null,
+            Loader = null,
+            ServiceKind = null,
+            // 依赖由 cards 派生（R4/D31）：作者不手写；约束恒 *.*.*（版本无关）。
+            DependsOn = DeckRegistrar.DeriveDependsOn(compiled.Definition),
+        };
+
+        var assets = (sidecar?.Assets ?? Array.Empty<AssetMetadata>())
+            .Where(asset => asset.Kind != AssetKind.Deck || !string.Equals(asset.Id, localId, StringComparison.Ordinal))
             .Append(metadata)
             .ToArray();
         WriteSidecar(sidecarAbsolute, sourceRelative, assets);
@@ -1250,6 +1452,12 @@ internal sealed class AssetEditorSession
 
         foreach (var (key, initial) in _initialAssets)
         {
+            if (initial.Metadata.Kind == AssetKind.Deck)
+            {
+                // D4/R11：卡组不保留历史版本——旧内容直接由新版本取代（转正时覆写正式文件即可）。
+                continue;
+            }
+
             var baseline = initial.Metadata.Version;
             var changed = !promoted.TryGetValue(key, out var next) || next != baseline;
             if (!changed)
@@ -1597,6 +1805,19 @@ internal sealed class AssetEditorSession
             {
                 declaredId = PrefabJson.Deserialize(File.ReadAllText(sourceAbsolute)).Root.Id;
             }
+            else if (kind == AssetKind.Deck && sourceAbsolute.EndsWith(".deck.json", StringComparison.OrdinalIgnoreCase))
+            {
+                var parsed = DeckDataJson.ParseFile(sourceAbsolute);
+                if (!parsed.IsParsed)
+                {
+                    // D52：create 只要求「存在且可解析」——不可解析就是拒绝，不写一份指向坏文件的声明。
+                    throw new AssetEditorException(
+                        AssetEditorErrorCode.InvalidContent,
+                        $"卡组数据体不可解析：'{sourceRelative}'：{parsed.Failure}");
+                }
+
+                declaredId = parsed.Body?.Id;
+            }
             else
             {
                 return;
@@ -1620,6 +1841,8 @@ internal sealed class AssetEditorSession
     {
         AssetKind.Card => $"cards/{localId}.card.json",
         AssetKind.Effect => $"effects/{localId}.prefab.json",
+        // R11/D53：卡组固定落 decks/ 顶层。
+        AssetKind.Deck => $"decks/{localId}.deck.json",
         _ => string.Empty,
     };
 

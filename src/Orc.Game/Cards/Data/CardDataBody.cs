@@ -16,7 +16,8 @@ public sealed class CardDataBody
     public CardDataBody(
         string id,
         string name,
-        IEnumerable<ICardDataComponentDefinition>? components = null)
+        IEnumerable<ICardDataComponentDefinition>? components = null,
+        bool deckable = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -43,6 +44,7 @@ public sealed class CardDataBody
         Id = id;
         Name = name;
         Components = list.ToArray();
+        Deckable = deckable;
     }
 
     /// <summary>卡库注册键（＝数据体 <c>id</c>）。</summary>
@@ -53,6 +55,9 @@ public sealed class CardDataBody
 
     /// <summary>组件定义集（声明序；空＝无组件）。</summary>
     public IReadOnlyList<ICardDataComponentDefinition> Components { get; }
+
+    /// <summary>可构筑标记（R9：数据体根字段；缺省 true——存量卡包零改动）。</summary>
+    public bool Deckable { get; }
 
     /// <summary>按类型取组件定义（未含＝false、不抛错）。</summary>
     public bool TryGetComponent<TDefinition>([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TDefinition? definition)

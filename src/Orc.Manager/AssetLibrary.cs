@@ -1,6 +1,8 @@
 using System.Text.Json.Nodes;
 using Orc.Core;
+using Orc.Game.Decks;
 using Orc.Packages;
+using Orc.Packages.Decks;
 using Orc.Protocol;
 
 namespace Orc.Manager;
@@ -104,6 +106,9 @@ public sealed class AssetLibrary
     private readonly List<PackageEntry> _packages = new();
     private readonly Dictionary<string, AssetLock> _locks = new(StringComparer.Ordinal);
     private readonly AssetRegistry _registry = new();
+    private readonly List<DeferredDeckAsset> _deferredDecks = new();
+    private IReadOnlyList<AssetDiagnostic> _deckDiagnostics = Array.Empty<AssetDiagnostic>();
+    private int _requiredDeckSize = DeckRules.DefaultRequiredSize;
 
     /// <summary>已注册的包（只增不减）。</summary>
     public IReadOnlyList<PackageEntry> Packages
@@ -118,13 +123,46 @@ public sealed class AssetLibrary
     }
 
     /// <summary>
+    /// 注册面快照（只读）：卡组 DTO 等的**唯一读面**——装配面不自建索引，一律按
+    /// <c>(kind, packageId)</c>／应用层 ID 从这里查。
+    /// </summary>
+    public IReadOnlyList<AssetRegistration> RegisteredAssets
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _registry.All;
+            }
+        }
+    }
+
+    /// <summary>本次卡组判定的诊断（R5/D42；读面按包投影，见 <c>pool.list</c>）。</summary>
+    public IReadOnlyList<AssetDiagnostic> DeckDiagnostics
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _deckDiagnostics;
+            }
+        }
+    }
+
+    /// <summary>
     /// 注册卡包目录（幂等：同目录重复注册＝跳过）。包级结构性非法＝该包被拒绝并给出原因，不抛。
     /// </summary>
-    public AssetRegistrationResult Register(IReadOnlyList<string> directories)
+    /// <param name="directories">卡包目录。</param>
+    /// <param name="requiredDeckSize">
+    /// 卡组要求的张数（D11：由持有服务端选项的调用方传入；缺省＝<see cref="DeckRules.DefaultRequiredSize"/>）。
+    /// </param>
+    public AssetRegistrationResult Register(
+        IReadOnlyList<string> directories, int requiredDeckSize = DeckRules.DefaultRequiredSize)
     {
         ArgumentNullException.ThrowIfNull(directories);
 
         var rejected = new List<string>();
+        _requiredDeckSize = requiredDeckSize;
 
         lock (_sync)
         {
@@ -151,7 +189,8 @@ public sealed class AssetLibrary
                     }
 
                     var manifest = PackageManifest.Parse(File.ReadAllText(manifestPath), out _);
-                    PackageRegistrar.Register(directory, manifest, _registry);
+                    var registration = PackageRegistrar.Register(directory, manifest, _registry);
+                    _deferredDecks.AddRange(registration.Decks);
 
                     var assets = 0;
                     foreach (var domain in new[] { AssetDomain.Formal, AssetDomain.Test })
@@ -178,9 +217,19 @@ public sealed class AssetLibrary
                 }
             }
 
+            // D9：包集合每次变化都**整体重算**第二段——允许合法↔非法翻转，
+            // 不能指望「只增不减 ⇒ 只会从非法变合法」这个巧合。
+            RecomputeDecks();
+
             return new AssetRegistrationResult(_packages.ToArray(), rejected);
         }
     }
+
+    /// <summary>整体重算卡组阶段（判定集合＝当前注册的全部包；卡池＝已通过卡牌判定的卡）。</summary>
+    private void RecomputeDecks()
+        => _deckDiagnostics = DeckRegistrar
+            .Register(_registry, _deferredDecks, AssetDomain.Formal, _requiredDeckSize)
+            .Diagnostics;
 
     /// <summary>
     /// 依赖分析（R2）：哪些包/资产可用、哪些不可用及原因（结构性失败 ⇒ 全部不可用）。

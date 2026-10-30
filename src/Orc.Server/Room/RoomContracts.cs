@@ -73,7 +73,8 @@ public sealed record SeatApplication(
     string? DisplayName,
     IReadOnlyList<string> Deck,
     DeckConfigPayload? DeckConfig,
-    IReadOnlyList<PackageRef> Packages);
+    IReadOnlyList<PackageRef> Packages,
+    string? DeckId = null);
 
 /// <summary>座位申请结局。</summary>
 /// <param name="Ok">是否受理。</param>
@@ -95,4 +96,5 @@ public sealed record RoomSeatStart(
     IReadOnlyList<string> Deck,
     RoomDeckConfig? DeckConfig,
     string ControllerKind,
-    IReadOnlyList<PackageRef> Packages);
+    IReadOnlyList<PackageRef> Packages,
+    string? DeckId = null);

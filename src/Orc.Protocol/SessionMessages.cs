@@ -87,8 +87,17 @@ public sealed record SessionAttachParams
     /// <summary>展示名（可空）。</summary>
     public string? DisplayName { get; init; }
 
-    /// <summary>卡组（卡 id 序列；绑 seat 的 controller/兼任连接必填）。</summary>
+    /// <summary>
+    /// 手写卡组（卡 id 序列）。与 <see cref="DeckId"/> **互斥**；两源都空＝座位没有卡组。
+    /// <para>语义收紧：**空数组＝没给**（<c>deck: []</c> 与不传等效）。</para>
+    /// </summary>
     public IReadOnlyList<string>? Deck { get; init; }
+
+    /// <summary>
+    /// 卡组资产标识（应用层 ID／包内裸局部 ID／展示名）。给了它就用该卡组，不再看 <see cref="Deck"/>。
+    /// <para>解析失败（不存在／未入 lock／重名歧义）＝<c>DeckInvalid</c>，歧义时说明文本含候选。</para>
+    /// </summary>
+    public string? DeckId { get; init; }
 
     /// <summary>构筑配置（可空）。</summary>
     public DeckConfigPayload? DeckConfig { get; init; }

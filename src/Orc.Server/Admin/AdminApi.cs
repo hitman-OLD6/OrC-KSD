@@ -6,6 +6,7 @@ using Orc.Mcp.Match;
 using Orc.Mcp.Pool;
 using Orc.Core;
 using Orc.Packages;
+using Orc.Packages.Decks;
 using Orc.Packages.Loading;
 using Orc.Protocol;
 using Orc.Server.Execution;
@@ -312,7 +313,51 @@ public sealed class AdminApi
                 }
 
                 var deck = declared.Deck;
-                if (deck.Count == 0 && room.IsAiSeat(seat))
+                PlayerDeckConfiguration? config = null;
+
+                if (!string.IsNullOrWhiteSpace(declared.DeckId))
+                {
+                    // 卡组资产通路（R6/D27/D28）：显式标识优先于自动构筑——AI 座位也不例外。
+                    var lookup = assembly.Decks.Resolve(declared.DeckId);
+                    if (lookup.Status == DeckLookupStatus.Ambiguous)
+                    {
+                        room.MarkLobby();
+                        return AdminOutcome.Fail(
+                            ResultCodes.DeckInvalid,
+                            $"座位 {seat} 的卡组标识 '{declared.DeckId}' 命中多份卡组"
+                            + $"（{string.Join("、", lookup.Candidates)}）——请给全名。");
+                    }
+
+                    if (lookup.Status != DeckLookupStatus.Resolved)
+                    {
+                        room.MarkLobby();
+                        return AdminOutcome.Fail(
+                            ResultCodes.DeckInvalid,
+                            $"座位 {seat} 的卡组标识 '{declared.DeckId}' 不在本局可用集合"
+                            + "（不存在／未入 lock／内容不合法）。");
+                    }
+
+                    var definition = lookup.Deck!;
+                    var seatConfig = declared.DeckConfig is { } requested
+                        ? new PlayerDeckConfiguration(requested.MainFaction, requested.AllyFaction)
+                        : null;
+
+                    // 座位显式配置只与卡组内嵌的**最终值**比对（D47）。
+                    if (seatConfig is not null
+                        && (!string.Equals(seatConfig.MainFaction, definition.DeckConfig.MainFaction, StringComparison.Ordinal)
+                            || !string.Equals(seatConfig.AllyFaction, definition.DeckConfig.AllyFaction, StringComparison.Ordinal)))
+                    {
+                        room.MarkLobby();
+                        return AdminOutcome.Fail(
+                            ResultCodes.DeckInvalid,
+                            $"座位 {seat} 的构筑配置与卡组 '{lookup.AppId}' 不一致"
+                            + $"（卡组：主国 {definition.DeckConfig.MainFaction}／盟国 {definition.DeckConfig.AllyFaction}）。");
+                    }
+
+                    config = seatConfig ?? definition.DeckConfig;
+                    deck = definition.ToCardIds();
+                }
+                else if (deck.Count == 0 && room.IsAiSeat(seat))
                 {
                     // AI 卡组在**装配卡池之后**由该池生成（不再依赖进程级预装池）。
                     // 目标张数：strict/lenient 用配置值；none 档没有张数口径，退回引擎默认（否则生成器只返回空)。
@@ -331,7 +376,7 @@ public sealed class AdminApi
                     }
                 }
 
-                var config = declared.DeckConfig is { } deckConfig
+                config ??= declared.DeckConfig is { } deckConfig
                     ? new PlayerDeckConfiguration(deckConfig.MainFaction, deckConfig.AllyFaction)
                     : null;
 
@@ -342,6 +387,8 @@ public sealed class AdminApi
                     {
                         violations.Add(factionViolation);
                     }
+
+                    violations.AddRange(DeckRules.ValidateFactionComposition(deck, pool, config, tier));
 
                     if (violations.Count > 0)
                     {

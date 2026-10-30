@@ -1,3 +1,5 @@
+using Orc.Packages;
+
 namespace Orc.Packages.Loading;
 
 /// <summary>
@@ -27,7 +29,16 @@ public sealed record PackageInspection(
     bool Ok,
     string? ErrorCode = null,
     string? Error = null,
-    bool WillRemove = false);
+    bool WillRemove = false)
+{
+    /// <summary>
+    /// 该包的**卡组诊断**（R5/D42）：落在这里而不是 <see cref="AssemblyInspection"/> 的顶层段——
+    /// 后者表达「这次开局会怎样」，而「卡组合不合格」属注册面事实、按包归属。
+    /// 合法的包＝空。
+    /// </summary>
+    public IReadOnlyList<AssetDiagnostic> DeckDiagnostics { get; init; }
+        = Array.Empty<AssetDiagnostic>();
+}
 
 /// <summary>
 /// 装载计划摘要（只给数字，不给完整卡清单）。

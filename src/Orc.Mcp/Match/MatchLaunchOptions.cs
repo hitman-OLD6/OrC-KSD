@@ -1,17 +1,32 @@
 namespace Orc.Mcp.Match;
 
 /// <summary>
-/// 座位装配输入：一个座位对应一份**显式卡组**（由控制器给出；不做自动构筑）。
+/// 座位装配输入：一个座位给**手写卡列表**或**卡组资产标识**二者之一（R6/D25）。
+/// <para>
+/// 两个字段互斥且不可都空：<see cref="Deck"/> 非空＝手写通路；<see cref="DeckId"/> 非空＝卡组资产通路。
+/// 「空数组＝没给」（D26）：<c>Deck: []</c> 与不传等效，因此 <c>Deck: []</c> ＋ <c>DeckId</c> 是合法组合。
+/// </para>
 /// </summary>
 /// <param name="Seat">座位号（0＝玩家A、1＝玩家B）。</param>
-/// <param name="Deck">卡组名单（卡 id 序列；可含包内原 id 或已前缀化 id）。</param>
-/// <param name="Name">展示名（缺省＝按座位号生成）。</param>
-/// <param name="DeckConfiguration">构筑配置（主国/盟国；提供即由 <c>Match</c> 创建期校验并注入）。</param>
+/// <param name="Deck">手写卡组名单（可含包内原 id 或已前缀化 id；空＝没给）。</param>
+/// <param name="Name">座位展示名（与卡组展示名**互不相干**：解析成功也不回写这里）。</param>
+/// <param name="DeckConfiguration">
+/// 构筑配置：手写通路＝座位自己的配置；卡组资产通路＝缺省取卡组内嵌的**最终值**，给了则须与之一致（D47）。
+/// </param>
+/// <param name="DeckId">卡组标识（应用层 ID／裸局部 ID／展示名；与 <paramref name="Deck"/> 互斥）。</param>
 public sealed record MatchSeatConfig(
     int Seat,
-    IReadOnlyList<string> Deck,
+    IReadOnlyList<string>? Deck = null,
     string? Name = null,
-    Orc.Game.PlayerDeckConfiguration? DeckConfiguration = null);
+    Orc.Game.PlayerDeckConfiguration? DeckConfiguration = null,
+    string? DeckId = null)
+{
+    /// <summary>归一后的手写卡列表（<c>Count == 0</c> 视为没给——D26 的唯一归一点）。</summary>
+    public IReadOnlyList<string>? NormalizedDeck => Deck is { Count: > 0 } deck ? deck : null;
+
+    /// <summary>归一后的卡组标识（空白视为没给）。</summary>
+    public string? NormalizedDeckId => string.IsNullOrWhiteSpace(DeckId) ? null : DeckId.Trim();
+}
 
 /// <summary>
 /// 真实对局创建输入（进程内；非沙盒）：卡包目录 ＋ 两个座位装配输入。

@@ -24,6 +24,10 @@
     S1 只建工程与冒烟用例，保证解决方案可构建、测试可发现。
   -->
   <ItemGroup>
+    <Compile Include="..\Shared\DeckPackFixture.cs" Link="Shared\DeckPackFixture.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Orc.Server\Orc.Server.csproj" />
     <ProjectReference Include="..\..\src\Orc.Client\Orc.Client.csproj" />
     <ProjectReference Include="..\..\src\Orc.Protocol\Orc.Protocol.csproj" />

@@ -462,6 +462,8 @@ public sealed partial class ServerHost : IAsyncDisposable
                 Seat = request.Params?["seat"]?.GetValue<int>(),
                 DisplayName = request.Params?["displayName"]?.GetValue<string>(),
                 Deck = request.Params?["deck"] is JsonArray deck ? ReadStringList(deck) : null,
+                // R6/D25：卡组标识（与 deck 互斥；空数组＝没给）。
+                DeckId = request.Params?["deckId"]?.GetValue<string>(),
                 DeckConfig = request.Params?["deckConfig"]?.Deserialize<DeckConfigPayload>(ProtocolJson.Options),
                 Packages = ReadPackages(request.Params?["packages"]),
                 Token = request.Params?["token"]?.GetValue<string>(),
@@ -547,9 +549,17 @@ public sealed partial class ServerHost : IAsyncDisposable
             return AttachFailed(session, $"座位号 {seat} 越界（0/1）。");
         }
 
-        if (wantsController && (request.Deck is null || request.Deck.Count == 0))
+        // 卡组两源互斥（R6/D26）：空数组＝没给，所以 `deck: []` ＋ `deckId` 是合法组合。
+        var attachedDeck = request.Deck is { Count: > 0 } ? request.Deck : null;
+        var attachedDeckId = string.IsNullOrWhiteSpace(request.DeckId) ? null : request.DeckId.Trim();
+        if (wantsController && attachedDeck is not null && attachedDeckId is not null)
         {
-            return AttachFailed(session, "controller 申请必须同时提交卡组（deck）：批准时必须能看到要打什么牌。");
+            return AttachFailed(session, "controller 申请不能同时给手写卡组（deck）与卡组标识（deckId）——二者互斥。");
+        }
+
+        if (wantsController && attachedDeck is null && attachedDeckId is null)
+        {
+            return AttachFailed(session, "controller 申请必须提交卡组：给卡组标识（deckId）或手写卡组（deck）之一。");
         }
 
         if (wantsController && request.Packages is null)
@@ -557,7 +567,7 @@ public sealed partial class ServerHost : IAsyncDisposable
             return AttachFailed(session, "controller 申请必须同时提交卡包声明（packages）：它与卡组共同决定这一局能不能开。");
         }
 
-        var deck = request.Deck ?? Array.Empty<string>();
+        var deck = attachedDeck ?? Array.Empty<string>();
         var packages = request.Packages ?? Array.Empty<PackageRef>();
 
         // 只有"要坐 controller 位"的申请才占座位；纯 viewer 不占（一个 seat 可挂 0..N 个 viewer）。
@@ -571,7 +581,8 @@ public sealed partial class ServerHost : IAsyncDisposable
 
             var applied = Room.Apply(
                 controllerSeat,
-                new SeatApplication(session.Id, request.DisplayName, deck, request.DeckConfig, packages));
+                new SeatApplication(
+                    session.Id, request.DisplayName, deck, request.DeckConfig, packages, attachedDeckId));
             if (!applied.Ok)
             {
                 return AttachFailed(session, applied.Message ?? "座位申请被拒绝。", applied.Code);
@@ -585,7 +596,8 @@ public sealed partial class ServerHost : IAsyncDisposable
         session.Seat = request.Seat;
         session.SeatToken = null;
         session.Binding = null;
-        session.Request = new PendingAttach(roles, request.Seat, request.DisplayName, deck, request.DeckConfig, packages);
+        session.Request = new PendingAttach(
+            roles, request.Seat, request.DisplayName, deck, request.DeckConfig, packages, attachedDeckId);
         session.State = SessionState.Pending;
 
         // 通知管理器有新的待许可连接（事件，不是请求-应答）。
@@ -701,9 +713,10 @@ public sealed partial class ServerHost : IAsyncDisposable
             return AdminOutcome.Fail(ResultCodes.InvalidArguments, "controller 批准必须指定座位（seat=0/1）。");
         }
 
-        if (wantsController && request.Deck.Count == 0)
+        if (wantsController && request.Deck.Count == 0 && string.IsNullOrWhiteSpace(request.DeckId))
         {
-            return AdminOutcome.Fail(ResultCodes.InvalidArguments, "该连接未提交卡组（deck）：不能批准为 controller。");
+            return AdminOutcome.Fail(
+                ResultCodes.InvalidArguments, "该连接未提交卡组（deck／deckId）：不能批准为 controller。");
         }
 
         if (wantsController && targetSeat is { } controllerSeat)
@@ -1930,7 +1943,8 @@ public sealed partial class ServerHost : IAsyncDisposable
         string? DisplayName,
         IReadOnlyList<string> Deck,
         DeckConfigPayload? DeckConfig,
-        IReadOnlyList<PackageRef> Packages);
+        IReadOnlyList<PackageRef> Packages,
+        string? DeckId = null);
 
     /// <summary>
     /// 单个客户端连接（**输入与输出的唯一对象**，但角色态决定它"能做什么、能收什么"）。

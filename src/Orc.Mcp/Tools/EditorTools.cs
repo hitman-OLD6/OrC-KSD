@@ -88,7 +88,7 @@ internal static class EditorTools
             {
               "type": "object",
               "properties": {
-                "kind": { "type": "string", "enum": ["card", "effect", "trigger", "handler"] },
+                "kind": { "type": "string", "enum": ["card", "effect", "trigger", "handler", "deck"] },
                 "packageId": { "type": "string" },
                 "idPrefix": { "type": "string" },
                 "tags": { "type": "array", "items": { "type": "string" }, "description": "全部命中（AND）" },
@@ -110,7 +110,7 @@ internal static class EditorTools
             {
               "type": "object",
               "properties": {
-                "kind": { "type": "string", "enum": ["card", "effect", "trigger", "handler"] },
+                "kind": { "type": "string", "enum": ["card", "effect", "trigger", "handler", "deck"] },
                 "id": { "type": "string" }
               },
               "required": ["kind", "id"],
@@ -143,12 +143,14 @@ internal static class EditorTools
         service.AddTool(
             "editor.asset_create",
             "editor",
-            "新建资产（版本从 1.0.0 起）：卡牌源文件缺失时后端补可解析骨架。对应能力 `asset.create`。",
+            "新建资产（版本从 1.0.0 起）：卡牌源文件缺失时后端补可解析骨架；"
+            + "卡组（kind=deck）**必须先写源文件** `decks/<id>.deck.json`（含 id／name／deckConfig／cards），"
+            + "后端不补骨架、也不接受 anchor／loader。对应能力 `asset.create`。",
             """
             {
               "type": "object",
               "properties": {
-                "kind": { "type": "string", "enum": ["card", "effect", "trigger", "handler"] },
+                "kind": { "type": "string", "enum": ["card", "effect", "trigger", "handler", "deck"] },
                 "id": { "type": "string", "description": "包内局部 ID（手写，后端校验）" },
                 "sourcePath": { "type": "string", "description": "源文件相对路径（缺省＝cards/<id>.card.json 或 effects/<id>.prefab.json）" },
                 "anchor": { "type": "string", "description": "内含资产锚点（trigger/handler 必填）" },
@@ -169,7 +171,7 @@ internal static class EditorTools
             {
               "type": "object",
               "properties": {
-                "kind": { "type": "string", "enum": ["card", "effect", "trigger", "handler"] },
+                "kind": { "type": "string", "enum": ["card", "effect", "trigger", "handler", "deck"] },
                 "id": { "type": "string" }
               },
               "required": ["kind", "id"],
@@ -188,7 +190,7 @@ internal static class EditorTools
             {
               "type": "object",
               "properties": {
-                "kind": { "type": "string", "enum": ["card", "effect", "trigger", "handler"] },
+                "kind": { "type": "string", "enum": ["card", "effect", "trigger", "handler", "deck"] },
                 "id": { "type": "string" },
                 "version": { "type": "string", "description": "手写版本（缺省＝自动递增）" }
               },
@@ -207,14 +209,14 @@ internal static class EditorTools
             {
               "type": "object",
               "properties": {
-                "kind": { "type": "string", "enum": ["card", "effect", "trigger", "handler"] },
+                "kind": { "type": "string", "enum": ["card", "effect", "trigger", "handler", "deck"] },
                 "id": { "type": "string" },
                 "dependencies": {
                   "type": "array",
                   "items": {
                     "type": "object",
                     "properties": {
-                      "kind": { "type": "string", "enum": ["card", "effect", "trigger", "handler"] },
+                      "kind": { "type": "string", "enum": ["card", "effect", "trigger", "handler", "deck"] },
                       "appId": { "type": "string", "description": "应用层 ID 或裸局部 ID" },
                       "versionConstraint": { "type": "string", "description": "如 1.2.3／1.*.*／1.^.*" }
                     },
@@ -353,6 +355,16 @@ internal static class EditorTools
         });
     }
 
+    private static JsonArray DeckViolationsJson(IReadOnlyList<Orc.Game.Decks.DeckViolation> violations)
+        => new(violations
+            .Select(violation => (JsonNode)new JsonObject
+            {
+                ["kind"] = violation.Kind,
+                ["cardId"] = violation.CardId,
+                ["message"] = violation.Message,
+            })
+            .ToArray());
+
     private static McpToolResult AssetGet(McpService service, McpToolCall call)
     {
         var asset = service.Editor.GetAsset(ReadKind(call.Arguments), ToolArgs.RequireString(call.Arguments, "id"));
@@ -368,13 +380,28 @@ internal static class EditorTools
             ? service.Editor.Commit(path)
             : service.Editor.Commit(path, content);
 
+        if (result.Violations is { } violations)
+        {
+            // 非法卡组：写入被拒、文件保持原样、版本不递增——违规逐条交回（客户端按 Kind 分类）。
+            return McpToolResult.Failure(
+                McpCodes.DeckInvalid,
+                $"卡组不合法，提交被拒（{violations.Count} 项）："
+                + string.Join("；", violations.Select(violation => violation.Message)),
+                new JsonObject
+                {
+                    ["path"] = path,
+                    ["violations"] = DeckViolationsJson(violations),
+                });
+        }
+
+        var asset = result.Asset!;
         return McpToolResult.Success(
             result.VersionBumped
-                ? $"已提交 {path}（版本自动递增至 {result.Asset.Version}）。"
-                : $"已提交 {path}（版本保持 {result.Asset.Version}）。",
+                ? $"已提交 {path}（版本自动递增至 {asset.Version}）。"
+                : $"已提交 {path}（版本保持 {asset.Version}）。",
             details: new JsonObject
             {
-                ["asset"] = AssetJson(result.Asset),
+                ["asset"] = AssetJson(asset),
                 ["versionBumped"] = result.VersionBumped,
                 ["channel"] = content is null ? "path" : "content",
             });
@@ -474,7 +501,7 @@ internal static class EditorTools
         var token = ToolArgs.RequireString(args, "kind");
         return AssetKindTokens.TryParse(token, out var kind)
             ? kind
-            : throw new ToolArgumentException("kind", $"kind '{token}' 非法（期望 card/effect/trigger/handler）。");
+            : throw new ToolArgumentException("kind", $"kind '{token}' 非法（期望 card/effect/trigger/handler/deck）。");
     }
 
     /// <summary>结构化过滤入参 → <see cref="EditorAssetQuery"/>（工具面无 lambda，跨进程不可传谓词）。</summary>
@@ -484,7 +511,7 @@ internal static class EditorTools
             Kind = ToolArgs.OptionalString(args, "kind") is { Length: > 0 } kindToken
                 ? (AssetKindTokens.TryParse(kindToken, out var kind)
                     ? kind
-                    : throw new ToolArgumentException("kind", $"kind '{kindToken}' 非法（期望 card/effect/trigger/handler）。"))
+                    : throw new ToolArgumentException("kind", $"kind '{kindToken}' 非法（期望 card/effect/trigger/handler/deck）。"))
                 : null,
             PackageId = ToolArgs.OptionalString(args, "packageId"),
             IdPrefix = ToolArgs.OptionalString(args, "idPrefix"),
@@ -560,6 +587,8 @@ internal static class EditorTools
             ["packageGuid"] = session.PackageGuid.ToString("D"),
             ["dependsOnPackages"] = SandboxTools.ToJsonArray(session.DependsOnPackages),
             ["assetCount"] = session.AssetCount,
+            // D15：回显卡组判定口径，作者才知道自己按多少张在写。
+            ["requiredDeckSize"] = session.RequiredDeckSize,
             ["warnings"] = SandboxTools.ToJsonArray(session.Warnings),
         };
 

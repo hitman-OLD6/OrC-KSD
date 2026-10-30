@@ -45,7 +45,8 @@ public sealed record SeatConfig(
     string? DisplayName = null,
     IReadOnlyList<PackageRef>? Packages = null,
     IReadOnlyList<string>? Deck = null,
-    DeckConfigPayload? DeckConfig = null);
+    DeckConfigPayload? DeckConfig = null,
+    string? DeckId = null);
 
 /// <summary>
 /// 服务端启动选项（spawn 参数；由管理器传来，不在 CLI 里隐式传递能力开关）。

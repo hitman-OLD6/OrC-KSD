@@ -141,6 +141,47 @@ public static class PoolProjection
             node["error"] = package.Error;
         }
 
+        // 卡组诊断（R5/D42）：**显式进白名单**——这是「作者的包坏了」的告知，不是敏感信息；
+        // 不加白名单的话，play 受众永远看不到自己卡组为什么不可用。
+        if (package.DeckDiagnostics.Count > 0)
+        {
+            node["deckDiagnostics"] = new JsonArray(
+                package.DeckDiagnostics.Select(diagnostic => (JsonNode)RenderDeckDiagnostic(diagnostic, whitelist)).ToArray());
+        }
+
+        return node;
+    }
+
+    /// <summary>
+    /// 卡组诊断行：<c>code/appId/message/violations</c>（违规按 <c>kind</c> 分类、按 <c>cardId</c> 点名）。
+    /// 完整的 file 段只在非白名单受众出现。
+    /// </summary>
+    private static JsonObject RenderDeckDiagnostic(AssetDiagnostic diagnostic, bool whitelist)
+    {
+        var node = new JsonObject
+        {
+            ["code"] = diagnostic.Code.ToString(),
+            ["appId"] = diagnostic.AppId,
+            ["message"] = diagnostic.Message,
+        };
+
+        if (diagnostic.Violations is { } violations)
+        {
+            node["violations"] = new JsonArray(violations
+                .Select(violation => (JsonNode)new JsonObject
+                {
+                    ["kind"] = violation.Kind,
+                    ["cardId"] = violation.CardId,
+                    ["message"] = violation.Message,
+                })
+                .ToArray());
+        }
+
+        if (!whitelist)
+        {
+            node["file"] = diagnostic.File;
+        }
+
         return node;
     }
 

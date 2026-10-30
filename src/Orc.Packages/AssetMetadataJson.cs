@@ -303,7 +303,7 @@ public static class AssetSidecarJson
         var kindText = RequireString(item, "kind");
         if (!AssetKindTokens.TryParse(kindText, out var kind))
         {
-            throw new FormatException($"资产种类 '{kindText}' 非法（期望 card/effect/trigger/handler/service）。");
+            throw new FormatException($"资产种类 '{kindText}' 非法（期望 card/effect/trigger/handler/service/deck）。");
         }
 
         var id = RequireString(item, "id");

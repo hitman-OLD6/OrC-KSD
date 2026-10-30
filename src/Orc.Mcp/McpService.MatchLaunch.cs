@@ -7,6 +7,7 @@ using Orc.Game.Collections;
 using Orc.Mcp.Contracts;
 using Orc.Mcp.Match;
 using Orc.Packages;
+using Orc.Packages.Decks;
 using Orc.Packages.Loading;
 using Orc.Plugins.BuiltIn;
 
@@ -46,11 +47,11 @@ public sealed partial class McpService
             return ActionOutcome.Failed(McpCodes.InvalidArguments, "座位配置须恰为 0 与 1（SeatA＝0、SeatB＝1）。");
         }
 
-        var deckError = ValidateDeck(options.SeatA, options.RequiredDeckSize)
-            ?? ValidateDeck(options.SeatB, options.RequiredDeckSize);
-        if (deckError is not null)
+        // ① 座位形状（互斥／都空）——放在最前：调用方的错误不该走到昂贵的包注册之后（D30）。
+        var shapeError = ValidateSeatShape(options.SeatA) ?? ValidateSeatShape(options.SeatB);
+        if (shapeError is not null)
         {
-            return ActionOutcome.Failed(McpCodes.InvalidArguments, deckError);
+            return ActionOutcome.Failed(McpCodes.InvalidArguments, shapeError);
         }
 
         // 进程级资产（词条/组件注册面）由 **boot 段**注册（刻意变化第 10 条：不在每局重复调用，
@@ -77,16 +78,28 @@ public sealed partial class McpService
             }
         }
 
-        string[] deckA;
-        string[] deckB;
-        try
+        // ② 解析座位给的卡组（手写列表 / 卡组标识），得到本局实际使用的卡 id 与构筑配置。
+        var seatA = ResolveSeat(options.SeatA, assembly);
+        var seatB = seatA.Failure is null ? ResolveSeat(options.SeatB, assembly) : default;
+        if (seatA.Failure is { } seatAFailure)
         {
-            deckA = options.SeatA.Deck.Select(id => ResolveDeckCardId(assembly, id)).ToArray();
-            deckB = options.SeatB.Deck.Select(id => ResolveDeckCardId(assembly, id)).ToArray();
+            return ActionOutcome.Failed(seatAFailure.Code, seatAFailure.Message);
         }
-        catch (InvalidOperationException ex)
+
+        if (seatB.Failure is { } seatBFailure)
         {
-            return ActionOutcome.Failed(McpCodes.InvalidArguments, $"卡组解析失败：{ex.Message}");
+            return ActionOutcome.Failed(seatBFailure.Code, seatBFailure.Message);
+        }
+
+        var deckA = seatA.Deck;
+        var deckB = seatB.Deck;
+
+        // ③ 张数／空白（形状级，与档位无关）
+        var deckError = ValidateDeck(options.SeatA, deckA, options.RequiredDeckSize)
+            ?? ValidateDeck(options.SeatB, deckB, options.RequiredDeckSize);
+        if (deckError is not null)
+        {
+            return ActionOutcome.Failed(McpCodes.InvalidArguments, deckError);
         }
 
         // S7：卡组规则（唯一实现）——尺寸、卡池存在性、同名上限（按稀有度）、主国/盟国配对。
@@ -94,13 +107,18 @@ public sealed partial class McpService
         {
             var pool = assembly.Definitions.ToDictionary(entry => entry.Id, entry => entry.Definition, StringComparer.Ordinal);
             var violations = new List<Orc.Game.Decks.DeckViolation>();
-            foreach (var (seat, deck) in new[] { (options.SeatA, deckA), (options.SeatB, deckB) })
+            foreach (var (deck, configuration) in new[] { (deckA, seatA.Configuration), (deckB, seatB.Configuration) })
             {
+                // 手写卡列表通路：**继续吃档位**（R10 末条）。卡组资产通路不经过这里——它在注册期
+                // 已按恒 strict 判定完毕，两套量尺互不影响（D10）。
                 violations.AddRange(Orc.Game.Decks.DeckRules.Validate(deck, pool, options.RequiredDeckSize, options.DeckRuleTier));
-                if (Orc.Game.Decks.DeckRules.ValidateFaction(seat.DeckConfiguration, options.DeckRuleTier) is { } factionViolation)
+                if (Orc.Game.Decks.DeckRules.ValidateFaction(configuration, options.DeckRuleTier) is { } factionViolation)
                 {
                     violations.Add(factionViolation);
                 }
+
+                violations.AddRange(Orc.Game.Decks.DeckRules.ValidateFactionComposition(
+                    deck, pool, configuration, options.DeckRuleTier));
             }
 
             if (violations.Count > 0)
@@ -147,8 +165,8 @@ public sealed partial class McpService
                 effectRegistry: effectRegistry,
                 packageActivator: packageActivator,
                 cardLoader: assembly,
-                deckConfigForPlayerA: options.SeatA.DeckConfiguration,
-                deckConfigForPlayerB: options.SeatB.DeckConfiguration);
+                deckConfigForPlayerA: seatA.Configuration,
+                deckConfigForPlayerB: seatB.Configuration);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
@@ -253,26 +271,112 @@ public sealed partial class McpService
         };
     }
 
-    private static string? ValidateDeck(MatchSeatConfig seat, int requiredSize)
+    /// <summary>
+    /// 座位形状校验（D26/D29）：两源都非空＝互斥；归一后都空＝必须提供。错误码只复用一个 <c>InvalidArguments</c>。
+    /// </summary>
+    private static string? ValidateSeatShape(MatchSeatConfig seat)
     {
-        if (seat.Deck is null)
+        var deck = seat.NormalizedDeck;
+        var deckId = seat.NormalizedDeckId;
+
+        if (deck is not null && deckId is not null)
         {
-            return $"座位 {seat.Seat} 未提供卡组（卡组必须显式指定）。";
+            return $"座位 {seat.Seat} 同时给了卡组标识（DeckId）与手写卡列表——两者互斥，只能给一个。";
         }
 
-        if (seat.Deck.Count == 0)
+        return deck is null && deckId is null
+            ? $"座位 {seat.Seat} 未提供卡组（给卡组标识 DeckId 或手写卡列表 Deck 之一）。"
+            : null;
+    }
+
+    /// <summary>座位解析结果：本局实际使用的卡 id ＋ 构筑配置（或失败码）。</summary>
+    private readonly record struct SeatResolution(
+        string[] Deck,
+        Orc.Game.PlayerDeckConfiguration? Configuration,
+        (string Code, string Message)? Failure);
+
+    /// <summary>
+    /// 解析一个座位的卡组（D30 第 ③ 步）：手写通路逐条经中间层解析；卡组资产通路查**可用集合**索引，
+    /// 再按卡组展开并逐条经同一中间层解析（D35：卡组合法 ≠ 本局可用，lock 可能被裁剪）。
+    /// </summary>
+    private static SeatResolution ResolveSeat(MatchSeatConfig seat, MatchCardAssembly assembly)
+    {
+        if (seat.NormalizedDeck is { } handWritten)
         {
-            return $"座位 {seat.Seat} 的卡组为空（卡组必须显式指定）。";
+            try
+            {
+                return new SeatResolution(
+                    handWritten.Select(id => ResolveDeckCardId(assembly, id)).ToArray(),
+                    seat.DeckConfiguration,
+                    Failure: null);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Failed(McpCodes.InvalidArguments, $"座位 {seat.Seat} 的卡组解析失败：{ex.Message}");
+            }
         }
 
-        if (seat.Deck.Any(string.IsNullOrWhiteSpace))
+        var lookup = assembly.Decks.Resolve(seat.NormalizedDeckId);
+        switch (lookup.Status)
+        {
+            case DeckLookupStatus.Resolved:
+                break;
+            case DeckLookupStatus.Ambiguous:
+                return Failed(
+                    McpCodes.DeckInvalid,
+                    $"座位 {seat.Seat} 的卡组标识 '{seat.NormalizedDeckId}' 命中多份卡组"
+                    + $"（{string.Join("、", lookup.Candidates)}）——请给全名（应用层 ID 或包内唯一写法）。");
+            default:
+                return Failed(
+                    McpCodes.DeckInvalid,
+                    $"座位 {seat.Seat} 的卡组标识 '{seat.NormalizedDeckId}' 不在本局可用集合（不存在／未入 lock／内容不合法）。");
+        }
+
+        var definition = lookup.Deck!;
+
+        // 座位显式配置只与卡组内嵌的**最终值**比对（D47）：文件省略 allyFaction 时推导结果也算一致。
+        if (seat.DeckConfiguration is { } requested)
+        {
+            var finalConfig = definition.DeckConfig;
+            if (!string.Equals(requested.MainFaction, finalConfig.MainFaction, StringComparison.Ordinal)
+                || !string.Equals(requested.AllyFaction, finalConfig.AllyFaction, StringComparison.Ordinal))
+            {
+                return Failed(
+                    McpCodes.DeckInvalid,
+                    $"座位 {seat.Seat} 的构筑配置与卡组 '{lookup.AppId}' 不一致"
+                    + $"（卡组：主国 {finalConfig.MainFaction}／盟国 {finalConfig.AllyFaction}；"
+                    + $"座位：主国 {requested.MainFaction ?? "<无>"}／盟国 {requested.AllyFaction ?? "<无>"}）。");
+            }
+        }
+
+        try
+        {
+            return new SeatResolution(
+                definition.ToCardIds().Select(id => ResolveDeckCardId(assembly, id)).ToArray(),
+                seat.DeckConfiguration ?? definition.DeckConfig,
+                Failure: null);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Failed(
+                McpCodes.DeckInvalid,
+                $"座位 {seat.Seat} 的卡组 '{lookup.AppId}' 含本局不可用的卡：{ex.Message}");
+        }
+    }
+
+    private static SeatResolution Failed(string code, string message)
+        => new(Array.Empty<string>(), Configuration: null, (code, message));
+
+    private static string? ValidateDeck(MatchSeatConfig seat, IReadOnlyList<string> deck, int requiredSize)
+    {
+        if (deck.Any(string.IsNullOrWhiteSpace))
         {
             return $"座位 {seat.Seat} 的卡组含空白卡 id。";
         }
 
-        if (requiredSize > 0 && seat.Deck.Count != requiredSize)
+        if (requiredSize > 0 && deck.Count != requiredSize)
         {
-            return $"座位 {seat.Seat} 的卡组为 {seat.Deck.Count} 张，要求 {requiredSize} 张。";
+            return $"座位 {seat.Seat} 的卡组为 {deck.Count} 张，要求 {requiredSize} 张。";
         }
 
         return null;

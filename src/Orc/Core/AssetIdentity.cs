@@ -27,9 +27,18 @@ public enum AssetKind
 
     /// <summary>引擎服务资产（插件提供；子类见 <c>serviceKind</c>）。**追加为 4**——保持既有排序/字节序不变。</summary>
     Service = 4,
+
+    /// <summary>
+    /// 卡组（R1：第六种资产种类）。**追加为 5**——同样保持既有 0..4 的排序/字节序不变。
+    /// <para>
+    /// 卡组与其他资产共用 sidecar／GUID 派生／版本／lock／两段加载，区别只在「不实例化」与
+    /// 「必须为 null 的 sidecar 字段」（见 <c>anchor</c>／<c>loader</c>／<c>serviceKind</c> 的 deck 专用校验）。
+    /// </para>
+    /// </summary>
+    Deck = 5,
 }
 
-/// <summary>资产种类 token（规范小写：<c>card</c>／<c>effect</c>／<c>trigger</c>／<c>handler</c>）读写。</summary>
+/// <summary>资产种类 token（规范小写：<c>card</c>／<c>effect</c>／<c>trigger</c>／<c>handler</c>／<c>service</c>／<c>deck</c>）读写。</summary>
 public static class AssetKindTokens
 {
     /// <summary>规范 token。</summary>
@@ -41,6 +50,7 @@ public static class AssetKindTokens
         AssetKind.Trigger => "trigger",
         AssetKind.Handler => "handler",
         AssetKind.Service => "service",
+        AssetKind.Deck => "deck",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "未定义的资产种类。"),
     };
 
@@ -54,6 +64,7 @@ public static class AssetKindTokens
             case "trigger": kind = AssetKind.Trigger; return true;
             case "handler": kind = AssetKind.Handler; return true;
             case "service": kind = AssetKind.Service; return true;
+            case "deck": kind = AssetKind.Deck; return true;
             default: kind = default; return false;
         }
     }

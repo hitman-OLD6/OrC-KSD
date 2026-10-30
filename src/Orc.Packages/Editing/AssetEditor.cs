@@ -23,6 +23,7 @@ namespace Orc.Packages.Editing;
 public sealed class AssetEditor
 {
     private readonly object _gate = new();
+    private readonly AssetRegistry _registry;
     private readonly IEditableRootPolicy _policy;
     private readonly AssetEditorOptions _options;
     private readonly AssetLoader _loader;
@@ -40,6 +41,7 @@ public sealed class AssetEditor
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(policy);
 
+        _registry = registry;
         _policy = policy;
         _options = options ?? new AssetEditorOptions();
         _loader = _options.Loader ?? new AssetLoader(registry);
@@ -181,7 +183,14 @@ public sealed class AssetEditor
                     $"已有编辑会话（包 '{_session.PackageId}'，临时包 '{_session.TemporaryRoot}'）；请先 session.end。");
             }
 
-            var session = AssetEditorSession.Open(request, _policy, ListPackages());
+            // D36：提交期判定的卡池＝注册面快照（会话内可见的全部已注册包）＋ 本会话的内存增量。
+            // 不在这里扫盘：编辑器一旦自己扫，两个集合就分叉，「编辑器说合法、注册说不合法」必现（D38）。
+            var session = AssetEditorSession.Open(
+                request,
+                _policy,
+                ListPackages(),
+                AssetEditorSession.SnapshotPool(_registry),
+                _options.RequiredDeckSize);
             _session = session;
             return session.Describe();
         }

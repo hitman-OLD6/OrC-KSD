@@ -44,12 +44,18 @@ public sealed class DeckRulesValidator
         }
 
         // 张数口径来自 ServerOptions.RequiredDeckSize（与 AI 卡组生成同源），不得写死 39。
-        var violations = new List<DeckViolation>(DeckRules.Validate(deck, _pool(), _requiredDeckSize, _tier));
+        var pool = _pool();
+        var configuration = ToConfiguration(config);
+        var violations = new List<DeckViolation>(DeckRules.Validate(deck, pool, _requiredDeckSize, _tier));
 
-        if (DeckRules.ValidateFaction(ToConfiguration(config), _tier) is { } factionViolation)
+        if (DeckRules.ValidateFaction(configuration, _tier) is { } factionViolation)
         {
             violations.Add(factionViolation);
         }
+
+        // 归属与盟国配额（R10 第 1／2 条）：与「配国」同侧——本通路按档位执行；
+        // 卡组资产通路恒 strict（D10：资产层不存在放宽档）。
+        violations.AddRange(DeckRules.ValidateFactionComposition(deck, pool, configuration, _tier));
 
         return violations.Count == 0
             ? null

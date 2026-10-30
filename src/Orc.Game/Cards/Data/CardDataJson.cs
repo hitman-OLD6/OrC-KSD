@@ -117,6 +117,18 @@ public static class CardDataJson
                 return new CardDataReadResult(null, warnings, "卡牌数据体缺少 name（必填）。");
             }
 
+            // 可构筑标记（R9/D20/D22）：缺省＝true；非布尔＝结构化失败（选严不选宽——这是防作弊边界）。
+            var deckable = true;
+            if (TryGetPropertyInsensitive(root, "deckable", out var deckableElement))
+            {
+                if (deckableElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                {
+                    return new CardDataReadResult(null, warnings, "卡牌数据体字段 deckable 须为布尔。");
+                }
+
+                deckable = deckableElement.GetBoolean();
+            }
+
             var components = new List<ICardDataComponentDefinition>();
             var seenNames = new HashSet<string>(StringComparer.Ordinal);
 
@@ -170,14 +182,14 @@ public static class CardDataJson
                 }
             }
 
-            return new CardDataReadResult(new CardDataBody(id!, name!, components), warnings, null);
+            return new CardDataReadResult(new CardDataBody(id!, name!, components, deckable), warnings, null);
         }
     }
 
     /// <summary>
     /// 写出数据体为 JSON 文本（对称 <see cref="Deserialize"/>；X1 加性·写方向）：
     /// camelCase、读宽写窄（<c>schemaVersion</c> 固定 <see cref="SchemaVersion"/>、inline 统一对象态）、
-    /// 文本契约（2 空格缩进、LF、尾随换行、固定键序：schemaVersion → id → name → components）、
+    /// 文本契约（2 空格缩进、LF、尾随换行、固定键序：schemaVersion → id → name → deckable? → components）、
     /// 组件写序＝定义集顺序（保序对称）。
     /// 失败分层：整体性非法（null 等）＝抛出；组件级不可还原（未注册／无 writer／写入异常／无反向映射等）
     /// ＝警告集记录（该组件跳过或项级降级，不阻断其余）。
@@ -188,7 +200,7 @@ public static class CardDataJson
     public static string Serialize(CardDataBody body, out IReadOnlyList<string> warnings)
     {
         ArgumentNullException.ThrowIfNull(body);
-        return SerializeCore(body.Id, body.Name, body.Components, isGuard: false, out warnings);
+        return SerializeCore(body.Id, body.Name, body.Components, isGuard: false, body.Deckable, out warnings);
     }
 
     /// <summary>
@@ -204,7 +216,12 @@ public static class CardDataJson
         ArgumentNullException.ThrowIfNull(entry.Definition);
         ArgumentException.ThrowIfNullOrWhiteSpace(entry.Id);
         return SerializeCore(
-            entry.Id, entry.Definition.Name, entry.Definition.Components, entry.Definition.IsGuard, out warnings);
+            entry.Id,
+            entry.Definition.Name,
+            entry.Definition.Components,
+            entry.Definition.IsGuard,
+            entry.Definition.Deckable,
+            out warnings);
     }
 
     /// <summary>写出（便捷重载：id ＋ 定义——能力与 <see cref="Serialize(CardDefinitionEntry, out IReadOnlyList{string})"/> 一致）。</summary>
@@ -214,7 +231,8 @@ public static class CardDataJson
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentNullException.ThrowIfNull(definition);
-        return SerializeCore(id, definition.Name, definition.Components, definition.IsGuard, out warnings);
+        return SerializeCore(
+            id, definition.Name, definition.Components, definition.IsGuard, definition.Deckable, out warnings);
     }
 
     private static string SerializeCore(
@@ -222,6 +240,7 @@ public static class CardDataJson
         string name,
         IReadOnlyList<ICardDataComponentDefinition> components,
         bool isGuard,
+        bool deckable,
         out IReadOnlyList<string> warnings)
     {
         var collected = new List<string>();
@@ -239,6 +258,12 @@ public static class CardDataJson
             writer.WriteNumber("schemaVersion", SchemaVersion);
             writer.WriteString("id", id);
             writer.WriteString("name", name);
+
+            // 读宽写窄（D22）：true 是缺省值、不落盘；只有 false 才是作者不得不表达的意图。
+            if (!deckable)
+            {
+                writer.WriteBoolean("deckable", false);
+            }
 
             writer.WriteStartArray("components");
             foreach (var component in components)

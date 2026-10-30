@@ -125,6 +125,24 @@ public sealed class CardValiditySuite
             var description = input.Description ?? GetString(root, "description");
             var image = input.CardImagePath ?? GetString(root, "image");
 
+            // 可构筑标记（R9/D22）：缺省 true；类型错＝非法项（不生成）——可构筑性是防作弊边界，选严不选宽。
+            var deckable = true;
+            var declaredDeckable = true;
+            if (TryGetProperty(root, "deckable", out var deckableElement))
+            {
+                // 显式 null 也算类型错（D22 明列）——「我不知道」不能当成「可构筑」。
+                if (deckableElement.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                {
+                    deckable = deckableElement.GetBoolean();
+                    declaredDeckable = deckable;
+                }
+                else
+                {
+                    issues.Add(CardFieldIssue.Invalid(
+                        "deckable", "boolean", true, CardIssueReason.WrongType));
+                }
+            }
+
             EvaluateIdentity(input, localId, name, issues);
 
             var components = new List<ICardDataComponentDefinition>();
@@ -232,12 +250,19 @@ public sealed class CardValiditySuite
             // 卡图与描述（缺失＝警报，可玩）。
             EvaluatePresentation(input, image, description, issues);
 
+            // 老兵卡内建不可构筑（D23）：显式 deckable: true 覆盖不了——只留一条警报，卡照常生成、照常可玩。
+            if (declaredDeckable && components.OfType<KeywordsDefinition>().Any(keywords => keywords.VeteranOf is not null))
+            {
+                issues.Add(CardFieldIssue.Warning(
+                    "deckable", "boolean", false, CardIssueReason.IgnoredByRule));
+            }
+
             CardDefinition? definition = null;
             if (!issues.Any(issue => issue.IsInvalid))
             {
                 try
                 {
-                    definition = CardDefinition.CreateForLoading(name, components);
+                    definition = CardDefinition.CreateForLoading(name, components, deckable);
                 }
                 catch (Exception ex) when (ex is ArgumentException or ArgumentOutOfRangeException)
                 {

@@ -1,6 +1,6 @@
 {
-  "commit": "dc13b96b5ba584af615546a0c99d3a36af134729",
-  "generatedAt": "2026-10-28T16:24:52.5658542+08:00",
+  "commit": "9f36e0914ccdbaada744b9068b9e15b2d0fdbc30",
+  "generatedAt": "2026-10-30T09:47:57.4147577+08:00",
   "gameUpdates": [
     {
       "name": "CardBurned",
@@ -822,6 +822,7 @@
         "BecomesVeteran:System.String",
         "Category:System.String",
         "Components:System.Collections.Generic.IReadOnlyList<Orc.Game.Cards.Data.ICardDataComponentDefinition>",
+        "Deckable:System.Boolean",
         "Defense:System.Int32",
         "DeployCost:System.Int32",
         "Faction:System.String",
@@ -836,8 +837,8 @@
         "VeteranOf:System.String"
       ],
       "constructors": [
-        "System.String, System.Collections.Generic.IEnumerable<Orc.Game.Cards.Data.ICardDataComponentDefinition>, System.Boolean",
-        "System.String, System.Int32, System.Int32, System.Int32, System.Int32, System.String, System.Collections.Generic.IEnumerable<Orc.Game.Cards.KeywordDeclaration>, System.Collections.Generic.IEnumerable<System.String>, System.Boolean, System.String, System.String, System.Collections.Generic.IEnumerable<System.String>, System.String, System.String"
+        "System.String, System.Collections.Generic.IEnumerable<Orc.Game.Cards.Data.ICardDataComponentDefinition>, System.Boolean, System.Boolean",
+        "System.String, System.Int32, System.Int32, System.Int32, System.Int32, System.String, System.Collections.Generic.IEnumerable<Orc.Game.Cards.KeywordDeclaration>, System.Collections.Generic.IEnumerable<System.String>, System.Boolean, System.String, System.String, System.Collections.Generic.IEnumerable<System.String>, System.String, System.String, System.Boolean"
       ]
     }
   },

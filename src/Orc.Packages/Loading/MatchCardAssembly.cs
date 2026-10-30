@@ -3,7 +3,9 @@ using Orc.Core;
 using Orc.Game.Cards;
 using Orc.Game.Cards.Loading;
 using Orc.Game.Triggers;
+using Orc.Game.Decks;
 using Orc.Packages;
+using Orc.Packages.Decks;
 
 namespace Orc.Packages.Loading;
 
@@ -33,6 +35,7 @@ public sealed class MatchCardAssembly : IMatchCardLoader
     private readonly List<AssetLock> _locks;
     private readonly List<PackageRegistrationResult> _registrations;
     private readonly List<string> _warnings;
+    private readonly IReadOnlyList<AssetDiagnostic> _deckDiagnostics;
     private CardLoaderTrigger? _loader;
     private AssetLoader? _assetLoader;
 
@@ -41,13 +44,15 @@ public sealed class MatchCardAssembly : IMatchCardLoader
         AssetIdBridge bridge,
         List<AssetLock> locks,
         List<PackageRegistrationResult> registrations,
-        List<string> warnings)
+        List<string> warnings,
+        IReadOnlyList<AssetDiagnostic> deckDiagnostics)
     {
         Registry = registry;
         Bridge = bridge;
         _locks = locks;
         _registrations = registrations;
         _warnings = warnings;
+        _deckDiagnostics = deckDiagnostics;
     }
 
     /// <summary>资产注册面（进程视图；本装配独占——同一条装载链只有一份 DTO）。</summary>
@@ -58,6 +63,18 @@ public sealed class MatchCardAssembly : IMatchCardLoader
 
     /// <summary>注册期与 lock 期的告警（不阻断装载的人读留痕）。</summary>
     public IReadOnlyList<string> Warnings => _warnings;
+
+    /// <summary>
+    /// 本次装配的**卡组诊断**（R5/D42）：一条非法卡组＝一条 <see cref="AssetDiagnosticCode.DeckInvalid"/>，
+    /// 其 <see cref="AssetDiagnostic.Violations"/> 装全部违规。读面按包投影这些条目。
+    /// </summary>
+    public IReadOnlyList<AssetDiagnostic> DeckDiagnostics => _deckDiagnostics;
+
+    /// <summary>
+    /// 卡组定位索引（R6/D7）：只装**本次加载计划里实际出现、且 DTO 非空**的卡组——
+    /// 名称解析用的是「lock 后可用集合」，与判定所用的「注册集合」严格分开（D8）。
+    /// </summary>
+    public DeckCatalog Decks { get; private set; } = DeckCatalog.Empty;
 
     /// <summary>卡定义集（包链的 id 已前缀化为应用层 ID）——宿主用于建局前的读面/报告。</summary>
     public IReadOnlyList<CardDefinitionEntry> Definitions
@@ -140,7 +157,12 @@ public sealed class MatchCardAssembly : IMatchCardLoader
     /// <exception cref="ArgumentException">目录列表为空或含空白项。</exception>
     /// <exception cref="DirectoryNotFoundException">目录不存在。</exception>
     /// <exception cref="InvalidDataException">目录不是卡包；或包级结构性非法（整包不注册）。</exception>
-    public static MatchCardAssembly Register(IReadOnlyList<string> packDirectories)
+    /// <param name="packDirectories">卡包目录。</param>
+    /// <param name="requiredDeckSize">
+    /// 卡组要求的张数（D11：由调用方按 <c>ServerOptions.RequiredDeckSize</c> 传入；**不写死**）。
+    /// </param>
+    public static MatchCardAssembly Register(
+        IReadOnlyList<string> packDirectories, int requiredDeckSize = DeckRules.DefaultRequiredSize)
     {
         ArgumentNullException.ThrowIfNull(packDirectories);
         if (packDirectories.Count == 0)
@@ -148,7 +170,7 @@ public sealed class MatchCardAssembly : IMatchCardLoader
             throw new ArgumentException("至少需要一个卡包目录。", nameof(packDirectories));
         }
 
-        return Build(packDirectories, strict: true).Assembly!;
+        return Build(packDirectories, strict: true, requiredDeckSize).Assembly!;
     }
 
     /// <summary>
@@ -159,10 +181,13 @@ public sealed class MatchCardAssembly : IMatchCardLoader
     /// </para>
     /// </summary>
     /// <param name="packDirectories">卡包目录（空＝合法输入，产出 <see cref="AssetLoadIssueCode.EmptyPool"/>）。</param>
-    public static AssemblyInspection Inspect(IReadOnlyList<string> packDirectories)
+    /// <param name="packDirectories">卡包目录（空＝合法输入，产出 <see cref="AssetLoadIssueCode.EmptyPool"/>）。</param>
+    /// <param name="requiredDeckSize">卡组要求的张数（与 <see cref="Register"/> 同一口径）。</param>
+    public static AssemblyInspection Inspect(
+        IReadOnlyList<string> packDirectories, int requiredDeckSize = DeckRules.DefaultRequiredSize)
     {
         ArgumentNullException.ThrowIfNull(packDirectories);
-        return Build(packDirectories, strict: false).Inspection;
+        return Build(packDirectories, strict: false, requiredDeckSize).Inspection;
     }
 
     /// <summary>构建结果（严格模式的产出／非严格模式的判定结论）。</summary>
@@ -175,7 +200,7 @@ public sealed class MatchCardAssembly : IMatchCardLoader
     /// <c>false</c> 时把同一批失败写进 <see cref="AssemblyInspection"/>（<see cref="Inspect"/>）。
     /// </para>
     /// </summary>
-    private static BuildOutcome Build(IReadOnlyList<string> packDirectories, bool strict)
+    private static BuildOutcome Build(IReadOnlyList<string> packDirectories, bool strict, int requiredDeckSize)
     {
         var registry = new AssetRegistry();
         var bridge = new AssetIdBridge();
@@ -278,7 +303,29 @@ public sealed class MatchCardAssembly : IMatchCardLoader
                 directory, manifest.Id, manifest.Version.ToString(), manifest.Guid.ToString("N"), true));
         }
 
-        var assembly = new MatchCardAssembly(registry, bridge, locks, registrations, warnings);
+        // ── 第二段：卡组注册与判定（R3/D9）──────────────────────────────────────
+        // 必须在 Planner 之前完成：lock 里的卡组条目要靠注册表解析，晚一步就是一批 Unregistered。
+        // 判定集合＝本次注册的全部包（跨包引用天然合法）；卡池＝已通过卡牌判定的卡（D13）。
+        var deckResult = DeckRegistrar.Register(
+            registry,
+            registrations.SelectMany(registration => registration.Decks),
+            AssetDomain.Formal,
+            requiredDeckSize);
+
+        for (var index = 0; index < packages.Count; index++)
+        {
+            var diagnostics = deckResult.Diagnostics
+                .Where(diagnostic => string.Equals(diagnostic.PackageId, packages[index].PackageId, StringComparison.Ordinal))
+                .ToArray();
+            if (diagnostics.Length > 0)
+            {
+                packages[index] = packages[index] with { DeckDiagnostics = diagnostics };
+            }
+        }
+
+        warnings.AddRange(deckResult.Warnings);
+
+        var assembly = new MatchCardAssembly(registry, bridge, locks, registrations, warnings, deckResult.Diagnostics);
         var issues = new List<AssetLoadIssue>();
 
         if (assembly.Definitions.Count == 0)
@@ -342,6 +389,12 @@ public sealed class MatchCardAssembly : IMatchCardLoader
         {
             assembly.BindPlan(plan);
         }
+
+        assembly.Decks = DeckCatalog.Build(
+            plan.Formal.Items
+                .Concat(plan.Test.Items)
+                .Where(item => item.Kind == AssetKind.Deck && item.Asset.Deck is not null)
+                .Select(item => (item.AppId, item.Asset.Deck!)));
 
         var ok = packages.All(package => package.Ok) && plan.IsValid && hasCard;
         return new BuildOutcome(assembly, new AssemblyInspection(ok, packages, issues, warnings, summary));

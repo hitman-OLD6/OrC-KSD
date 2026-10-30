@@ -2,6 +2,7 @@ using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Cards;
 using Orc.Game.Cards.Loading;
+using Orc.Packages.Decks;
 using Orc.Packages.Loading;
 
 namespace Orc.Packages;
@@ -56,6 +57,15 @@ public sealed record AssetRegistration(
     /// 非卡资产与无问题卡＝空。
     /// </summary>
     public IReadOnlyList<CardFieldIssue> LoadIssues { get; init; } = Array.Empty<CardFieldIssue>();
+
+    /// <summary>
+    /// 卡组 DTO（R5/D5/D6）：**仅 kind=deck 且内容全合法时非空**。
+    /// <para>
+    /// 非法卡组＝身份仍在、本槽为 null（与卡牌「<c>Card</c> 为 null ＋ <c>LoadIssues</c>」逐字同构）——
+    /// 否则诊断无法指认、编辑器看不到「ID 存在但非法」、lock 条目会退化成 <c>Unregistered</c>。
+    /// </para>
+    /// </summary>
+    public DeckDefinition? Deck { get; init; }
 
     /// <summary>包 GUID 前 8 位（资产名用）。</summary>
     public string PackageGuid8 => PackageGuid == Guid.Empty
@@ -158,6 +168,39 @@ public sealed class AssetRegistry
             byGuidVersions.Add(registration.AssetGuid);
         }
 
+        failure = null;
+        return true;
+    }
+
+    /// <summary>
+    /// 就地替换一条**同身份**的已注册条目（仅供卡组阶段；D9 的整体重算会让同一 GUID 的
+    /// <see cref="AssetRegistration.Deck"/> 槽在「非法↔合法」之间翻转）。
+    /// <para>
+    /// 身份四项（包 id／种类／局部 ID／版本）必须与既有条目一致——本方法**不能**用来改版本或搬运身份，
+    /// 否则注册表的「只追加不覆盖」语义就被这唯一的写口掏空了。
+    /// </para>
+    /// </summary>
+    /// <exception cref="ArgumentNullException">registration 为 null。</exception>
+    public bool TryReplace(AssetRegistration registration, out string? failure)
+    {
+        ArgumentNullException.ThrowIfNull(registration);
+
+        if (!_byGuid.TryGetValue(registration.AssetGuid, out var existing))
+        {
+            failure = $"资产 GUID '{registration.AssetGuid}' 未注册——替换只能用于已存在的条目。";
+            return false;
+        }
+
+        if (!string.Equals(existing.PackageId, registration.PackageId, StringComparison.Ordinal)
+            || existing.Kind != registration.Kind
+            || !string.Equals(existing.LocalId, registration.LocalId, StringComparison.Ordinal)
+            || existing.Version != registration.Version)
+        {
+            failure = $"资产 GUID '{registration.AssetGuid}' 的身份与既有条目不一致（替换只能改 DTO 槽，不得改身份）。";
+            return false;
+        }
+
+        _byGuid[registration.AssetGuid] = registration;
         failure = null;
         return true;
     }

@@ -2,7 +2,9 @@ using Orc.Cards;
 using Orc.Core;
 using Orc.Game.Cards;
 using Orc.Game.Cards.Data;
+using Orc.Game.Decks;
 using Orc.Game.EffectParsing;
+using Orc.Packages.Decks;
 
 namespace Orc.Packages;
 
@@ -30,6 +32,18 @@ public enum AssetDiagnosticCode
 
     /// <summary>版本号非法（该资产非法，不生成；不阻断包）。</summary>
     VersionInvalid = 5,
+
+    /// <summary>
+    /// 卡组内容不成立（R5/D41）：**一条诊断装一份卡组的全部违规**——「列全」由
+    /// <see cref="AssetDiagnostic.Violations"/> 表达，不按违规条数拆成 N 条诊断。
+    /// </summary>
+    DeckInvalid = 6,
+
+    /// <summary>
+    /// 卡组声明了不允许的 sidecar 字段（D59：<c>anchor</c>／<c>loader</c>／<c>serviceKind</c>）。
+    /// 只对 deck 生效——其他种类的既有宽口径不收紧。
+    /// </summary>
+    FieldNotAllowed = 7,
 }
 
 /// <summary>资产级诊断条目。</summary>
@@ -43,7 +57,17 @@ public sealed record AssetDiagnostic(
     string PackageId,
     string? AppId,
     string? File,
-    string Message);
+    string Message)
+{
+    /// <summary>
+    /// 卡组的**全部**违规（R5/D41/D44）：仅 <see cref="AssetDiagnosticCode.DeckInvalid"/> 非空。
+    /// <para>
+    /// 卡牌诊断恒为 null——消费方容忍空值即可，不为「有没有违规」引入包装类型。
+    /// 客户端按 <c>Kind</c> 分类、按 <c>CardId</c> 点名，**不解析 <see cref="Message"/>**。
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<DeckViolation>? Violations { get; init; }
+}
 
 /// <summary>一次包注册的产出：DTO 内容 ＋ 已注册资产 ＋ 资产级诊断。</summary>
 /// <param name="Manifest">包清单。</param>
@@ -54,7 +78,18 @@ public sealed record PackageRegistrationResult(
     PackageManifest Manifest,
     CardPackContent Content,
     IReadOnlyList<AssetRegistration> Assets,
-    IReadOnlyList<AssetDiagnostic> Diagnostics);
+    IReadOnlyList<AssetDiagnostic> Diagnostics)
+{
+    /// <summary>
+    /// 第一段**不注册**、留给卡组阶段（R3 第二段）处理的卡组声明。
+    /// <para>
+    /// 卡组必须等全部包的第一段跑完才能判定（跨包引用），所以第一段只解析元数据、不产出 DTO；
+    /// 注册与判定统一在 <see cref="DeckRegistrar.Register"/>。这也保证 planner 永远看不到
+    /// 「半成品卡组」条目（D60）。
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<DeferredDeckAsset> Decks { get; init; } = Array.Empty<DeferredDeckAsset>();
+}
 
 /// <summary>
 /// **注册面**（R3/D10）：元数据解析 ＋ 包内全部资产 DTO 生成（不实例化、不进对局）——
@@ -101,11 +136,13 @@ public static class PackageRegistrar
         var declarations = new List<(string CardId, IReadOnlyList<string> PrefabIds)>();
         var consumed = new HashSet<Guid>();
         var registered = new List<AssetRegistration>();
+        var deferredDecks = new List<DeferredDeckAsset>();
 
         RegisterCards(scan, manifest, registry, domain, sidecars, diagnostics, consumed,
-            registered, definitions, inlinePrefabs, declarations);
+            registered, definitions, inlinePrefabs, declarations, deferredDecks);
 
-        RegisterDeclaredAssets(scan, manifest, registry, domain, sidecars, diagnostics, consumed, registered);
+        RegisterDeclaredAssets(
+            scan, manifest, registry, domain, sidecars, diagnostics, consumed, registered, deferredDecks);
 
         var texts = PackageScanner.ReadTexts(scan.RootDirectory);
         AppendTextEffects(manifest, definitions, texts, inlinePrefabs, declarations);
@@ -121,19 +158,28 @@ public static class PackageRegistrar
             texts,
             scan.ComponentsDirectory);
 
-        return new PackageRegistrationResult(manifest, content, registered, diagnostics);
+        return new PackageRegistrationResult(manifest, content, registered, diagnostics)
+        {
+            Decks = deferredDecks,
+        };
     }
 
     /// <summary>
     /// 读取全部 sidecar（两段式，顺序不可换）：
     /// ① 先按 <see cref="PackageScan.ManifestSidecars"/> 校验「声明即落地」（缺失＝包级结构性非法，B4）；
-    /// ② 再把并集（<see cref="PackageScan.SidecarFiles"/> ＋ 卡文件同目录）读入并按源文件相对路径索引。
-    /// <para>并集每一项**一视同仁**：source／packageId 一致性与重复 GUID 校验对全量生效。</para>
+    /// ② 再把并集（<see cref="PackageScan.SidecarFiles"/> ＋ 卡文件同目录 ＋ 卡组文件同目录）读入并按源文件相对路径索引。
+    /// <para>
+    /// 并集每一项**一视同仁**：source／packageId 一致性与重复 GUID 校验对全量生效。
+    /// 卡组那条腿必须显式加（D56）——卡的 sidecar 靠「同目录」自动进字典，卡组若漏掉就是
+    /// 「文件在、sidecar 不在字典、卡组永不注册且无任何报错」的静默坑。
+    /// </para>
     /// </summary>
     private static Dictionary<string, AssetSidecar> ReadSidecars(PackageScan scan)
     {
         var sidecars = new Dictionary<string, AssetSidecar>(StringComparer.Ordinal);
         var paths = new List<string>();
+
+        RejectVersionedDeckSidecars(scan);
 
         foreach (var relative in scan.ManifestSidecars)
         {
@@ -154,6 +200,14 @@ public static class PackageRegistrar
         foreach (var cardFile in scan.CardFiles)
         {
             if (cardFile.SidecarPath is { } sidecarPath)
+            {
+                paths.Add(sidecarPath);
+            }
+        }
+
+        foreach (var deckFile in scan.DeckFiles)
+        {
+            if (deckFile.SidecarPath is { } sidecarPath)
             {
                 paths.Add(sidecarPath);
             }
@@ -193,6 +247,31 @@ public static class PackageRegistrar
         return sidecars;
     }
 
+    /// <summary>
+    /// 卡组不保留历史版本（R11/D57）：<c>manifest.metadata</c> 显式声明 <c>versions/</c> 下的卡组 sidecar＝包级结构性非法。
+    /// <para>
+    /// 手工丢进 <c>versions/*/decks/</c> 且未声明＝**静默忽略**——扫描面根本不看那里，
+    /// 因此这里只需要拒绝「作者明确声明了一份不存在的通道」这一种情况。
+    /// </para>
+    /// </summary>
+    /// <exception cref="InvalidDataException">声明了 versions/ 下的卡组 sidecar。</exception>
+    private static void RejectVersionedDeckSidecars(PackageScan scan)
+    {
+        var deckSidecarSuffix = PackageScanner.DeckFilePattern[1..] + AssetSidecarJson.SidecarExtension;
+
+        foreach (var relative in scan.ManifestSidecars)
+        {
+            var normalized = relative.Replace('\\', '/');
+            if (normalized.StartsWith(PackageScanner.VersionsDirectoryName + "/", StringComparison.OrdinalIgnoreCase)
+                && normalized.EndsWith(deckSidecarSuffix, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    $"manifest 元数据声明了 versions/ 下的卡组 sidecar：{normalized}——"
+                    + "卡组不保留历史版本，versions/ 下的卡组声明无效，请删除该声明（包级结构性非法）。");
+            }
+        }
+    }
+
     private static void RejectDuplicateGuids(PackageManifest manifest, Dictionary<string, AssetSidecar> sidecars)
     {
         var seen = new Dictionary<Guid, string>();
@@ -223,7 +302,8 @@ public static class PackageRegistrar
         List<AssetRegistration> registered,
         List<CardDefinitionEntry> definitions,
         List<EffectSnapshot> inlinePrefabs,
-        List<(string CardId, IReadOnlyList<string> PrefabIds)> declarations)
+        List<(string CardId, IReadOnlyList<string> PrefabIds)> declarations,
+        List<DeferredDeckAsset> deferredDecks)
     {
         var prefix = $"pack/{manifest.Id}/";
 
@@ -291,6 +371,14 @@ public static class PackageRegistrar
                 if (!ValidateGuid(manifest, declared, appId, cardFile.RelativePath, diagnostics))
                 {
                     consumed.Add(declared.Guid);
+                    continue;
+                }
+
+                if (declared.Kind == AssetKind.Deck)
+                {
+                    // 卡组一律延后到第二段（R3/D9）——这里只登记声明，不产出 DTO。
+                    consumed.Add(declared.Guid);
+                    deferredDecks.Add(Defer(manifest, declared, appId, cardFile.AbsolutePath, cardFile.RelativePath));
                     continue;
                 }
 
@@ -389,7 +477,8 @@ public static class PackageRegistrar
         Dictionary<string, AssetSidecar> sidecars,
         List<AssetDiagnostic> diagnostics,
         HashSet<Guid> consumed,
-        List<AssetRegistration> registered)
+        List<AssetRegistration> registered,
+        List<DeferredDeckAsset> deferredDecks)
     {
         var cardSources = new HashSet<string>(
             scan.CardFiles.Select(file => file.RelativePath), StringComparer.Ordinal);
@@ -452,6 +541,14 @@ public static class PackageRegistrar
                     continue;
                 }
 
+                if (asset.Kind == AssetKind.Deck)
+                {
+                    // 卡组延后到第二段（R3/D9）；身份与字段越界由 Defer 记录（D59/D61：先身份后字段）。
+                    consumed.Add(asset.Guid);
+                    deferredDecks.Add(Defer(manifest, asset, appId, absoluteSource, relativeSource));
+                    continue;
+                }
+
                 consumed.Add(asset.Guid);
                 var registration = new AssetRegistration(
                     asset, domain, manifest.Id, appId, AssetMetadataSource.Sidecar, null, snapshot, absoluteSource)
@@ -461,6 +558,58 @@ public static class PackageRegistrar
                 Register(registry, registration, appId, relativeSource, diagnostics, registered);
             }
         }
+    }
+
+    /// <summary>
+    /// 生成卡组声明（第一段只做**身份 ＋ 字段越界**两道判定，不解析内容、不产出 DTO）。
+    /// <para>顺序不可换（D61）：先身份后字段——身份都不对，谈不上「声明合不合规」。</para>
+    /// </summary>
+    private static DeferredDeckAsset Defer(
+        PackageManifest manifest,
+        AssetMetadata metadata,
+        string appId,
+        string absoluteSource,
+        string relativeSource)
+    {
+        var issues = new List<AssetDiagnostic>();
+        if (metadata.Anchor is not null)
+        {
+            issues.Add(new AssetDiagnostic(
+                AssetDiagnosticCode.FieldNotAllowed,
+                manifest.Id,
+                appId,
+                relativeSource,
+                "卡组不是内含资产，不得声明 anchor（该资产非法，不生成卡组对象）。"));
+        }
+
+        if (metadata.Loader is not null)
+        {
+            issues.Add(new AssetDiagnostic(
+                AssetDiagnosticCode.FieldNotAllowed,
+                manifest.Id,
+                appId,
+                relativeSource,
+                "卡组不参与卡位装载，loader 不适用（该资产非法，不生成卡组对象）。"));
+        }
+
+        if (metadata.ServiceKind is not null)
+        {
+            issues.Add(new AssetDiagnostic(
+                AssetDiagnosticCode.FieldNotAllowed,
+                manifest.Id,
+                appId,
+                relativeSource,
+                "serviceKind 只对 service 种类有效（该资产非法，不生成卡组对象）。"));
+        }
+
+        return new DeferredDeckAsset(
+            metadata,
+            manifest.Id,
+            appId,
+            absoluteSource,
+            relativeSource,
+            manifest.Guid,
+            issues.Count == 0 ? null : issues);
     }
 
     private static bool ValidateGuid(

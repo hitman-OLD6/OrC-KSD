@@ -20,8 +20,12 @@ public sealed class CardDefinition
     /// <param name="isGuard">守护者标记（代码注册路径加性面；数据体路径恒 false——官方 <c>guard</c> 走词条承载〔批 4 守护词条化〕）。</param>
     /// <exception cref="ArgumentException">name 为 null/空白；components 含 null/重复类型；缺 factionCost/tagData。</exception>
     /// <exception cref="ArgumentOutOfRangeException">国籍/稀有度为未定义枚举值。</exception>
-    public CardDefinition(string name, IEnumerable<ICardDataComponentDefinition> components, bool isGuard = false)
-        : this(name, components, isGuard, allowBlankName: false)
+    public CardDefinition(
+        string name,
+        IEnumerable<ICardDataComponentDefinition> components,
+        bool isGuard = false,
+        bool deckable = true)
+        : this(name, components, isGuard, allowBlankName: false, deckable)
     {
     }
 
@@ -32,7 +36,8 @@ public sealed class CardDefinition
         string? name,
         IEnumerable<ICardDataComponentDefinition> components,
         bool isGuard,
-        bool allowBlankName)
+        bool allowBlankName,
+        bool deckable = true)
     {
         if (allowBlankName)
         {
@@ -109,6 +114,10 @@ public sealed class CardDefinition
         // S1（老兵数据映射正式承载）：两端口的派生读面——数据体路径经 keywords 组件分流承载；代码注册路径经兼容构造参数。
         BecomesVeteran = keywords?.BecomesVeteran;
         VeteranOf = keywords?.VeteranOf;
+
+        // R9/D23：可构筑性＝「声明的可构筑」∧「不是老兵卡」，合并后只留这一个布尔。
+        // 判定侧（DeckRules）只读本属性——内建规则不得散落第二处，否则两处一漂移就是两套口径。
+        Deckable = deckable && VeteranOf is null;
     }
 
     /// <summary>
@@ -126,8 +135,8 @@ public sealed class CardDefinition
     /// <exception cref="ArgumentException">components 含 null/重复类型；缺 factionCost/tagData。</exception>
     /// <exception cref="ArgumentOutOfRangeException">国籍/稀有度为未定义枚举值。</exception>
     public static CardDefinition CreateForLoading(
-        string? name, IEnumerable<ICardDataComponentDefinition> components)
-        => new(name ?? string.Empty, components, isGuard: false, allowBlankName: true);
+        string? name, IEnumerable<ICardDataComponentDefinition> components, bool deckable = true)
+        => new(name ?? string.Empty, components, isGuard: false, allowBlankName: true, deckable);
 
     /// <summary>
     /// 创建定义（兼容构造：既有 12 参数；内部转换为组件定义集——校验与既有行为一致、fail-fast 保留）。
@@ -150,11 +159,13 @@ public sealed class CardDefinition
         string? rarity = null,
         IEnumerable<string>? tags = null,
         string? becomesVeteran = null,
-        string? veteranOf = null)
+        string? veteranOf = null,
+        bool deckable = true)
         : this(
             name,
             BuildComponents(category, deployCost, operateCost, attack, defense, keywords, unitTypes, faction, rarity, tags, becomesVeteran, veteranOf),
-            isGuard)
+            isGuard,
+            deckable)
     {
     }
 
@@ -408,6 +419,12 @@ public sealed class CardDefinition
 
     /// <summary>守护者标记（代码注册路径加性面；数据体路径恒 false）。</summary>
     public bool IsGuard { get; }
+
+    /// <summary>
+    /// 是否可进卡组（R9/D23）：数据体根字段 <c>deckable</c>（缺省＝true）**与**「非老兵卡」的合并结果。
+    /// 老兵卡恒不可构筑，显式 <c>deckable: true</c> 覆盖不了内建规则。
+    /// </summary>
+    public bool Deckable { get; }
 
     /// <summary>国籍（派生自 <c>factionCost</c> 组件终值；实例侧只读）。</summary>
     public string Faction { get; }

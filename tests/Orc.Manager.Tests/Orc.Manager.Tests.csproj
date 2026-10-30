@@ -20,6 +20,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\Shared\DeckPackFixture.cs" Link="Shared\DeckPackFixture.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Orc.Manager\Orc.Manager.csproj" />
     <ProjectReference Include="..\..\src\Orc.Server\Orc.Server.csproj" />
   </ItemGroup>

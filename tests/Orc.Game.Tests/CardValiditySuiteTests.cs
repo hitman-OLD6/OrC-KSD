@@ -388,7 +388,7 @@ public class CardValiditySuiteTests
             {
                 "missing", "wrongType", "outOfRange", "sourceMissing", "sidecarMissing",
                 "idMismatch", "versionInvalid", "loaderUnregistered", "conflict", "duplicateGuid",
-                "scriptCompileFailed",
+                "scriptCompileFailed", "ignoredByRule",
             },
             Enum.GetValues<CardIssueReason>().Select(CardIssueReasonTokens.Token));
 

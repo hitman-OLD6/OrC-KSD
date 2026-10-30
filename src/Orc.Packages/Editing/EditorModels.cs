@@ -98,7 +98,8 @@ public sealed record EditorSessionInfo(
     Guid PackageGuid,
     IReadOnlyList<string> DependsOnPackages,
     int AssetCount,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings,
+    int RequiredDeckSize = 0);
 
 /// <summary>`asset.list` / `asset.get` 条目（R9）。</summary>
 /// <param name="Kind">资产种类。</param>
@@ -124,9 +125,22 @@ public sealed record EditorAssetInfo(
     IReadOnlyList<string> Tags);
 
 /// <summary>`asset.commit` 的产出。</summary>
-/// <param name="Asset">提交后的资产（新版本／新 GUID）。</param>
+/// <param name="Asset">
+/// 提交后的资产（新版本／新 GUID）。**提交非法卡组被拒时为 null**——那时没有任何东西被写入，
+/// 硬编一个「提交结果」只会误导调用方。
+/// </param>
 /// <param name="VersionBumped">是否由本次提交自动递增（<c>version.set</c>/<c>asset.create</c> 后首次提交＝false）。</param>
-public sealed record EditorCommitResult(EditorAssetInfo Asset, bool VersionBumped);
+public sealed record EditorCommitResult(EditorAssetInfo? Asset, bool VersionBumped)
+{
+    /// <summary>
+    /// 卡组内容违规（R7/D43）：仅「提交非法卡组被拒」时非空——源文件保持原样、声明不落盘、版本不递增。
+    /// <para>
+    /// 与注册期共用 <see cref="Orc.Game.Decks.DeckViolation"/>：客户端按 <c>Kind</c> 分类、按 <c>CardId</c> 点名。
+    /// 这里**不**返回 <see cref="AssetDiagnostic"/>（提交期不涉及包注册，硬套 PackageId／File 只能编造字段）。
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<Orc.Game.Decks.DeckViolation>? Violations { get; init; }
+}
 
 /// <summary>`lock.preview` 的产出：转正后的正式 lock（预测）＋ 当前测试 lock（实况）。</summary>
 /// <param name="Formal">转正将写出的正式 lock。</param>
@@ -233,4 +247,10 @@ public sealed record AssetEditorOptions
 
     /// <summary>装载器（`reload` 用；未注入＝用注册表新建一个只计算不落地的装载器）。</summary>
     public AssetLoader? Loader { get; init; }
+
+    /// <summary>
+    /// 卡组要求的张数（R7/D11/D15）：提交期判定与注册期必须同一口径，故缺省值与
+    /// <see cref="Orc.Game.Decks.DeckRules.DefaultRequiredSize"/> 对齐，并在 <c>session.begin</c> 回显给作者。
+    /// </summary>
+    public int RequiredDeckSize { get; init; } = Orc.Game.Decks.DeckRules.DefaultRequiredSize;
 }

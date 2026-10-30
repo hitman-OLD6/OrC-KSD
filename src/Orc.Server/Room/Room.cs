@@ -55,6 +55,7 @@ public sealed class Room
                 State = SeatState.Admitted,
                 DisplayName = string.IsNullOrWhiteSpace(config.DisplayName) ? "AI" : config.DisplayName,
                 Deck = config.Deck ?? Array.Empty<string>(),
+                DeckId = string.IsNullOrWhiteSpace(config.DeckId) ? null : config.DeckId.Trim(),
                 DeckConfig = config.DeckConfig is { } deckConfig
                     ? new RoomDeckConfig(deckConfig.MainFaction, deckConfig.AllyFaction)
                     : null,
@@ -133,14 +134,18 @@ public sealed class Room
                 }
 
                 var own = request.SeeAllDeclarations || request.Seat == i;
+                // 声明形态回显（D28）：给了卡组标识就只回 DeckId，Deck 保持 null——不展开成 39 条卡 id。
                 seats[i] = new RoomSeatSnapshot(
                     i,
                     true,
                     StateName(slot.State),
                     slot.DisplayName,
                     slot.Kind,
-                    own ? slot.Deck : null,
-                    own ? ToPackageSnapshots(slot.Packages) : null);
+                    own && string.IsNullOrWhiteSpace(slot.DeckId) ? slot.Deck : null,
+                    own ? ToPackageSnapshots(slot.Packages) : null)
+                {
+                    DeckId = own ? slot.DeckId : null,
+                };
             }
 
             state = RoomStateName(_state);
@@ -179,6 +184,7 @@ public sealed class Room
                 }
 
                 existing.Deck = application.Deck;
+                existing.DeckId = application.DeckId;
                 existing.DeckConfig = ToDeckConfig(application.DeckConfig);
                 existing.Packages = application.Packages;
                 existing.DisplayName = DisplayName(application.DisplayName, seat);
@@ -193,6 +199,7 @@ public sealed class Room
                     State = SeatState.Pending,
                     DisplayName = DisplayName(application.DisplayName, seat),
                     Deck = application.Deck,
+                    DeckId = application.DeckId,
                     DeckConfig = ToDeckConfig(application.DeckConfig),
                     Packages = application.Packages,
                     SeatToken = NewToken(),
@@ -404,7 +411,8 @@ public sealed class Room
                     slot.Deck,
                     slot.DeckConfig,
                     slot.Kind,
-                    slot.Packages)
+                    slot.Packages,
+                    slot.DeckId)
                 : null;
         }
     }
@@ -521,6 +529,7 @@ public sealed class Room
         public required string Kind { get; init; }
         public required string DisplayName { get; set; }
         public required IReadOnlyList<string> Deck { get; set; }
+        public string? DeckId { get; set; }
         public RoomDeckConfig? DeckConfig { get; set; }
         public required IReadOnlyList<PackageRef> Packages { get; set; }
         public required string SeatToken { get; set; }

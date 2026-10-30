@@ -28,8 +28,9 @@ public enum VersionSegmentKind
 public readonly struct AssetVersionConstraint : IEquatable<AssetVersionConstraint>
 {
     private AssetVersionConstraint(
-        int major, VersionSegmentKind minorKind, int minor, VersionSegmentKind patchKind, int patch)
+        VersionSegmentKind majorKind, int major, VersionSegmentKind minorKind, int minor, VersionSegmentKind patchKind, int patch)
     {
+        MajorKind = majorKind;
         Major = major;
         MinorKind = minorKind;
         Minor = minor;
@@ -37,7 +38,16 @@ public readonly struct AssetVersionConstraint : IEquatable<AssetVersionConstrain
         Patch = patch;
     }
 
-    /// <summary>主版（精确锁定）。</summary>
+    /// <summary>
+    /// 主版段语义（R4/D1）：<c>Exact</c>＝精确锁定（既有语义）；<c>Any</c>＝版本无关（写作 <c>*</c>）。
+    /// <para>
+    /// 刻意**不按资产种类特判**：版本无关是通用依赖形态，卡组→卡只是第一个消费者；
+    /// 任何「只有 deck 才允许 *.*.*」的分支都会让约束语法出现第二份解释。
+    /// </para>
+    /// </summary>
+    public VersionSegmentKind MajorKind { get; }
+
+    /// <summary>主版值（<see cref="MajorKind"/> 为 <c>Any</c> 时固定 0、不参与匹配）。</summary>
     public int Major { get; }
 
     /// <summary>次版段语义。</summary>
@@ -52,7 +62,10 @@ public readonly struct AssetVersionConstraint : IEquatable<AssetVersionConstrain
     /// <summary>修订值（<c>Exact</c>＝精确值；<c>AtLeast</c>＝下界）。</summary>
     public int Patch { get; }
 
-    /// <summary>解析版本约束（<c>x.y.z</c>；第二、三段可为 <c>*</c>/<c>^</c>）；非法＝false。</summary>
+    /// <summary>
+    /// 解析版本约束（<c>x.y.z</c>；首段可为整数或 <c>*</c>，第二、三段可为 <c>*</c>/<c>^</c>）；非法＝false。
+    /// <para>三段硬约束不变：单写 <c>*</c> 不是合法约束（依赖必须写清「哪两段不约束」）。</para>
+    /// </summary>
     public static bool TryParse(string? text, out AssetVersionConstraint constraint)
     {
         constraint = default;
@@ -63,7 +76,7 @@ public readonly struct AssetVersionConstraint : IEquatable<AssetVersionConstrain
 
         var parts = text.Trim().Split('.');
         if (parts.Length != 3
-            || !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var major))
+            || !TryParseMajor(parts[0], out var majorKind, out var major))
         {
             return false;
         }
@@ -74,7 +87,7 @@ public readonly struct AssetVersionConstraint : IEquatable<AssetVersionConstrain
             return false;
         }
 
-        constraint = new AssetVersionConstraint(major, minorKind, minor, patchKind, patch);
+        constraint = new AssetVersionConstraint(majorKind, major, minorKind, minor, patchKind, patch);
         return true;
     }
 
@@ -82,11 +95,11 @@ public readonly struct AssetVersionConstraint : IEquatable<AssetVersionConstrain
     public static AssetVersionConstraint Parse(string text)
         => TryParse(text, out var constraint)
             ? constraint
-            : throw new FormatException($"非法版本约束 '{text}'（期望 x.y.z，第二/三段可为 * 或 ^）。");
+            : throw new FormatException($"非法版本约束 '{text}'（期望 x.y.z；首段可为 *，第二/三段可为 * 或 ^）。");
 
-    /// <summary>给定版本是否满足本约束。</summary>
+    /// <summary>给定版本是否满足本约束（<see cref="VersionSegmentKind.Any"/> 的主版段不设限制）。</summary>
     public bool IsSatisfiedBy(AssetVersion version)
-        => version.Major == Major
+        => Satisfies(MajorKind, Major, version.Major)
             && Satisfies(MinorKind, Minor, version.Minor)
             && Satisfies(PatchKind, Patch, version.Patch);
 
@@ -98,6 +111,31 @@ public readonly struct AssetVersionConstraint : IEquatable<AssetVersionConstrain
             VersionSegmentKind.AtLeast => actual >= expected,
             _ => false,
         };
+
+    /// <summary>
+    /// 首段解析（D1）：只放宽为「整数 或 <c>*</c>」——<c>^</c> 在主版段无意义（主版不下界向上取新），
+    /// 因此**不**复用 <see cref="TryParseSegment"/>，避免顺手把 <c>^</c> 泄漏进主版语法。
+    /// </summary>
+    private static bool TryParseMajor(string text, out VersionSegmentKind kind, out int value)
+    {
+        var trimmed = text.Trim();
+        value = 0;
+
+        if (trimmed == "*")
+        {
+            kind = VersionSegmentKind.Any;
+            return true;
+        }
+
+        if (int.TryParse(trimmed, NumberStyles.None, CultureInfo.InvariantCulture, out value))
+        {
+            kind = VersionSegmentKind.Exact;
+            return true;
+        }
+
+        kind = default;
+        return false;
+    }
 
     private static bool TryParseSegment(string text, out VersionSegmentKind kind, out int value)
     {
@@ -142,7 +180,8 @@ public readonly struct AssetVersionConstraint : IEquatable<AssetVersionConstrain
 
     /// <inheritdoc />
     public bool Equals(AssetVersionConstraint other)
-        => Major == other.Major
+        => MajorKind == other.MajorKind
+            && Major == other.Major
             && MinorKind == other.MinorKind
             && Minor == other.Minor
             && PatchKind == other.PatchKind
@@ -152,7 +191,7 @@ public readonly struct AssetVersionConstraint : IEquatable<AssetVersionConstrain
     public override bool Equals(object? obj) => obj is AssetVersionConstraint other && Equals(other);
 
     /// <inheritdoc />
-    public override int GetHashCode() => HashCode.Combine(Major, MinorKind, Minor, PatchKind, Patch);
+    public override int GetHashCode() => HashCode.Combine(MajorKind, Major, MinorKind, Minor, PatchKind, Patch);
 
     /// <inheritdoc />
     public override string ToString()
@@ -164,6 +203,6 @@ public readonly struct AssetVersionConstraint : IEquatable<AssetVersionConstrain
             _ => value.ToString(CultureInfo.InvariantCulture),
         };
 
-        return $"{Major}.{Segment(MinorKind, Minor)}.{Segment(PatchKind, Patch)}";
+        return $"{Segment(MajorKind, Major)}.{Segment(MinorKind, Minor)}.{Segment(PatchKind, Patch)}";
     }
 }

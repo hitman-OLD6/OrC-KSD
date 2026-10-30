@@ -163,7 +163,7 @@ public static class CardDataLoader
             CardDefinition definition;
             try
             {
-                definition = new CardDefinition(body.Name, body.Components);
+                definition = new CardDefinition(body.Name, body.Components, deckable: body.Deckable);
             }
             catch (Exception ex) when (ex is ArgumentException or ArgumentOutOfRangeException)
             {
@@ -374,7 +374,7 @@ public static class CardDataLoader
 
     /// <summary>数据体面路径（套件里由数据体原文判定出的字段：<c>id</c>／<c>name</c>／<c>components.*</c>）。</summary>
     private static bool IsDataBodyPath(string path)
-        => path is "id" or "name" || path.StartsWith("components", StringComparison.Ordinal);
+        => path is "id" or "name" or "deckable" || path.StartsWith("components", StringComparison.Ordinal);
 
     private static CardDataLenientParse Unparsable(string error)
         => new(null, null, Array.Empty<CardFieldIssue>(), error);

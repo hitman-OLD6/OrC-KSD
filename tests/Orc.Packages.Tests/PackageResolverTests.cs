@@ -19,7 +19,8 @@ public class PackageResolverTests
     [InlineData("1.^2.*", true)]
     [InlineData("1.2.^1", true)]
     [InlineData("1.2", false)]
-    [InlineData("*.1.1", false)]
+    [InlineData("*.1.1", true)] // R4/D1：首段放宽为「整数 或 *」，`*.1.1` 由非法转合法。
+    [InlineData("*", false)] // 三段硬约束不变：单写 * 仍非法。
     [InlineData("1.x.3", false)]
     [InlineData("1.^x.3", false)]
     public void 版本约束解析(string text, bool expected)
