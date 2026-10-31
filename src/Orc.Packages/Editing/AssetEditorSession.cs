@@ -1,6 +1,7 @@
 using System.Text;
 using Orc.Cards;
 using Orc.Core;
+using Orc.Core.Model;
 using Orc.Game.Cards;
 using Orc.Game.Cards.Data;
 using Orc.Packages.Decks;
@@ -46,6 +47,18 @@ internal sealed class AssetEditorSession
 
     private const string ManifestFileName = "manifest.json";
     private const string VersionsDirectory = "versions";
+
+    /// <summary>moding 草案后缀（S11／D11：<c>modings/&lt;localId&gt;.moding.json</c>）。</summary>
+    private const string ModingFileSuffix = ".moding.json";
+
+    /// <summary>
+    /// handler DSL 文档后缀（D11：<c>handler-dsl/&lt;name&gt;.hdsl.json</c>）。
+    /// <para>
+    /// 它**不是资产**：无 id／版本／lock，提交即写盘（不进 <c>_assets</c>、不 bump 版本、不重算 lock）。
+    /// 也正因如此，它必须落在既有 7 类资产扫描模式之外，且**不得**加 <c>.meta.json</c> sidecar。
+    /// </para>
+    /// </summary>
+    private const string DslFileSuffix = ".hdsl.json";
 
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
@@ -202,9 +215,15 @@ internal sealed class AssetEditorSession
                 ? CommitPrefab(absolute)
                 : absolute.EndsWith(".deck.json", StringComparison.OrdinalIgnoreCase)
                     ? CommitDeck(absolute)
-                    : throw new AssetEditorException(
-                        AssetEditorErrorCode.InvalidContent,
-                        $"不支持的提交类型：'{relativePath}'（只接受 *.card.json／*.prefab.json／*.deck.json）。");
+                    : absolute.EndsWith(ModingFileSuffix, StringComparison.OrdinalIgnoreCase)
+                        ? CommitModing(absolute)
+                        : absolute.EndsWith(DslFileSuffix, StringComparison.OrdinalIgnoreCase)
+                            // DSL 文档**不是资产**（无 id／版本／lock，D11）：写入即完成，不碰资产声明与 lock。
+                            ? new EditorCommitResult(Asset: null, VersionBumped: false)
+                            : throw new AssetEditorException(
+                                AssetEditorErrorCode.InvalidContent,
+                                $"不支持的提交类型：'{relativePath}'（只接受 *.card.json／*.prefab.json／"
+                                + $"*.deck.json／*{ModingFileSuffix}／*{DslFileSuffix}）。");
 
         // 「拒绝写入」要真的一点都不写（R7/S11）：内容通道已经把文件落盘了，这里把源文件恢复原样。
         // 文件指针通道（content＝null）不动——那份文件是前端自己写的，撤销它不是我们的职责。
@@ -220,8 +239,101 @@ internal sealed class AssetEditorSession
             }
         }
 
+        // lock／版本对 DSL **完全无感**（有意，D11）：`.hdsl.json` 不是资产、不进 lock、不 bump 任何版本——
+        // 这不是漏了依赖追踪，而是「DSL 由草案承担可见性，自己不是资产」。因此这条通道提前返回、不重算 lock。
+        if (absolute.EndsWith(DslFileSuffix, StringComparison.OrdinalIgnoreCase))
+        {
+            return committed;
+        }
+
         RecomputeLocks();
         return committed;
+    }
+
+    /// <summary>
+    /// 提交 **moding 草案**（S11／D11）：草案是合法资产（kind＝<see cref="AssetKind.Moding"/>，只进测试 lock），
+    /// 只存**增量**——重载／新增的成员、挂载与包装声明；展开后的成员表不落盘（D13）。
+    /// </summary>
+    /// <exception cref="AssetEditorException">不可解析／缺 id／缺 extends／同 id 跨文件声明。</exception>
+    private EditorCommitResult CommitModing(string absolutePath)
+    {
+        var sourceRelative = RelativeToTemporary(absolutePath);
+        var sidecarAbsolute = absolutePath + AssetSidecarJson.SidecarExtension;
+        var sidecarRelative = sourceRelative + AssetSidecarJson.SidecarExtension;
+        var sidecar = File.Exists(sidecarAbsolute) ? ReadSidecar(sidecarAbsolute) : null;
+
+        ComponentAsset draft;
+        try
+        {
+            draft = AssetSchema.Read(File.ReadAllText(absolutePath), sourceRelative);
+        }
+        catch (PrefabLoadException ex)
+        {
+            throw new AssetEditorException(
+                AssetEditorErrorCode.InvalidContent, $"moding 草案不可解析：'{sourceRelative}'：{ex.Message}", ex);
+        }
+
+        if (string.IsNullOrWhiteSpace(draft.Id))
+        {
+            throw new AssetEditorException(
+                AssetEditorErrorCode.InvalidContent, $"moding 草案缺少 asset.id：'{sourceRelative}'。");
+        }
+
+        // 草案依赖父效果实体（R1）：没有 extends 就不是草案，而是组件资产（那种文件用 *.component.json 提交）。
+        if (draft.Extends is null)
+        {
+            throw new AssetEditorException(
+                AssetEditorErrorCode.InvalidContent,
+                $"moding 草案 '{draft.Id}' 缺少 asset.extends（父效果 id）：草案必须声明它依赖哪份父资产（R1）。");
+        }
+
+        var declaredDrafts = sidecar?.Assets.Where(asset => asset.Kind == AssetKind.Moding).ToArray()
+                            ?? Array.Empty<AssetMetadata>();
+        if (declaredDrafts.Length >= 1
+            && !declaredDrafts.Any(asset => string.Equals(asset.Id, draft.Id, StringComparison.Ordinal)))
+        {
+            throw new AssetEditorException(
+                AssetEditorErrorCode.InvalidContent,
+                $"草案 id '{draft.Id}' 不在 sidecar 声明的 moding 集合"
+                + $"（{string.Join("、", declaredDrafts.Select(asset => asset.Id))}）：'{sourceRelative}'。");
+        }
+
+        var key = new EditorAssetKey(AssetKind.Moding, draft.Id);
+        _assets.TryGetValue(key, out var existing);
+        if (existing is not null && !string.Equals(existing.SidecarRelative, sidecarRelative, StringComparison.Ordinal))
+        {
+            throw new AssetEditorException(
+                AssetEditorErrorCode.AssetExists,
+                $"资产 moding：{draft.Id} 已由 '{existing.SidecarRelative}' 声明（同 ID 不允许跨文件）。");
+        }
+
+        var metadata = existing?.Metadata
+                       ?? new AssetMetadata(
+                           Guid.Empty, AssetKind.Moding, draft.Id, EditorVersionRules.Initial,
+                           null, null, Array.Empty<AssetReference>(), Array.Empty<AssetReference>());
+        var previousVersion = metadata.Version;
+        var version = existing is not null ? AutoNext(sidecarRelative, previousVersion) : metadata.Version;
+        var bumped = version != previousVersion;
+        metadata = metadata with
+        {
+            Version = version,
+            Guid = DeriveGuid(AssetKind.Moding, draft.Id, version),
+            // 草案不是内含资产、也不参与卡位装载（与 deck 同一口径）。
+            Anchor = null,
+            Loader = null,
+            ServiceKind = null,
+        };
+
+        var assets = (sidecar?.Assets ?? Array.Empty<AssetMetadata>())
+            .Where(asset => asset.Kind != AssetKind.Moding || !string.Equals(asset.Id, draft.Id, StringComparison.Ordinal))
+            .Append(metadata)
+            .ToArray();
+        WriteSidecar(sidecarAbsolute, sourceRelative, assets);
+
+        var entry = new EditorAssetEntry(metadata, sidecarRelative, sidecarAbsolute, sourceRelative, absolutePath);
+        _assets[key] = entry;
+        _tags.Remove(key);
+        return new EditorCommitResult(ToInfo(entry), bumped);
     }
 
     /// <summary>新建资产（版本从 <c>1.0.0</c> 起；卡牌源文件缺失时补一份可解析骨架）。</summary>
@@ -1818,13 +1930,17 @@ internal sealed class AssetEditorSession
 
                 declaredId = parsed.Body?.Id;
             }
+            else if (kind == AssetKind.Moding && sourceAbsolute.EndsWith(ModingFileSuffix, StringComparison.OrdinalIgnoreCase))
+            {
+                declaredId = AssetSchema.Read(File.ReadAllText(sourceAbsolute), sourceRelative).Id;
+            }
             else
             {
                 return;
             }
         }
         catch (Exception ex) when (ex is InvalidDataException or FormatException or IOException
-            or System.Text.Json.JsonException)
+            or System.Text.Json.JsonException or PrefabLoadException)
         {
             return;
         }
@@ -1843,6 +1959,8 @@ internal sealed class AssetEditorSession
         AssetKind.Effect => $"effects/{localId}.prefab.json",
         // R11/D53：卡组固定落 decks/ 顶层。
         AssetKind.Deck => $"decks/{localId}.deck.json",
+        // S11／D11：moding 草案固定落 modings/ 顶层（DSL 文档不属于 kind→路径映射：它不是资产）。
+        AssetKind.Moding => $"modings/{localId}.moding.json",
         _ => string.Empty,
     };
 

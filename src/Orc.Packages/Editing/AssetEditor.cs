@@ -250,6 +250,32 @@ public sealed class AssetEditor
         }
     }
 
+    /// <summary>
+    /// **预制体视图**（S10 入口一／R4 扩展／R24／D13）：一次只读查询给出前端画布需要的全部编辑面。
+    /// <para>
+    /// 三个入参各有理由：<paramref name="packRoot"/> 定位扫描范围、<paramref name="prefabAssetId"/> 定位展开起点、
+    /// <paramref name="draftPath"/> 决定「本层」有没有内容。**不需要会话**——这是只读查询，与编辑会话无关。
+    /// </para>
+    /// <para>
+    /// **无草案时**（<paramref name="draftPath"/> 为 null）：<c>draft: null</c>、成员全 <c>inherited: true</c>，
+    /// 返回结构与有草案时**完全相同**（前端一种解析路径、不需要分支）：「先查父拿成员表 → 建草案 → 再查一次」。
+    /// </para>
+    /// <para>
+    /// **不抛异常**：父未注册／包不存在／草案缺失都走 <see cref="PrefabDescription.Diagnostics"/>（R1 第 2 条）。
+    /// 展开**复用** <see cref="PrefabCatalog.Resolve"/>，编辑器侧不存在第二套展开（R4 末条）。
+    /// **不分页**：一次一个父资产；批量列举交给 <see cref="ListAssets(EditorAssetQuery)"/>。
+    /// </para>
+    /// </summary>
+    /// <param name="packRoot">包根目录（正式包或 <c>*.tmp</c> 临时包均可；未注册的新包按包根现场构建临时目录）。</param>
+    /// <param name="prefabAssetId">父资产 id（组件资产的 <c>asset.id</c>）。</param>
+    /// <param name="draftPath">草案文件路径（相对包根或绝对；null／空白＝无草案）。</param>
+    public PrefabDescription DescribePrefab(string packRoot, string prefabAssetId, string? draftPath = null)
+    {
+        ArgumentNullException.ThrowIfNull(packRoot);
+        ArgumentNullException.ThrowIfNull(prefabAssetId);
+        return PrefabDescriber.Describe(packRoot, prefabAssetId, draftPath);
+    }
+
     /// <summary>`asset.get`。</summary>
     /// <exception cref="AssetEditorException">无会话／资产未声明。</exception>
     public EditorAssetInfo GetAsset(AssetKind kind, string localId)

@@ -94,6 +94,7 @@ public sealed partial class EffectRuntime
     /// <para>纯选择：不附带弃牌/移动等动作，由调用方自行组合。</para>
     /// </summary>
     /// <exception cref="ArgumentNullException">viewer 为 null。</exception>
+    [Orc.Game.Effects.HandlerDsl.HandlerDslResult("status:string:enum", "cards:list<entity>")]
     public async Task<HandCardPick> PickHandCardsAsync(
         Card viewer, int min, int max, CancellationToken ct = default)
     {

@@ -130,6 +130,14 @@ public sealed class MemberDefinition
     /// **handler 内部的具名插入点**（R1i 修订 2026-10-29：seam 恢复，不是退役）。
     /// </para>
     /// </param>
+    /// <param name="sealedMember">
+    /// **成员级封死**（R2；缺省 false＝可覆写）：父把某个成员逐个封死，任何资产层覆写＝装载期拒绝。
+    /// <para>
+    /// 与资产级开关（<see cref="PrefabDefinition.AuthorizesModing"/>）的分工：资产级是总闸（缺省关闭），
+    /// 成员级是逐个排除（默认全部可覆写）。<c>framework.</c> 前缀的框架合成成员**恒为 sealed**，
+    /// 不依赖本字段（沿用 <see cref="ComponentDisposalPolicy.IsReservedMember"/> 的保留名判定，不新增名单）。
+    /// </para>
+    /// </param>
     /// <exception cref="ArgumentException">
     /// name 为空或纯空白；band 未在 bands 方案中声明；bands 含空白项或重复名；seams 含空白项或重复名。
     /// </exception>
@@ -144,7 +152,8 @@ public sealed class MemberDefinition
         SignalTiming? signalTiming = null,
         string? band = null,
         IReadOnlyList<string>? bands = null,
-        IReadOnlyList<string>? seams = null)
+        IReadOnlyList<string>? seams = null,
+        bool sealedMember = false)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -165,6 +174,7 @@ public sealed class MemberDefinition
         Band = band;
         Bands = scheme;
         Seams = ValidateSeams(name, seams);
+        Sealed = sealedMember;
     }
 
     /// <summary>
@@ -364,12 +374,37 @@ public sealed class MemberDefinition
     /// <summary>是否是信号成员（时机入口）。</summary>
     public bool IsSignal => SignalTiming is not null;
 
+    /// <summary>
+    /// **成员级封死**（R2；缺省 false＝可覆写）：父逐个封死成员，资产层覆写＝装载期拒绝。
+    /// <c>framework.</c> 前缀恒 sealed——由 <see cref="IsEffectivelySealed"/> 统一给出，不要求本字段为 true。
+    /// </summary>
+    public bool Sealed { get; }
+
+    /// <summary>
+    /// 「实际上不可覆写」：成员级 <see cref="Sealed"/> 或 <c>framework.</c> 保留名（恒 sealed，R2 第 4 条）。
+    /// </summary>
+    public bool IsEffectivelySealed => Sealed || ComponentDisposalPolicy.IsReservedMember(Name);
+
     /// <summary>是否具备某能力位。</summary>
     public bool Has(MemberVisibility flag) => (Visibility & flag) == flag;
 
-    /// <summary>覆写本成员（R3a：整段替换；可见性只能收紧）。</summary>
+    /// <summary>
+    /// 覆写本成员（R3a：整段替换；可见性只能收紧）。
+    /// <para>
+    /// **R2（批次 4）新增授权门**：资产层参与的继承还要过两级授权——父的资产级开关
+    /// （<see cref="PrefabDefinition.AuthorizesModing"/>，缺省关闭）＋ 成员级封死（<see cref="IsEffectivelySealed"/>）。
+    /// 引擎内部层间继承（<see cref="PrefabLayer.Kernel"/> ↔ <see cref="PrefabLayer.Game"/>）**豁免**，
+    /// 既有 <c>engine ← engine.game</c>、<c>base ← unit/order/counter/hq</c> 的覆写行为逐条不变（R2 第 5、6 条）。
+    /// </para>
+    /// </summary>
     /// <exception cref="InvalidOperationException">子声明的可见性放宽了父声明。</exception>
-    internal MemberDefinition Override(MemberDefinition child)
+    /// <exception cref="PrefabLoadException">资产层覆写未获授权（父开关关闭／成员 sealed／<c>framework.</c> 前缀）。</exception>
+    internal MemberDefinition Override(
+        MemberDefinition child,
+        bool parentAuthorizesModing,
+        PrefabLayer parentLayer,
+        PrefabLayer childLayer,
+        string parentId)
     {
         if ((child.Visibility & ~Visibility) != 0)
         {
@@ -378,8 +413,37 @@ public sealed class MemberDefinition
                 $"成员 '{Name}' 的覆写放大了可见性（父＝{Visibility}，子＝{child.Visibility}）：继承只能收紧、不能放宽（R5）。");
         }
 
+        if (!IsEngineInternalInheritance(parentLayer, childLayer))
+        {
+            if (IsEffectivelySealed)
+            {
+                throw new PrefabLoadException(
+                    PrefabErrorCategories.Structure,
+                    $"成员 '{Name}' 被父资产 '{parentId}' 封死（"
+                    + (Sealed ? "成员级 sealed" : "framework. 前缀恒 sealed")
+                    + "）：未授权即装载期拒绝（R2）。");
+            }
+
+            if (!parentAuthorizesModing)
+            {
+                throw new PrefabLoadException(
+                    PrefabErrorCategories.Structure,
+                    $"父资产 '{parentId}' 未打开可重载开关（authorize-moding），成员 '{Name}' 不允许被覆写："
+                    + "未授权即装载期拒绝（R2）。");
+            }
+        }
+
         return child;
     }
+
+    /// <summary>
+    /// 引擎内部层间继承（<see cref="PrefabLayer.Kernel"/>／<see cref="PrefabLayer.Game"/> 之间）——
+    /// 授权判定对它们**整段豁免**：同一代码库内的层间继承不是「资产试图覆写另一份资产」（R2 第 6 条）。
+    /// </summary>
+    private static bool IsEngineInternalInheritance(PrefabLayer parentLayer, PrefabLayer childLayer)
+        => IsEngineLayer(parentLayer) && IsEngineLayer(childLayer);
+
+    private static bool IsEngineLayer(PrefabLayer layer) => layer is PrefabLayer.Kernel or PrefabLayer.Game;
 }
 
 /// <summary>

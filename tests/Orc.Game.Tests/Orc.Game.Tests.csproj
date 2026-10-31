@@ -27,6 +27,7 @@
     <ProjectReference Include="..\..\src\Orc.Foundation.Actions\Orc.Foundation.Actions.csproj" />
     <!-- 效果解析器的 csx 真编译校验（E1-C）：仅测试侧引入脚本求值器，生产侧不依赖 Orc.Script。 -->
     <ProjectReference Include="..\..\src\Orc.Script\Orc.Script.csproj" />
+    <ProjectReference Include="..\..\src\Orc.HandlerDsl\Orc.HandlerDsl.csproj" />
   </ItemGroup>
 
 </Project>

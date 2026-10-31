@@ -40,6 +40,14 @@ public sealed class PrefabDefinition
     /// 兜底信号（R1f；仅组件有意义）：null＝<see cref="ComponentDisposalPolicy.DefaultSignal"/>。
     /// 声明为 <c>effect.removed</c>＝装载期拒绝（<see cref="ComponentDisposalPolicy"/> 是唯一规则来源）。
     /// </param>
+    /// <param name="authorizesModing">
+    /// **资产级可重载开关**（R2；缺省关闭）：本资产允许被 moding 草案／派生资产覆写成员实现。
+    /// <para>
+    /// 缺省关闭是 R2 的原话（「父声明『本资产可被 moding』，缺省关闭」）：没有显式打开＝任何成员覆写都是装载期拒绝。
+    /// 引擎内部层间继承（<see cref="PrefabLayer.Kernel"/>／<see cref="PrefabLayer.Game"/>）**豁免**本开关，
+    /// 既有覆写行为逐条不变（R2 第 5、6 条）。
+    /// </para>
+    /// </param>
     /// <exception cref="ArgumentException">id 为空或纯空白。</exception>
     public PrefabDefinition(
         string id,
@@ -55,7 +63,8 @@ public sealed class PrefabDefinition
         IEnumerable<string>? components = null,
         ActiveWhen activeWhen = ActiveWhen.Placed,
         bool oneShot = false,
-        string? disposalSignal = null)
+        string? disposalSignal = null,
+        bool authorizesModing = false)
     {
         if (string.IsNullOrWhiteSpace(id))
         {
@@ -76,6 +85,7 @@ public sealed class PrefabDefinition
         ActiveWhen = activeWhen;
         OneShot = oneShot;
         DisposalSignal = disposalSignal;
+        AuthorizesModing = authorizesModing;
     }
 
     /// <summary>预制体 id（唯一）。</summary>
@@ -119,6 +129,12 @@ public sealed class PrefabDefinition
 
     /// <summary>兜底信号声明（null＝缺省 <see cref="ComponentDisposalPolicy.DefaultSignal"/>；仅组件有意义）。</summary>
     public string? DisposalSignal { get; }
+
+    /// <summary>
+    /// 资产级可重载开关（R2；缺省 false）：父声明「本资产可被 moding」，未打开＝成员覆写即装载期拒绝。
+    /// 引擎内部层间继承（<see cref="PrefabLayer.Kernel"/>／<see cref="PrefabLayer.Game"/>）不受它约束。
+    /// </summary>
+    public bool AuthorizesModing { get; }
 }
 
 /// <summary>
@@ -161,6 +177,7 @@ public sealed class PrefabType
         ActiveWhen = leaf.ActiveWhen;
         OneShot = leaf.OneShot;
         DisposalSignal = disposalSignal;
+        AuthorizesModing = leaf.AuthorizesModing;
 
         _members = new Dictionary<string, MemberDefinition>(StringComparer.Ordinal);
         foreach (var member in members)
@@ -232,6 +249,9 @@ public sealed class PrefabType
 
     /// <summary>继承链（根→叶子）。</summary>
     public IReadOnlyList<string> Chain { get; }
+
+    /// <summary>本预制体的资产级可重载开关（R2；叶子的声明；<see cref="PrefabDefinition.AuthorizesModing"/>）。</summary>
+    public bool AuthorizesModing { get; }
 
     /// <summary>owner 通道允许的名字集合（私有字段 ∪ 实体公开属性；S5 第 6d 条静态检查用）。</summary>
     public IReadOnlySet<string> OwnerMemberNames { get; }
@@ -399,7 +419,14 @@ public sealed class PrefabCatalog
             else
             {
                 // R3a：覆写＝整段替换（读子预制体即知最终行为，无 super）；可见性只能收紧（R5）。
-                members[existing] = members[existing].Override(member);
+                // R2（批次 4）：**资产层**参与覆写时还要过授权门——父的资产级开关 ＋ 成员级 sealed。
+                var inherited = parent!; // existing >= 0 ⇒ 成员来自父，父必存在。
+                members[existing] = members[existing].Override(
+                    member,
+                    parentAuthorizesModing: inherited.AuthorizesModing,
+                    parentLayer: inherited.Layer,
+                    childLayer: definition.Layer,
+                    parentId: inherited.Id);
             }
         }
 

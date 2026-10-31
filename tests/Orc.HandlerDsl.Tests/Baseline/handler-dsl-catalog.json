@@ -1,0 +1,579 @@
+{
+  "schemaVersion": 1,
+  "catalogRevision": 1142203374,
+  "nodes": [
+    {
+      "name": "addToHand",
+      "pins": [
+        {
+          "name": "cardName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "count",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "battle",
+      "pins": [
+        {
+          "name": "first",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "second",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "buff",
+      "pins": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "attack",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "defense",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "duration",
+          "type": "string",
+          "required": false,
+          "enum": [
+            "NextOwnerTurnStart",
+            "Permanent",
+            "TurnEnd"
+          ]
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "costMod",
+      "pins": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "delta",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "duration",
+          "type": "string",
+          "required": false,
+          "enum": [
+            "NextOwnerTurnStart",
+            "Permanent",
+            "TurnEnd"
+          ]
+        },
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "damage",
+      "pins": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "amount",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "death",
+      "pins": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "killer",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "triggerCard",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "deployCostMod",
+      "pins": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "delta",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "draw",
+      "pins": [
+        {
+          "name": "count",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "fetchFromDeck",
+      "pins": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "card",
+          "type": "entity",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "gainPointSlots",
+      "pins": [
+        {
+          "name": "amount",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "gainPoints",
+      "pins": [
+        {
+          "name": "amount",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "grant",
+      "pins": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "keyword",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "value",
+          "type": "number",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "interrupt",
+      "pins": []
+    },
+    {
+      "name": "kill",
+      "pins": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "losePointSlots",
+      "pins": [
+        {
+          "name": "amount",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "losePoints",
+      "pins": [
+        {
+          "name": "amount",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "move",
+      "pins": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "zone",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "pickHandCards",
+      "pins": [
+        {
+          "name": "min",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "max",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "cards",
+          "type": "list\u003Centity\u003E",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "pin",
+      "pins": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "rerunAuras",
+      "pins": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "revoke",
+      "pins": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "keyword",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "setKeywordValue",
+      "pins": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "keyword",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "value",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "shuffleIn",
+      "pins": [
+        {
+          "name": "cardName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "count",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "silence",
+      "pins": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "stop",
+      "pins": []
+    },
+    {
+      "name": "upgrade",
+      "pins": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "outcome",
+          "type": "string",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

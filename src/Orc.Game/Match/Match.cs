@@ -186,6 +186,10 @@ public sealed class Match
         // 内核零依赖口径不变（接口倒置），实现由 satellite（Orc.Script）提供；宿主已装配＝不覆盖。
         Engine.ScriptEvaluator ??= new Orc.Script.CSharpScriptEvaluator();
 
+        // handler DSL（S8／R28）：把「编译器 ＋ 目录」装到引擎上——含 DSL 成员的草案在装载期现场生成 csx。
+        // 未装配＝能力缺失（仅含 DSL 成员的草案受影响，其余资产零行为变化）；宿主已装配＝不覆盖。
+        Engine.HandlerDsl ??= Orc.Game.Effects.HandlerDslAssembly.Create();
+
         // A2（决策门 A）：内建词条行为制品＝v4 效果组件（Cards/KeywordPrefabs/*.component.json）——
         // 构造期装进编排运行时目录：①词条效果绑定核验（Initialize 的装配段）以目录为判据；②授予链的
         // v4 首选路径（KeywordManager.TryAttachComponent）同以目录为判据；两者都在 Initialize 之前就位。
@@ -678,6 +682,9 @@ public sealed class Match
         // E1-34（DSL 可运行）：默认装配脚本求值器——csx 处理器（效果解析器产物）需要它才能编译执行；
         // 内核零依赖口径不变（接口倒置），实现由 satellite（Orc.Script）提供；宿主已装配＝不覆盖。
         Engine.ScriptEvaluator ??= new Orc.Script.CSharpScriptEvaluator();
+
+        // handler DSL（S8／R28）：与上一处同口径——引擎侧装配编译器 ＋ 目录（宿主已装配＝不覆盖）。
+        Engine.HandlerDsl ??= Orc.Game.Effects.HandlerDslAssembly.Create();
 
         // 资产化 S12c：目标候选合法性 / 无头选靶 / 资源判定器同属内置判定器——已随内置插件迁出（见上）。
 

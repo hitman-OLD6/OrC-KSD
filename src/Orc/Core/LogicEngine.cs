@@ -75,6 +75,21 @@ public sealed class LogicEngine
     public ISyncScriptEvaluator? SyncScriptEvaluator { get; set; }
 
     /// <summary>
+    /// **handler DSL 的装配件**（编译器 ＋ 目录；可空）：由 satellite（<c>Orc.Game</c>）在装配期注入，
+    /// 与 <see cref="ScriptEvaluator"/> 同层同风格（内核零依赖、只持纯接口）。
+    /// <para>
+    /// **只在草案装载期使用**（R28）：装载含 <c>members[].handler.dsl</c> 的草案时**现场生成** csx（不写盘）再走
+    /// 既有 <c>RegisterScript</c> 预编译链。**产物装载期不碰它**——已发布产物里存的是 csx 文本。
+    /// </para>
+    /// <para>
+    /// 未装配（null）＝**能力缺失**：含 DSL 成员的草案＝装载拒绝，分类 <see cref="Orc.Core.Model.PrefabErrorCategories.Capability"/>；
+    /// **不含 DSL 的资产零行为变化**。这是能力依赖、不是 R9 所禁的「专项禁令」——没有编译器就没有编译，
+    /// 等同于「没有 Roslyn 就编译不了 csx」（见 <see cref="HandlerDslEnvironment"/> 的说明）。
+    /// </para>
+    /// </summary>
+    public HandlerDslEnvironment? HandlerDsl { get; set; }
+
+    /// <summary>
     /// 对局级判定器注册表（可空）：对局装配期注入——供效果装载链落地 <c>judicatorWrappers</c>（判定器包装器自注册）。
     /// </summary>
     public JudicatorRegistry? Judicators { get; set; }

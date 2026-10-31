@@ -32,6 +32,16 @@ public static class PrefabErrorCategories
 
     /// <summary>时机错误（无意义挂载：<c>active-when: placed</c> 的组件挂加载期信号，S3 第 4c 条）。</summary>
     public const string Timing = "timing";
+
+    /// <summary>
+    /// 能力缺失（**环境未装配 <c>IHandlerDslCompiler</c>**，D6／D14）：专用于「这台机器上没有编译器」。
+    /// <para>
+    /// **不复用 <see cref="Compile"/>**——「编译失败了」与「这台机器上没有编译器」对作者是完全不同的指引
+    /// （前者改脚本、后者装东西／换环境）；混在一类里作者会照着编译错误去改一个本来没问题的 DSL。
+    /// </para>
+    /// <para>这是**能力依赖**而非专项禁令：没有编译器就不能编译，等同于「没有 Roslyn 就编译不了 csx」（R9 不冲突）。</para>
+    /// </summary>
+    public const string Capability = "capability";
 }
 
 /// <summary>
@@ -41,11 +51,22 @@ public static class PrefabErrorCategories
 /// <param name="Target">出错对象（地址、预制体 id、成员名）。</param>
 /// <param name="Message">人类可读原因。</param>
 /// <param name="MissingFields">缺失字段名清单（仅视图包含校验等场景）。</param>
+/// <param name="Code">
+/// 图校验错误码（**仅 DSL 链填**，取值域＝契约包 <c>contracts/handler-dsl/v1/SPEC.md</c> §14.1 的封闭 13 码）；
+/// csx 链维持现状——那四类仍以 <see cref="Category"/> 身份出现（D14：不要为了让字段整齐去搬它们的既有位置）。
+/// 可空、默认 null，既有消费者零改动。
+/// </param>
+/// <param name="NodePath">
+/// DSL **节点路径**（如 <c>actions[2].then[0]</c>、字段级 <c>actions[0].else</c>）。
+/// **只在草案装载期有值**；产物装载期恒 null（产物里没有 DSL，R28）。可空、默认 null。
+/// </param>
 public sealed record PrefabLoadError(
     string Category,
     string Target,
     string Message,
-    IReadOnlyList<string>? MissingFields = null);
+    IReadOnlyList<string>? MissingFields = null,
+    string? Code = null,
+    string? NodePath = null);
 
 /// <summary>
 /// 装载期错误集合（**收集齐全部失败项**，不是遇错即停——S14 卡包原子性要求在批次 3 起按整包汇总，

@@ -4,6 +4,7 @@
     <Project Path="src/Orc.UI.Contracts/Orc.UI.Contracts.csproj" />
     <Project Path="src/Orc.Protocol/Orc.Protocol.csproj" />
     <Project Path="src/Orc.Script/Orc.Script.csproj" />
+    <Project Path="src/Orc.HandlerDsl/Orc.HandlerDsl.csproj" />
     <Project Path="src/Orc.Game/Orc.Game.csproj" />
     <Project Path="src/Orc.Foundation.Actions/Orc.Foundation.Actions.csproj" />
     <Project Path="src/Orc.Packages/Orc.Packages.csproj" />
@@ -20,6 +21,7 @@
     <Project Path="tests/Orc.Tests/Orc.Tests.csproj" />
     <Project Path="tests/Orc.Game.Tests/Orc.Game.Tests.csproj" />
     <Project Path="tests/Orc.Script.Tests/Orc.Script.Tests.csproj" />
+    <Project Path="tests/Orc.HandlerDsl.Tests/Orc.HandlerDsl.Tests.csproj" />
     <Project Path="tests/Orc.Packages.Tests/Orc.Packages.Tests.csproj" />
     <Project Path="tests/Orc.Mcp.Tests/Orc.Mcp.Tests.csproj" />
     <Project Path="tests/Orc.Ai.Tests/Orc.Ai.Tests.csproj" />

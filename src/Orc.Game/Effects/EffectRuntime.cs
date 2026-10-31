@@ -87,6 +87,7 @@ public enum EffectDuration
 /// `source` 形参（位于 ct 前、位置不变）。本期已接下游消费方＝伤害/击杀＋弃置路径；其余动作的 `source`
 /// 为下游服务接线预留（下游服务不在本步改动文件清单内）。</para>
 /// </summary>
+[Orc.Game.Effects.HandlerDsl.HandlerDslActionFace]
 public sealed partial class EffectRuntime
 {
     private readonly Func<CommandManager?> _commands;
@@ -501,6 +502,7 @@ public sealed partial class EffectRuntime
     /// → <see cref="DeckFetchFailureReason.CardDestroyed"/> → <see cref="DeckFetchFailureReason.NotInDeck"/>（后两者由动作层细化）。
     /// </summary>
     /// <exception cref="ArgumentNullException">target 为 null（参数层）。</exception>
+    [Orc.Game.Effects.HandlerDsl.HandlerDslResult("status:string:enum", "card:entity")]
     public async Task<DeckFetchResult> FetchFromDeckAsync(Card target, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(target);
@@ -668,6 +670,7 @@ public sealed partial class EffectRuntime
     /// 非单位（指令/反制/HQ 等）＝拒绝结果（「在场且存活」谓词不满足——降级不抛错，对齐本门面惯例）。
     /// </summary>
     /// <exception cref="ArgumentNullException">target 为 null。</exception>
+    [Orc.Game.Effects.HandlerDsl.HandlerDslResult("outcome:string:enum")]
     public Task<VeteranPromotionResult> UpgradeAsync(Card target, CancellationToken ct = default, Card? source = null)
     {
         ArgumentNullException.ThrowIfNull(target);

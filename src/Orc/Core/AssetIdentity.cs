@@ -22,7 +22,11 @@ public enum AssetKind
     /// <summary>触发器。</summary>
     Trigger = 2,
 
-    /// <summary>handler（含内含 handler 条目）。</summary>
+    /// <summary>
+    /// handler（含内含 handler 条目）。**保留空壳**：批次 4（S11）沿用 D11 的裁决——
+    /// **本批未启用，勿用于 handler DSL**。DSL 文档不是资产（无 id／版本／lock），
+    /// 它的承载种类是 <see cref="Moding"/>（草案）；产物是自包含的组件资产（<see cref="Effect"/>）。
+    /// </summary>
     Handler = 3,
 
     /// <summary>引擎服务资产（插件提供；子类见 <c>serviceKind</c>）。**追加为 4**——保持既有排序/字节序不变。</summary>
@@ -36,9 +40,22 @@ public enum AssetKind
     /// </para>
     /// </summary>
     Deck = 5,
+
+    /// <summary>
+    /// **moding 草案**（批次 4／S11；D11）：编辑期的派生形态，依赖父效果实体存在，只记录**增量**
+    /// （哪些成员被重载／新增、哪些挂载／包装声明），不落盘展开后的成员表。
+    /// <para>
+    /// **追加为 6**——保持既有 0..5 的排序／字节序不变（与 <see cref="Service"/>／<see cref="Deck"/> 同一约定）。
+    /// </para>
+    /// <para>
+    /// 草案是**合法资产**（R9：可注册、可装载、可被编辑器列举），但只进测试域；正式段解析任何引用都不会命中它。
+    /// 它的成员 handler 可指向一份 handler DSL 文档（<c>handler.dsl</c>），此时装载期**现场生成** csx（不写盘，R28）。
+    /// </para>
+    /// </summary>
+    Moding = 6,
 }
 
-/// <summary>资产种类 token（规范小写：<c>card</c>／<c>effect</c>／<c>trigger</c>／<c>handler</c>／<c>service</c>／<c>deck</c>）读写。</summary>
+/// <summary>资产种类 token（规范小写：<c>card</c>／<c>effect</c>／<c>trigger</c>／<c>handler</c>／<c>service</c>／<c>deck</c>／<c>moding</c>）读写。</summary>
 public static class AssetKindTokens
 {
     /// <summary>规范 token。</summary>
@@ -51,6 +68,7 @@ public static class AssetKindTokens
         AssetKind.Handler => "handler",
         AssetKind.Service => "service",
         AssetKind.Deck => "deck",
+        AssetKind.Moding => "moding",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "未定义的资产种类。"),
     };
 
@@ -65,6 +83,7 @@ public static class AssetKindTokens
             case "handler": kind = AssetKind.Handler; return true;
             case "service": kind = AssetKind.Service; return true;
             case "deck": kind = AssetKind.Deck; return true;
+            case "moding": kind = AssetKind.Moding; return true;
             default: kind = default; return false;
         }
     }

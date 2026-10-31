@@ -42,12 +42,14 @@ public static class CardPackAssembler
             if (pack.ComponentsDirectory is { } componentsDirectory)
             {
                 // v4：解析 + csx 预编译 + 真实挂载门校验，全部落在**暂存面**（正式运行时不动）。
+                // 含 handler.dsl 成员的草案在装载期**现场生成** csx（不写盘；engine.HandlerDsl 提供编译器 ＋ 目录）。
                 componentLoad = AssetPackLoader.Load(
                     ResolveRuntime(engine),
                     componentsDirectory,
                     engine.ScriptEvaluator,
                     engine.SyncScriptEvaluator,
-                    pack.Manifest.Id);
+                    pack.Manifest.Id,
+                    engine.HandlerDsl);
                 failures.AddRange(componentLoad.Errors.Select(static e => $"{e.Target}: {e.Message}"));
             }
             else if (pack.EffectsDirectory is not null)

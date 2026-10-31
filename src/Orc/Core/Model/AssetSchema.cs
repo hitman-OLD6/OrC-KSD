@@ -29,6 +29,12 @@ public static class AssetSchema
     /// <summary>资产类别唯一取值（本 schema 只表达组件实体；卡牌/引擎预制体仍由类型预制体声明）。</summary>
     public const string ComponentKind = "component";
 
+    /// <summary>
+    /// **moding 草案**的类别取值（S11／D11）：与 <see cref="ComponentKind"/> 共用同一套 <c>asset</c> 形态，
+    /// 差别只在语义——草案带 <c>extends</c>、只存增量，且以 <see cref="Orc.Core.AssetKind.Moding"/> 注册。
+    /// </summary>
+    public const string ModingKind = "moding";
+
     /// <summary>资产文件后缀（装载器扫描用）。</summary>
     public const string FilePattern = "*.component.json";
 
@@ -114,14 +120,18 @@ public static class AssetSchema
     {
         var id = RequiredString(element, "id", source);
         var kind = OptionalString(element, "kind") ?? ComponentKind;
-        if (!string.Equals(kind, ComponentKind, StringComparison.Ordinal))
+        if (!string.Equals(kind, ComponentKind, StringComparison.Ordinal)
+            && !string.Equals(kind, ModingKind, StringComparison.Ordinal))
         {
             throw Error(
                 PrefabErrorCategories.Structure,
                 source,
-                $"kind='{kind}' 不受支持：新 schema 只表达组件资产（kind='{ComponentKind}'）；"
-                + "卡牌/引擎由类型预制体声明（R3g／R6b）。");
+                $"kind='{kind}' 不受支持：新 schema 只表达组件资产（kind='{ComponentKind}'）与 moding 草案"
+                + $"（kind='{ModingKind}'）；卡牌/引擎由类型预制体声明（R3g／R6b）。");
         }
+
+        var extends = OptionalString(element, "extends");
+        var authorizesModing = OptionalBool(element, "authorize-moding") ?? false;
 
         var requiresHost = ParseHostKind(OptionalString(element, "requires-host") ?? "any", source);
         var activeWhen = ParseActiveWhen(OptionalString(element, "active-when"));
@@ -244,8 +254,77 @@ public static class AssetSchema
             }
         }
 
-        return new ComponentAsset(
-            id, requiresHost, activeWhen, oneShot, disposalSignal, privateFields, members, mounts, wraps, judgeWraps);
+        try
+        {
+            return new ComponentAsset(
+                id, requiresHost, activeWhen, oneShot, disposalSignal, privateFields, members, mounts, wraps, judgeWraps,
+                extends, authorizesModing);
+        }
+        catch (ArgumentException ex)
+        {
+            throw Error(PrefabErrorCategories.Structure, source, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 读取**来源标记** <c>generated</c>（R28／S11）：`{ generator, catalogRevision, source, dslHash, textHash, nodeMap }`。
+    /// <para>
+    /// 三个哈希字段都是字符串（<c>sha256:…</c> 形态，由生成器/摊平器给出）；<c>nodeMap</c> 可省略——
+    /// 它是调试可读性补偿，**不参与行为判定与 textHash**（D12）。
+    /// </para>
+    /// </summary>
+    /// <exception cref="PrefabLoadException">结构不符（缺必填字段／nodeMap 形态非法）。</exception>
+    private static HandlerGeneratedBlock ReadGenerated(JsonElement element, string memberName, string source)
+    {
+        var where = $"成员 '{memberName}' 的 handler.generated";
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            throw Error(PrefabErrorCategories.Structure, source, $"{where} 必须是对象。");
+        }
+
+        if (!element.TryGetProperty("catalogRevision", out var revisionElement) || !revisionElement.TryGetInt32(out var revision))
+        {
+            throw Error(PrefabErrorCategories.Structure, source, $"{where} 缺少整数 catalogRevision。");
+        }
+
+        IReadOnlyDictionary<string, HandlerLineRange>? nodeMap = null;
+        if (element.TryGetProperty("nodeMap", out var mapElement))
+        {
+            if (mapElement.ValueKind != JsonValueKind.Object)
+            {
+                throw Error(PrefabErrorCategories.Structure, source, $"{where}.nodeMap 必须是对象（节点路径 → [起, 止]）。");
+            }
+
+            var map = new Dictionary<string, HandlerLineRange>(StringComparer.Ordinal);
+            foreach (var entry in mapElement.EnumerateObject())
+            {
+                if (entry.Value.ValueKind != JsonValueKind.Array || entry.Value.GetArrayLength() != 2)
+                {
+                    throw Error(
+                        PrefabErrorCategories.Structure, source, $"{where}.nodeMap['{entry.Name}'] 必须是 [起, 止] 两元素数组。");
+                }
+
+                var start = entry.Value[0];
+                var end = entry.Value[1];
+                if (!start.TryGetInt32(out var startLine) || !end.TryGetInt32(out var endLine))
+                {
+                    throw Error(
+                        PrefabErrorCategories.Structure, source, $"{where}.nodeMap['{entry.Name}'] 的行号必须是整数。");
+                }
+
+                map[entry.Name] = new HandlerLineRange(startLine, endLine);
+            }
+
+            nodeMap = map;
+        }
+
+        return new HandlerGeneratedBlock(
+            RequiredString(element, "generator", source),
+            revision,
+            RequiredString(element, "source", source),
+            RequiredString(element, "dslHash", source),
+            RequiredString(element, "textHash", source),
+            nodeMap);
     }
 
     private static ComponentMemberAsset ReadMember(JsonElement member, string source)
@@ -291,15 +370,43 @@ public static class AssetSchema
             var entry = OptionalString(handlerElement, "entry") ?? "HandleAsync";
             var script = OptionalString(handlerElement, "script");
             var assemblyKey = OptionalString(handlerElement, "assembly-key");
-            if (script is null && assemblyKey is null)
+            var dsl = OptionalString(handlerElement, "dsl");
+            var dslHash = OptionalString(handlerElement, "dslHash");
+
+            // 三选一互斥（D11）：script／assembly-key／dsl 恰好一种。互斥校验并入既有 structure 分类，不新增错误码。
+            var sources = (script is not null ? 1 : 0) + (assemblyKey is not null ? 1 : 0) + (dsl is not null ? 1 : 0);
+            if (sources == 0)
             {
                 throw Error(
                     PrefabErrorCategories.Structure,
                     source,
-                    $"成员 '{name}' 的 handler 既没有 script 也没有 assembly-key（无源码可编译）。");
+                    $"成员 '{name}' 的 handler 既没有 script、也没有 assembly-key、也没有 dsl（无源码可编译）。");
             }
 
-            handler = new ComponentHandlerAsset(id, entry, script, assemblyKey);
+            if (sources > 1)
+            {
+                throw Error(
+                    PrefabErrorCategories.Structure,
+                    source,
+                    $"成员 '{name}' 的 handler 同时声明了多种来源（script／assembly-key／dsl 三选一互斥）："
+                    + $"{DescribeHandlerSources(script, assemblyKey, dsl)}。");
+            }
+
+            if (dslHash is not null && dsl is null)
+            {
+                throw Error(
+                    PrefabErrorCategories.Structure,
+                    source,
+                    $"成员 '{name}' 的 handler 声明了 dslHash 却没有 dsl：dslHash 是 DSL 文档的内容快照哈希。");
+            }
+
+            handler = new ComponentHandlerAsset(id, entry, script, assemblyKey, dsl, dslHash);
+
+            // 来源标记（R28／S11）：只有摊平产物会带 `generated`，草案恒无。
+            if (handlerElement.TryGetProperty("generated", out var generatedElement))
+            {
+                handler = handler with { Generated = ReadGenerated(generatedElement, name, source) };
+            }
         }
 
         var band = OptionalString(member, "band");
@@ -314,8 +421,9 @@ public static class AssetSchema
         }
 
         var seams = ReadSeams(member, source, $"成员 '{name}' 的 seams");
+        var sealedMember = OptionalBool(member, "sealed") ?? false;
 
-        return new ComponentMemberAsset(name, visibility, view, handler, band, bands, seams);
+        return new ComponentMemberAsset(name, visibility, view, handler, band, bands, seams, sealedMember);
     }
 
     /// <summary>
@@ -432,6 +540,16 @@ public static class AssetSchema
             writer.WriteStartObject("asset");
             writer.WriteString("kind", ComponentKind);
             writer.WriteString("id", asset.Id);
+            if (asset.Extends is { } extends)
+            {
+                writer.WriteString("extends", extends);
+            }
+
+            if (asset.AuthorizesModing)
+            {
+                writer.WriteBoolean("authorize-moding", true);
+            }
+
             writer.WriteString("requires-host", FormatHostKind(asset.RequiresHost));
             writer.WriteString("active-when", asset.ActiveWhen == ActiveWhen.Loaded ? "loaded" : "placed");
             writer.WriteBoolean("one-shot", asset.OneShot);
@@ -508,6 +626,11 @@ public static class AssetSchema
                     writer.WriteEndArray();
                 }
 
+                if (member.Sealed)
+                {
+                    writer.WriteBoolean("sealed", true);
+                }
+
                 if (member.Handler is { } handler)
                 {
                     writer.WriteStartObject("handler");
@@ -521,6 +644,21 @@ public static class AssetSchema
                     if (handler.AssemblyKey is not null)
                     {
                         writer.WriteString("assembly-key", handler.AssemblyKey);
+                    }
+
+                    if (handler.Dsl is not null)
+                    {
+                        writer.WriteString("dsl", handler.Dsl);
+                    }
+
+                    if (handler.DslHash is not null)
+                    {
+                        writer.WriteString("dslHash", handler.DslHash);
+                    }
+
+                    if (handler.Generated is { } generated)
+                    {
+                        WriteGenerated(writer, generated);
                     }
 
                     writer.WriteEndObject();
@@ -589,6 +727,32 @@ public static class AssetSchema
 
         var text = Encoding.UTF8.GetString(buffer.ToArray()).Replace("\r\n", "\n", StringComparison.Ordinal);
         return text + "\n";
+    }
+
+    /// <summary>写出**来源标记**（R28／S11）：字段顺序固定，`nodeMap` 仅在非空时写出。</summary>
+    private static void WriteGenerated(Utf8JsonWriter writer, HandlerGeneratedBlock generated)
+    {
+        writer.WriteStartObject("generated");
+        writer.WriteString("generator", generated.Generator);
+        writer.WriteNumber("catalogRevision", generated.CatalogRevision);
+        writer.WriteString("source", generated.Source);
+        writer.WriteString("dslHash", generated.DslHash);
+        writer.WriteString("textHash", generated.TextHash);
+        if (generated.NodeMap is { Count: > 0 } nodeMap)
+        {
+            writer.WriteStartObject("nodeMap");
+            foreach (var pair in nodeMap.OrderBy(static p => p.Key, StringComparer.Ordinal))
+            {
+                writer.WriteStartArray(pair.Key);
+                writer.WriteNumberValue(pair.Value.Start);
+                writer.WriteNumberValue(pair.Value.End);
+                writer.WriteEndArray();
+            }
+
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndObject();
     }
 
     private static void WriteInitial(Utf8JsonWriter writer, PrivateFieldDefinition field)
@@ -705,8 +869,29 @@ public static class AssetSchema
         }
     }
 
-    private static void RejectLegacyFields(JsonElement element, string source)
+    /// <summary>handler 来源的清单文本（三选一互斥冲突的诊断用）。</summary>
+    private static string DescribeHandlerSources(string? script, string? assemblyKey, string? dsl)
     {
+        var names = new List<string>(3);
+        if (script is not null)
+        {
+            names.Add("script");
+        }
+
+        if (assemblyKey is not null)
+        {
+            names.Add("assembly-key");
+        }
+
+        if (dsl is not null)
+        {
+            names.Add("dsl");
+        }
+
+        return string.Join("＋", names);
+    }
+
+    private static void RejectLegacyFields(JsonElement element, string source)    {
         foreach (var property in element.EnumerateObject())
         {
             foreach (var legacy in LegacyFields)

@@ -25,6 +25,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Orc.Packages\Orc.Packages.csproj" />
+    <!-- S10 入口二的目录门面返回 Orc.HandlerDsl 的纯数据类型投影（门面本身仍在 Orc.Game 侧）。 -->
+    <ProjectReference Include="..\..\src\Orc.HandlerDsl\Orc.HandlerDsl.csproj" />
     <ProjectReference Include="..\..\src\Orc.Plugins.BuiltIn\Orc.Plugins.BuiltIn.csproj" />
     <ProjectReference Include="..\..\src\Orc.UI\Orc.UI.csproj" />
     <ProjectReference Include="..\..\src\Orc\Orc.csproj" />

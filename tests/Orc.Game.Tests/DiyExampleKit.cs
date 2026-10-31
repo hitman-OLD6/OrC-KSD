@@ -71,7 +71,10 @@ internal static class DiyExampleKit
         match.Engine.ScriptEvaluator ??= new CSharpScriptEvaluator();
         match.Engine.SyncScriptEvaluator ??= new CSharpSyncScriptEvaluator();
         var loaded = AssetPackLoader.Load(
-            match.Engine.Model!, componentsDirectory, match.Engine.ScriptEvaluator, match.Engine.SyncScriptEvaluator);
+            match.Engine.Model!, componentsDirectory, match.Engine.ScriptEvaluator, match.Engine.SyncScriptEvaluator,
+            // 真实链路：Match 构造期已装配 handler DSL（`Engine.HandlerDsl ??= HandlerDslAssembly.Create()`），
+            // 装载器必须拿到同一份——否则含 DSL 成员的资产会被判成「本环境未装配编译器」（capability）。
+            handlerDsl: match.Engine.HandlerDsl);
         Assert.True(
             loaded.Loaded,
             "v4 装载失败：" + string.Join("；", loaded.Errors.Select(static e => $"{e.Category}/{e.Target}: {e.Message}")));

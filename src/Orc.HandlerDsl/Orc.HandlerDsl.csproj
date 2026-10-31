@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Orc.HandlerDsl</AssemblyName>
+    <RootNamespace>Orc.HandlerDsl</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    handler DSL 的后端实现程序集（S2／S3 起）。
+
+    分层（D4 裁决）：
+      - 内核 `Orc`（Orc.Core）只持**纯接口**：IHandlerDslCompiler／IHandlerCatalog／
+        HandlerDslCompileResult／HandlerDslError，与本工程**无反向依赖**；
+      - DSL 类型系统（引脚类型／表达式／节点／类型推导）与**目录元模型**类型只在本工程，
+        内核不被契约类型污染。
+    权威载体是仓库顶层文本包 `contracts/handler-dsl/v1/`（不进任何 csproj 编译范围）；
+    本程序集是**派生产物**，正确性由 vectors 守护（D2）。改语义时**先改包、后改这里**。
+
+    术语：handler DSL 与 `Orc.Game.EffectParsing.Dsl`（卡面文本效果 DSL）是两个东西，禁止混称。
+  -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\Orc\Orc.csproj" />
+  </ItemGroup>
+
+</Project>
