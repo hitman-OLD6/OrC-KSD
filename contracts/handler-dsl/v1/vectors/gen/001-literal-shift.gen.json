@@ -1,0 +1,99 @@
+{
+  "kind": "gen",
+  "name": "字面量与表达式位移（动作调用 ＋ 表达式内联）",
+  "refs": [
+    "R6",
+    "R12",
+    "D7",
+    "SPEC §13"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "damage",
+        "target": {
+          "view": "Target"
+        },
+        "amount": {
+          "op": "sub",
+          "args": [
+            {
+              "view": "Defense"
+            },
+            {
+              "lit": 1
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 1142203374,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "attack": "number",
+      "defense": "number",
+      "name": "string"
+    },
+    "nodes": [
+      {
+        "name": "damage",
+        "source": {
+          "face": "EffectRuntime",
+          "method": "DamageAsync",
+          "faceType": "Orc.Game.Effects.EffectRuntime",
+          "tokenParameter": "ct"
+        },
+        "hasAwait": true,
+        "hasSideEffect": true,
+        "inputs": [
+          {
+            "name": "target",
+            "type": "entity",
+            "required": true
+          },
+          {
+            "name": "amount",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "source",
+            "type": "entity",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "result",
+            "type": "boolean",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  "view": {
+    "fields": {
+      "Target": {
+        "type": "entity"
+      },
+      "Defense": {
+        "type": "number",
+        "writable": true
+      },
+      "Units": {
+        "type": "list<entity>"
+      }
+    }
+  },
+  "expect": {
+    "csx": "001-literal-shift.expected.csx"
+  }
+}

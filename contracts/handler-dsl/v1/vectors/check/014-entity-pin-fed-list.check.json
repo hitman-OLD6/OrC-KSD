@@ -1,0 +1,95 @@
+{
+  "kind": "check",
+  "name": "动作的实体引脚接 list<entity>（集合须显式 iterate）",
+  "refs": [
+    "R22",
+    "R26",
+    "SPEC §10.1"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "damage",
+        "target": {
+          "view": "Units"
+        },
+        "amount": {
+          "lit": 1
+        }
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 1142203374,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "attack": "number",
+      "defense": "number",
+      "kredits": "number",
+      "name": "string"
+    },
+    "nodes": [
+      {
+        "name": "damage",
+        "source": {
+          "face": "EffectRuntime",
+          "method": "DamageAsync",
+          "faceType": "Orc.Game.Effects.EffectRuntime",
+          "tokenParameter": "ct"
+        },
+        "hasAwait": true,
+        "hasSideEffect": true,
+        "inputs": [
+          {
+            "name": "target",
+            "type": "entity",
+            "required": true
+          },
+          {
+            "name": "amount",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "source",
+            "type": "entity",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "result",
+            "type": "boolean",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  "view": {
+    "fields": {
+      "Target": {
+        "type": "entity"
+      },
+      "Defense": {
+        "type": "number",
+        "writable": true
+      },
+      "Units": {
+        "type": "list<entity>"
+      },
+      "Name": {
+        "type": "string"
+      }
+    }
+  },
+  "expect": {
+    "code": "pin-type",
+    "nodePath": "actions[0].target"
+  }
+}

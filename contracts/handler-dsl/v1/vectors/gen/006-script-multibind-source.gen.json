@@ -1,0 +1,153 @@
+{
+  "kind": "gen",
+  "name": "script ＋ 多输出 bind 拆解 ＋ source 连线（正文原样内联、结果对象先持有再拆）",
+  "refs": [
+    "R15",
+    "R19",
+    "D7",
+    "SPEC §13",
+    "SPEC §8.9"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "script",
+        "inputs": [
+          {
+            "name": "x",
+            "type": "number"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "y",
+            "type": "number"
+          }
+        ],
+        "body": "// 作者脚本正文原样内联\nvar y = view.Amount + 1;"
+      },
+      {
+        "op": "fetchFromDeck",
+        "bind": {
+          "status": "st",
+          "card": "c"
+        },
+        "target": {
+          "view": "Target"
+        }
+      },
+      {
+        "op": "kill",
+        "target": {
+          "view": "Target"
+        },
+        "source": {
+          "var": "c"
+        }
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 1142203374,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "attack": "number",
+      "defense": "number",
+      "kredits": "number",
+      "name": "string"
+    },
+    "nodes": [
+      {
+        "name": "fetchFromDeck",
+        "source": {
+          "face": "EffectRuntime",
+          "method": "FetchFromDeckAsync",
+          "faceType": "Orc.Game.Effects.EffectRuntime",
+          "tokenParameter": "ct"
+        },
+        "hasAwait": true,
+        "hasSideEffect": true,
+        "inputs": [
+          {
+            "name": "target",
+            "type": "entity",
+            "required": true
+          },
+          {
+            "name": "source",
+            "type": "entity",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "status",
+            "type": "string",
+            "required": true,
+            "enumType": "enum"
+          },
+          {
+            "name": "card",
+            "type": "entity",
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "kill",
+        "source": {
+          "face": "EffectRuntime",
+          "method": "KillAsync",
+          "faceType": "Orc.Game.Effects.EffectRuntime",
+          "tokenParameter": "ct"
+        },
+        "hasAwait": true,
+        "hasSideEffect": true,
+        "inputs": [
+          {
+            "name": "target",
+            "type": "entity",
+            "required": true
+          },
+          {
+            "name": "source",
+            "type": "entity",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "result",
+            "type": "boolean",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  "view": {
+    "fields": {
+      "Target": {
+        "type": "entity"
+      },
+      "Defense": {
+        "type": "number",
+        "writable": true
+      },
+      "Units": {
+        "type": "list<entity>"
+      },
+      "Name": {
+        "type": "string"
+      }
+    }
+  },
+  "expect": {
+    "csx": "006-script-multibind-source.expected.csx"
+  }
+}

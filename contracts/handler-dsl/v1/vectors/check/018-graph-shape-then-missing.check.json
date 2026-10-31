@@ -1,0 +1,56 @@
+{
+  "kind": "check",
+  "name": "branch 缺 then（then 必填且非空）",
+  "refs": [
+    "R18",
+    "D17",
+    "SPEC §3"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "branch",
+        "test": {
+          "lit": true
+        }
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 1142203374,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "attack": "number",
+      "defense": "number",
+      "kredits": "number",
+      "name": "string"
+    },
+    "nodes": []
+  },
+  "view": {
+    "fields": {
+      "Target": {
+        "type": "entity"
+      },
+      "Defense": {
+        "type": "number",
+        "writable": true
+      },
+      "Units": {
+        "type": "list<entity>"
+      },
+      "Name": {
+        "type": "string"
+      }
+    }
+  },
+  "expect": {
+    "code": "graph-shape",
+    "nodePath": "actions[0].then"
+  }
+}

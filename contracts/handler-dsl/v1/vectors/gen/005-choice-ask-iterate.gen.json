@@ -1,0 +1,168 @@
+{
+  "kind": "gen",
+  "name": "choice ＋ ask ＋ iterate（交互节点、字符串转义、绑定跨节点可见）",
+  "refs": [
+    "R23",
+    "R17",
+    "D18",
+    "SPEC §10.2",
+    "SPEC §13"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "choice",
+        "prompt": "选择一项：\"抽牌\" 或 \"放弃\"",
+        "options": [
+          {
+            "label": "抽 1 张",
+            "actions": [
+              {
+                "op": "draw",
+                "count": {
+                  "lit": 1
+                }
+              }
+            ]
+          },
+          {
+            "label": "放弃",
+            "actions": [
+              {
+                "op": "stop"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "op": "ask",
+        "kind": "unit",
+        "side": "enemy",
+        "prompt": "选一个敌方单位",
+        "bind": "picked",
+        "fallback": "first"
+      },
+      {
+        "op": "iterate",
+        "over": {
+          "var": "picked"
+        },
+        "as": "p",
+        "actions": [
+          {
+            "op": "kill",
+            "target": {
+              "var": "p"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 1142203374,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "attack": "number",
+      "defense": "number",
+      "kredits": "number",
+      "name": "string"
+    },
+    "nodes": [
+      {
+        "name": "draw",
+        "source": {
+          "face": "EffectRuntime",
+          "method": "DrawAsync",
+          "implicitHost": "viewer",
+          "faceType": "Orc.Game.Effects.EffectRuntime",
+          "tokenParameter": "ct"
+        },
+        "hasAwait": true,
+        "hasSideEffect": true,
+        "inputs": [
+          {
+            "name": "count",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "source",
+            "type": "entity",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "result",
+            "type": "number",
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "kill",
+        "source": {
+          "face": "EffectRuntime",
+          "method": "KillAsync",
+          "faceType": "Orc.Game.Effects.EffectRuntime",
+          "tokenParameter": "ct"
+        },
+        "hasAwait": true,
+        "hasSideEffect": true,
+        "inputs": [
+          {
+            "name": "target",
+            "type": "entity",
+            "required": true
+          },
+          {
+            "name": "source",
+            "type": "entity",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "result",
+            "type": "boolean",
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "stop",
+        "hasAwait": false,
+        "hasSideEffect": true,
+        "inputs": [],
+        "outputs": []
+      }
+    ]
+  },
+  "view": {
+    "fields": {
+      "Target": {
+        "type": "entity"
+      },
+      "Defense": {
+        "type": "number",
+        "writable": true
+      },
+      "Units": {
+        "type": "list<entity>"
+      },
+      "Name": {
+        "type": "string"
+      }
+    }
+  },
+  "expect": {
+    "csx": "005-choice-ask-iterate.expected.csx"
+  }
+}

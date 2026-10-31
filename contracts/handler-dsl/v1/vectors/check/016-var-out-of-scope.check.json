@@ -1,0 +1,141 @@
+{
+  "kind": "check",
+  "name": "分支内声明的绑定在分支外引用（词法作用域收口）",
+  "refs": [
+    "R20",
+    "R26",
+    "SPEC §8"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "branch",
+        "test": {
+          "lit": true
+        },
+        "then": [
+          {
+            "op": "draw",
+            "bind": "drawn",
+            "count": {
+              "lit": 1
+            }
+          }
+        ]
+      },
+      {
+        "op": "damage",
+        "target": {
+          "var": "drawn"
+        },
+        "amount": {
+          "lit": 1
+        }
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 1142203374,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "attack": "number",
+      "defense": "number",
+      "kredits": "number",
+      "name": "string"
+    },
+    "nodes": [
+      {
+        "name": "damage",
+        "source": {
+          "face": "EffectRuntime",
+          "method": "DamageAsync",
+          "faceType": "Orc.Game.Effects.EffectRuntime",
+          "tokenParameter": "ct"
+        },
+        "hasAwait": true,
+        "hasSideEffect": true,
+        "inputs": [
+          {
+            "name": "target",
+            "type": "entity",
+            "required": true
+          },
+          {
+            "name": "amount",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "source",
+            "type": "entity",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "result",
+            "type": "boolean",
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "draw",
+        "source": {
+          "face": "EffectRuntime",
+          "method": "DrawAsync",
+          "implicitHost": "viewer",
+          "faceType": "Orc.Game.Effects.EffectRuntime",
+          "tokenParameter": "ct"
+        },
+        "hasAwait": true,
+        "hasSideEffect": true,
+        "inputs": [
+          {
+            "name": "count",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "source",
+            "type": "entity",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "result",
+            "type": "number",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  "view": {
+    "fields": {
+      "Target": {
+        "type": "entity"
+      },
+      "Defense": {
+        "type": "number",
+        "writable": true
+      },
+      "Units": {
+        "type": "list<entity>"
+      },
+      "Name": {
+        "type": "string"
+      }
+    }
+  },
+  "expect": {
+    "code": "bind-scope",
+    "nodePath": "actions[1].target"
+  }
+}

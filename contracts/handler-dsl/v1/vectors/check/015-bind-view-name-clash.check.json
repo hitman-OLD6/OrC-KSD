@@ -1,0 +1,89 @@
+{
+  "kind": "check",
+  "name": "绑定名与视图字段同名（绑定与视图字段不得同名）",
+  "refs": [
+    "R19",
+    "R20",
+    "R26"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "draw",
+        "bind": "Defense",
+        "count": {
+          "lit": 1
+        }
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 1142203374,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "attack": "number",
+      "defense": "number",
+      "kredits": "number",
+      "name": "string"
+    },
+    "nodes": [
+      {
+        "name": "draw",
+        "source": {
+          "face": "EffectRuntime",
+          "method": "DrawAsync",
+          "implicitHost": "viewer",
+          "faceType": "Orc.Game.Effects.EffectRuntime",
+          "tokenParameter": "ct"
+        },
+        "hasAwait": true,
+        "hasSideEffect": true,
+        "inputs": [
+          {
+            "name": "count",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "source",
+            "type": "entity",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "result",
+            "type": "number",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  "view": {
+    "fields": {
+      "Target": {
+        "type": "entity"
+      },
+      "Defense": {
+        "type": "number",
+        "writable": true
+      },
+      "Units": {
+        "type": "list<entity>"
+      },
+      "Name": {
+        "type": "string"
+      }
+    }
+  },
+  "expect": {
+    "code": "bind-scope",
+    "nodePath": "actions[0].bind"
+  }
+}

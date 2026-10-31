@@ -1,0 +1,57 @@
+{
+  "kind": "check",
+  "name": "write 到视图声明里没有的字段（R17 的可写性硬拒绝）",
+  "refs": [
+    "R17",
+    "R26",
+    "SPEC §11.3"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "write",
+        "field": "Cost",
+        "value": {
+          "lit": 1
+        }
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 1142203374,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "attack": "number",
+      "defense": "number",
+      "kredits": "number",
+      "name": "string"
+    },
+    "nodes": []
+  },
+  "view": {
+    "fields": {
+      "Target": {
+        "type": "entity"
+      },
+      "Defense": {
+        "type": "number",
+        "writable": true
+      },
+      "Units": {
+        "type": "list<entity>"
+      },
+      "Name": {
+        "type": "string"
+      }
+    }
+  },
+  "expect": {
+    "code": "write-forbidden",
+    "nodePath": "actions[0].field"
+  }
+}

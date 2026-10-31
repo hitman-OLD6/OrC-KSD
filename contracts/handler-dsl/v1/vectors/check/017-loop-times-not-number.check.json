@@ -1,0 +1,57 @@
+{
+  "kind": "check",
+  "name": "循环上限不是 number（仍落 loop-unbounded，不落 pin-type）",
+  "refs": [
+    "R14",
+    "R26",
+    "SPEC §9.1"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "loop",
+        "times": {
+          "lit": "3"
+        },
+        "actions": []
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 1142203374,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "attack": "number",
+      "defense": "number",
+      "kredits": "number",
+      "name": "string"
+    },
+    "nodes": []
+  },
+  "view": {
+    "fields": {
+      "Target": {
+        "type": "entity"
+      },
+      "Defense": {
+        "type": "number",
+        "writable": true
+      },
+      "Units": {
+        "type": "list<entity>"
+      },
+      "Name": {
+        "type": "string"
+      }
+    }
+  },
+  "expect": {
+    "code": "loop-unbounded",
+    "nodePath": "actions[0].times"
+  }
+}

@@ -1,0 +1,136 @@
+{
+  "kind": "gen",
+  "name": "let ＋ while ＋ sequence ＋ branch ＋ write（上限只求值一次、test 每轮重估、表达式无临时变量）",
+  "refs": [
+    "R6",
+    "R14",
+    "R17",
+    "D16",
+    "D7",
+    "SPEC §13"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "let",
+        "name": "budget",
+        "value": {
+          "op": "count",
+          "args": [
+            {
+              "view": "Units"
+            }
+          ]
+        }
+      },
+      {
+        "op": "while",
+        "test": {
+          "op": "gt",
+          "args": [
+            {
+              "var": "budget"
+            },
+            {
+              "lit": 0
+            }
+          ]
+        },
+        "limit": {
+          "var": "budget"
+        },
+        "actions": [
+          {
+            "op": "sequence",
+            "actions": [
+              {
+                "op": "branch",
+                "test": {
+                  "op": "empty",
+                  "args": [
+                    {
+                      "view": "Units"
+                    }
+                  ]
+                },
+                "then": [
+                  {
+                    "op": "write",
+                    "field": "Defense",
+                    "value": {
+                      "op": "sub",
+                      "args": [
+                        {
+                          "view": "Defense"
+                        },
+                        {
+                          "lit": 1
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "else": [
+                  {
+                    "op": "write",
+                    "field": "Defense",
+                    "value": {
+                      "op": "add",
+                      "args": [
+                        {
+                          "view": "Defense"
+                        },
+                        {
+                          "read": {
+                            "of": "self",
+                            "path": "attack"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 1142203374,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "attack": "number",
+      "defense": "number",
+      "kredits": "number",
+      "name": "string"
+    },
+    "nodes": []
+  },
+  "view": {
+    "fields": {
+      "Target": {
+        "type": "entity"
+      },
+      "Defense": {
+        "type": "number",
+        "writable": true
+      },
+      "Units": {
+        "type": "list<entity>"
+      },
+      "Name": {
+        "type": "string"
+      }
+    }
+  },
+  "expect": {
+    "csx": "004-let-while-branch-write.expected.csx"
+  }
+}

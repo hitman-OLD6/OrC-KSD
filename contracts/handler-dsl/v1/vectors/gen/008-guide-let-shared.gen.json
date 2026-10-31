@@ -1,0 +1,119 @@
+{
+  "kind": "gen",
+  "name": "《前端接入指南》§8.3 共享中间值（出度>1 必须用 let）",
+  "refs": [
+    "FRONTEND-GUIDE §8.3",
+    "SPEC §8.6"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "let",
+        "name": "n",
+        "value": {
+          "op": "count",
+          "args": [
+            {
+              "view": "Units"
+            }
+          ]
+        }
+      },
+      {
+        "op": "branch",
+        "test": {
+          "op": "gt",
+          "args": [
+            {
+              "var": "n"
+            },
+            {
+              "lit": 0
+            }
+          ]
+        },
+        "then": [
+          {
+            "op": "damage",
+            "target": {
+              "view": "Unit"
+            },
+            "amount": {
+              "var": "n"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 1142203374,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "attack": "number",
+      "defense": "number",
+      "deployCost": "number",
+      "hqHealth": "number",
+      "kredits": "number",
+      "maxKredits": "number",
+      "name": "string",
+      "opCost": "number",
+      "zone": "string"
+    },
+    "nodes": [
+      {
+        "name": "damage",
+        "source": {
+          "face": "EffectRuntime",
+          "method": "DamageAsync",
+          "faceType": "Orc.Game.Effects.EffectRuntime",
+          "tokenParameter": "ct"
+        },
+        "hasAwait": true,
+        "hasSideEffect": true,
+        "inputs": [
+          {
+            "name": "target",
+            "type": "entity",
+            "required": true
+          },
+          {
+            "name": "amount",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "source",
+            "type": "entity",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "result",
+            "type": "boolean",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  "view": {
+    "fields": {
+      "Units": {
+        "type": "list<entity>"
+      },
+      "Unit": {
+        "type": "entity"
+      }
+    }
+  },
+  "expect": {
+    "csx": "008-guide-let-shared.expected.csx"
+  }
+}

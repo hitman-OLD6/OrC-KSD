@@ -1,0 +1,343 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orc.dev/contracts/handler-dsl/v1/schema.json",
+  "title": "handler DSL document v1",
+  "description": "handler DSL 文档的 JSON Schema（由 SPEC.md §2–§5 的字段封闭表机械生成）。schemaVersion 硬门与深度上限（64）、拓扑树性、绑定作用域、目录引脚一致性、表达式类型推导均不在本 Schema 可表达范围内，由校验器按 SPEC.md 执行；本 Schema 只覆盖「结构＋字段封闭」。",
+  "type": "object",
+  "required": ["schemaVersion", "actions"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "硬版本轴：不匹配＝装载期拒绝（schema-version）。"
+    },
+    "catalogRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "软版本轴：只作诊断，缺省合法，不一致永不作为拒绝理由（SPEC §12.7）。"
+    },
+    "actions": {
+      "type": "array",
+      "description": "节点数组；数组顺序即执行顺序。可为空（空 handler）。",
+      "items": { "$ref": "#/$defs/node" }
+    }
+  },
+  "$defs": {
+    "node": {
+      "description": "一个树节点。op ∈ {10 个内建 op} ∪ {目录动作节点名}。树里不存在「同一节点」，节点无 id、无 ref、无跳转边。",
+      "oneOf": [
+        { "$ref": "#/$defs/sequence" },
+        { "$ref": "#/$defs/branch" },
+        { "$ref": "#/$defs/loop" },
+        { "$ref": "#/$defs/while" },
+        { "$ref": "#/$defs/iterate" },
+        { "$ref": "#/$defs/choice" },
+        { "$ref": "#/$defs/let" },
+        { "$ref": "#/$defs/write" },
+        { "$ref": "#/$defs/ask" },
+        { "$ref": "#/$defs/script" },
+        { "$ref": "#/$defs/actionNode" }
+      ]
+    },
+
+    "sequence": {
+      "type": "object",
+      "required": ["op", "actions"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "sequence" },
+        "actions": { "type": "array", "items": { "$ref": "#/$defs/node" } }
+      }
+    },
+
+    "branch": {
+      "type": "object",
+      "required": ["op", "test", "then"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "branch" },
+        "test": { "$ref": "#/$defs/expression", "description": "必须推导为 boolean。" },
+        "then": {
+          "type": "array",
+          "minItems": 1,
+          "description": "必填且非空（空数组＝graph-shape）。",
+          "items": { "$ref": "#/$defs/node" }
+        },
+        "else": {
+          "type": "array",
+          "minItems": 1,
+          "description": "无 else 必须省略该字段；`\"else\": []` ＝ graph-shape 拒绝。",
+          "items": { "$ref": "#/$defs/node" }
+        }
+      }
+    },
+
+    "loop": {
+      "type": "object",
+      "required": ["op", "times", "actions"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "loop" },
+        "times": { "$ref": "#/$defs/expression", "description": "必填，任意 number 表达式（不要求编译期常量）；缺／类型不符＝loop-unbounded。" },
+        "actions": { "type": "array", "items": { "$ref": "#/$defs/node" } }
+      }
+    },
+
+    "while": {
+      "type": "object",
+      "required": ["op", "test", "limit", "actions"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "while" },
+        "test": { "$ref": "#/$defs/expression", "description": "每轮重估；必须推导为 boolean。" },
+        "limit": { "$ref": "#/$defs/expression", "description": "只在循环开始时求值一次；必须推导为 number；缺／类型不符＝loop-unbounded。" },
+        "actions": { "type": "array", "items": { "$ref": "#/$defs/node" } }
+      }
+    },
+
+    "iterate": {
+      "type": "object",
+      "required": ["op", "over", "as", "actions"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "iterate" },
+        "over": { "$ref": "#/$defs/expression", "description": "必须是 list<T>；否则 pin-type（集合来源用 ask／view 字段／动作输出）。" },
+        "as": { "$ref": "#/$defs/bindingName" },
+        "actions": { "type": "array", "items": { "$ref": "#/$defs/node" } }
+      }
+    },
+
+    "choice": {
+      "type": "object",
+      "required": ["op", "prompt", "options"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "choice" },
+        "prompt": { "type": "string", "description": "选项文案（字面量）。" },
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/choiceOption" }
+        }
+      }
+    },
+
+    "choiceOption": {
+      "type": "object",
+      "required": ["label", "actions"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string" },
+        "actions": {
+          "type": "array",
+          "description": "所有 options[].actions 处在同一作用域层级（互斥、不叠加）。",
+          "items": { "$ref": "#/$defs/node" }
+        }
+      }
+    },
+
+    "let": {
+      "type": "object",
+      "required": ["op", "name", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "let" },
+        "name": { "$ref": "#/$defs/bindingName", "description": "跨多处引用同一中间值的唯一正路（SPEC §8.6）。" },
+        "value": { "$ref": "#/$defs/expression" }
+      }
+    },
+
+    "write": {
+      "type": "object",
+      "required": ["op", "field", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "write" },
+        "field": { "type": "string", "minLength": 1, "description": "必须是编译期字面量（不接受运行期按名写）。" },
+        "value": { "$ref": "#/$defs/expression" }
+      }
+    },
+
+    "ask": {
+      "type": "object",
+      "required": ["op", "kind", "prompt"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "ask" },
+        "kind": {
+          "type": "string",
+          "enum": ["unit", "hq", "card"],
+          "description": "候选实体子类型；结果恒为 list<entity>，静态子类型＝kind。"
+        },
+        "side": { "type": "string" },
+        "zone": { "type": "string" },
+        "filter": { "$ref": "#/$defs/expression", "description": "必须推导为 boolean。" },
+        "prompt": { "type": "string" },
+        "bind": { "$ref": "#/$defs/singleBind" },
+        "fallback": {
+          "type": "string",
+          "enum": ["empty", "first"],
+          "default": "empty",
+          "description": "只管「无交互通道」这一种情况；有通道但玩家取消＝返回空集、不走 fallback（SPEC §10.2）。"
+        }
+      }
+    },
+
+    "script": {
+      "type": "object",
+      "required": ["op", "inputs", "outputs", "body"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "script" },
+        "inputs": { "type": "array", "items": { "$ref": "#/$defs/scriptPin" } },
+        "outputs": { "type": "array", "items": { "$ref": "#/$defs/scriptPin" } },
+        "body": { "type": "string", "description": "csx 片段；只经声明引脚与图交互。" }
+      }
+    },
+
+    "scriptPin": {
+      "type": "object",
+      "required": ["name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/bindingName" },
+        "type": { "$ref": "#/$defs/pinTypeName" }
+      }
+    },
+
+    "actionNode": {
+      "type": "object",
+      "required": ["op"],
+      "description": "目录生成的节点：字段集＝目录声明的输入引脚名（＋可选 bind）。表外字段＝pin-unknown。",
+      "properties": {
+        "op": {
+          "type": "string",
+          "minLength": 1,
+          "not": {
+            "enum": ["sequence", "branch", "loop", "while", "iterate", "choice", "let", "write", "ask", "script"]
+          },
+          "description": "节点名：内建 op 与目录节点名冲突＝扫描期断言失败，故此处排除 10 个内建 op。"
+        },
+        "bind": { "$ref": "#/$defs/bind" }
+      },
+      "additionalProperties": { "$ref": "#/$defs/expression" }
+    },
+
+    "bind": {
+      "description": "单输出→字符串；多输出→对象（键集必须恰好等于目录声明的输出名集合）。单输出写成对象＝bind-scope。",
+      "oneOf": [
+        { "$ref": "#/$defs/singleBind" },
+        {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/bindingName" }
+        }
+      ]
+    },
+
+    "singleBind": { "$ref": "#/$defs/bindingName" },
+
+    "bindingName": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+      "description": "不得与视图字段名同名；同一可见链上禁止同名（含遮蔽）。"
+    },
+
+    "pinTypeName": {
+      "type": "string",
+      "enum": [
+        "entity",
+        "number",
+        "string",
+        "boolean",
+        "list<entity>",
+        "list<number>",
+        "list<string>",
+        "list<boolean>"
+      ],
+      "description": "引脚类型封闭集（SPEC §6）：不提供结构体／字典／可空／任意 CLR 类型／list<list<…>>。"
+    },
+
+    "expression": {
+      "description": "引脚取值子语言：五种变体之一，恰有一个变体键。出现第六种形态＝pin-unknown。",
+      "oneOf": [
+        { "$ref": "#/$defs/lit" },
+        { "$ref": "#/$defs/var" },
+        { "$ref": "#/$defs/view" },
+        { "$ref": "#/$defs/read" },
+        { "$ref": "#/$defs/op" }
+      ]
+    },
+
+    "lit": {
+      "type": "object",
+      "required": ["lit"],
+      "additionalProperties": false,
+      "properties": {
+        "lit": {
+          "type": ["number", "string", "boolean"],
+          "description": "JSON 类型决定引脚类型；null／数组／对象＝pin-unknown。"
+        }
+      }
+    },
+
+    "var": {
+      "type": "object",
+      "required": ["var"],
+      "additionalProperties": false,
+      "properties": { "var": { "$ref": "#/$defs/bindingName" } }
+    },
+
+    "view": {
+      "type": "object",
+      "required": ["view"],
+      "additionalProperties": false,
+      "properties": {
+        "view": {
+          "type": "string",
+          "minLength": 1,
+          "description": "当前执行帧的视图字段；字段必须在挂载点目标成员的视图声明里，否则 pin-unknown。"
+        }
+      }
+    },
+
+    "read": {
+      "type": "object",
+      "required": ["read"],
+      "additionalProperties": false,
+      "properties": {
+        "read": {
+          "type": "object",
+          "required": ["of", "path"],
+          "additionalProperties": false,
+          "properties": {
+            "of": { "type": "string", "enum": ["self", "viewer"] },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "取值集由目录的 readables 声明；未知 path＝pin-unknown。"
+            }
+          }
+        }
+      }
+    },
+
+    "op": {
+      "type": "object",
+      "required": ["op", "args"],
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "type": "string",
+          "description": "算子名，取值集封闭（SPEC §5）：add/sub/mul、eq/ne/lt/le/gt/ge、and/or/not、count/sum/max/min、empty。v1 无除法。未知＝expr-op-unknown。"
+        },
+        "args": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/expression" }
+        }
+      }
+    }
+  }
+}

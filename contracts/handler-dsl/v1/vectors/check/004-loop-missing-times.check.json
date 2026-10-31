@@ -1,0 +1,52 @@
+{
+  "kind": "check",
+  "name": "loop 缺 times（不落默认值兜底）",
+  "refs": [
+    "R14",
+    "D16",
+    "SPEC §9.1"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "loop",
+        "actions": [
+          {
+            "op": "sequence",
+            "actions": []
+          }
+        ]
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 1142203374,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "attack": "number",
+      "defense": "number",
+      "kredits": "number",
+      "name": "string"
+    },
+    "nodes": []
+  },
+  "view": {
+    "fields": {
+      "Target": {
+        "type": "entity"
+      },
+      "Defense": {
+        "type": "number"
+      }
+    }
+  },
+  "expect": {
+    "code": "loop-unbounded",
+    "nodePath": "actions[0].times"
+  }
+}

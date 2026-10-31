@@ -1,0 +1,124 @@
+{
+  "kind": "gen",
+  "name": "运行期上限的循环 ＋ 遍历 ＋ 早退（只求值一次、恒 for）",
+  "refs": [
+    "R6",
+    "R14",
+    "R22",
+    "D16",
+    "SPEC §13"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "loop",
+        "times": {
+          "op": "count",
+          "args": [
+            {
+              "view": "Units"
+            }
+          ]
+        },
+        "actions": [
+          {
+            "op": "iterate",
+            "over": {
+              "view": "Units"
+            },
+            "as": "u",
+            "actions": [
+              {
+                "op": "damage",
+                "target": {
+                  "var": "u"
+                },
+                "amount": {
+                  "lit": 1
+                }
+              }
+            ]
+          },
+          {
+            "op": "stop"
+          }
+        ]
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 1142203374,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "attack": "number",
+      "defense": "number",
+      "name": "string"
+    },
+    "nodes": [
+      {
+        "name": "damage",
+        "source": {
+          "face": "EffectRuntime",
+          "method": "DamageAsync",
+          "faceType": "Orc.Game.Effects.EffectRuntime",
+          "tokenParameter": "ct"
+        },
+        "hasAwait": true,
+        "hasSideEffect": true,
+        "inputs": [
+          {
+            "name": "target",
+            "type": "entity",
+            "required": true
+          },
+          {
+            "name": "amount",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "source",
+            "type": "entity",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "result",
+            "type": "boolean",
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "stop",
+        "hasAwait": false,
+        "hasSideEffect": true,
+        "inputs": [],
+        "outputs": []
+      }
+    ]
+  },
+  "view": {
+    "fields": {
+      "Target": {
+        "type": "entity"
+      },
+      "Defense": {
+        "type": "number",
+        "writable": true
+      },
+      "Units": {
+        "type": "list<entity>"
+      }
+    }
+  },
+  "expect": {
+    "csx": "003-loop-runtime-bound.expected.csx"
+  }
+}

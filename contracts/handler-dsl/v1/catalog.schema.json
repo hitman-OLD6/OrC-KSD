@@ -1,0 +1,206 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://orc.dev/contracts/handler-dsl/v1/catalog.schema.json",
+ "title": "handler DSL node catalog (meta-model) v1",
+ "description": "节点目录的**元模型**（SPEC §12）：定义目录实例长什么样。本文件只描述结构与字段语义，不含任何具体方法的标注实例——「谁标了什么」只存在引擎程序集里，目录实例由运行期扫描产出；落盘副本仅作 vectors 快照。",
+ "type": "object",
+ "required": [
+  "schemaVersion",
+  "catalogRevision",
+  "nodes"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "schemaVersion": {
+   "type": "integer",
+   "const": 1,
+   "description": "目录元模型所属的契约版本；与 DSL 文档的 schemaVersion 同一硬轴。"
+  },
+  "catalogRevision": {
+   "type": "integer",
+   "minimum": 0,
+   "description": "目录实例的内容版本（软轴）。增量变更只递增它；破坏性变更须同时升 schemaVersion（SPEC §1）。"
+  },
+  "scannedFaces": {
+   "type": "array",
+   "description": "本次扫描输入集：带 [HandlerDslActionFace] 的门面类型名清单。用于回答「这个节点来自哪个门面」。",
+   "items": {
+    "type": "string",
+    "minLength": 1
+   }
+  },
+  "readables": {
+   "type": "object",
+   "description": "read.path 的封闭取值集（SPEC §12.8）：path → 引脚类型名。未知 path＝pin-unknown。",
+   "minProperties": 1,
+   "additionalProperties": {
+    "$ref": "#/$defs/pinTypeName"
+   }
+  },
+  "nodes": {
+   "type": "array",
+   "description": "可调用原语清单。内建 10 个 op 不得出现在此（冲突＝扫描期断言失败）。目录里不存在「列出来但不可连线」的禁用态节点。",
+   "items": {
+    "$ref": "#/$defs/node"
+   }
+  }
+ },
+ "$defs": {
+  "node": {
+   "type": "object",
+   "required": [
+    "name",
+    "inputs",
+    "outputs"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "name": {
+     "type": "string",
+     "pattern": "^[a-z][A-Za-z0-9_]*$",
+     "not": {
+      "enum": [
+       "sequence",
+       "branch",
+       "loop",
+       "while",
+       "iterate",
+       "choice",
+       "let",
+       "write",
+       "ask",
+       "script"
+      ]
+     },
+     "description": "契约可见的节点标识（node-unknown 按它判）。默认派生＝去 Async 后缀、首字母小写；冲突或改名时由 [HandlerDslNode] 显式给出，显式优先。"
+    },
+    "source": {
+     "$ref": "#/$defs/source"
+    },
+    "hasAwait": {
+     "type": "boolean",
+     "default": false,
+     "description": "递归标记：本节点是 ask/choice/script，或子树内有，或 test/value/over 表达式含 count/read。容器节点继承子树标记。"
+    },
+    "hasSideEffect": {
+     "type": "boolean",
+     "default": false,
+     "description": "递归标记：本节点是 write/ask/choice/script/动作节点，或子树内有。容器节点继承子树标记。"
+    },
+    "inputs": {
+     "type": "array",
+     "description": "输入引脚。CancellationToken 恒不出引脚；隐式宿主首参（host/viewer/self）不出引脚；重载合并后仅部分重载出现的引脚为 required:false。",
+     "items": {
+      "$ref": "#/$defs/pin"
+     }
+    },
+    "outputs": {
+     "type": "array",
+     "description": "输出引脚：Task<T> 展开；void＝空数组。单输出→bind 用字符串；多输出→bind 用对象且键集必须恰好等于本数组的名字集。契约：若任务返回结果对象而未标注拆解，目录生成失败（不静默退化为一个 string 引脚）。",
+     "items": {
+      "$ref": "#/$defs/pin"
+     }
+    }
+   }
+  },
+  "source": {
+   "type": "object",
+   "description": "节点的来源（扫描溯源）。纯元数据，不参与校验判定。**合成节点（stop／interrupt）省略本对象**——它们不属于任何门面（SPEC §12.9），快照校验不得把缺 source 判成孤儿。",
+   "additionalProperties": false,
+   "properties": {
+    "face": {
+     "type": "string",
+     "description": "门面类型名（带 [HandlerDslActionFace] 的类型）。"
+    },
+    "method": {
+     "type": "string",
+     "description": "方法名（可与节点名不同——改名由 [HandlerDslNode] 解耦）。"
+    },
+    "faceType": {
+     "type": "string",
+     "description": "门面类型的 **CLR 全名**：生成码定位调用目标用（实例方法经 EffectRuntime 解析接收者，静态方法直接 类型.方法）。与 face 的短名互补。"
+    },
+    "static": {
+     "type": "boolean",
+     "default": false,
+     "description": "来源方法是否静态。静态门面（如 KeywordEffectActionFace）生成码直接 类型.方法；实例门面（如 EffectRuntime）经 EffectRuntime.ResolveFor(orcSelf) 取接收者。"
+    },
+    "implicitHost": {
+     "type": "string",
+     "enum": [
+      "host",
+      "viewer",
+      "self"
+     ],
+     "description": "隐式宿主参数（封闭白名单），不出引脚，生成码固定用 orcSelf。"
+    },
+    "tokenParameter": {
+     "type": "string",
+     "description": "来源方法的 CancellationToken 形参名（无此形参时省略）。该形参**不出引脚**，但生成码必须把它按命名实参传下去；漏传会让动作恒拿 default(CancellationToken)，取消与超时永远传导不到动作内部。"
+    }
+   }
+  },
+  "pin": {
+   "type": "object",
+   "required": [
+    "name",
+    "type"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "name": {
+     "type": "string",
+     "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+     "description": "引脚名（契约可见；改名＝删除引脚＝破坏性变更）。"
+    },
+    "type": {
+     "$ref": "#/$defs/pinTypeName"
+    },
+    "required": {
+     "type": "boolean",
+     "default": true,
+     "description": "参数无默认值且在所有重载里都出现＝true；否则 false（可省略）。可选→必填＝破坏性变更。"
+    },
+    "subtypes": {
+     "type": "array",
+     "description": "仅 entity／list<entity> 引脚：运行期接受的子类型集，供前端连线提示；图校验期只对基类型做硬拒绝。",
+     "items": {
+      "type": "string",
+      "enum": [
+       "unit",
+       "hq",
+       "card"
+      ]
+     },
+     "minItems": 1
+    },
+    "enum": {
+     "type": "array",
+     "description": "仅 string 引脚：允许取值集（枚举用 string ＋ 本字段表达）。收窄＝破坏性变更。",
+     "items": {
+      "type": "string"
+     },
+     "minItems": 1
+    },
+    "enumType": {
+     "type": "string",
+     "description": "枚举引脚的 CLR 类型全名（C# 枚举参数：生成码落 <类型>.<成员>）；或结果拆解里的保留值 `enum`（[HandlerDslResult] 的 `name:type:enum`，生成码落 .ToString()）。纯元数据，不参与校验判定。"
+    }
+   }
+  },
+  "pinTypeName": {
+   "type": "string",
+   "enum": [
+    "entity",
+    "number",
+    "string",
+    "boolean",
+    "list<entity>",
+    "list<number>",
+    "list<string>",
+    "list<boolean>"
+   ],
+   "description": "引脚类型封闭集。五类之外的类型名出现在目录＝目录生成失败（装载期拒绝）。"
+  }
+ }
+}

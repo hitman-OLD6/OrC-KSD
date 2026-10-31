@@ -1,0 +1,100 @@
+{
+  "kind": "gen",
+  "name": "《前端接入指南》§3.1 最小可用样例（ask → iterate → damage）",
+  "refs": [
+    "FRONTEND-GUIDE §3.1",
+    "SPEC §3"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "ask",
+        "kind": "unit",
+        "side": "enemy",
+        "prompt": "选一个敌方单位",
+        "bind": "targets"
+      },
+      {
+        "op": "iterate",
+        "over": {
+          "var": "targets"
+        },
+        "as": "t",
+        "actions": [
+          {
+            "op": "damage",
+            "target": {
+              "var": "t"
+            },
+            "amount": {
+              "lit": 3
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 1142203374,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "attack": "number",
+      "defense": "number",
+      "deployCost": "number",
+      "hqHealth": "number",
+      "kredits": "number",
+      "maxKredits": "number",
+      "name": "string",
+      "opCost": "number",
+      "zone": "string"
+    },
+    "nodes": [
+      {
+        "name": "damage",
+        "source": {
+          "face": "EffectRuntime",
+          "method": "DamageAsync",
+          "faceType": "Orc.Game.Effects.EffectRuntime",
+          "tokenParameter": "ct"
+        },
+        "hasAwait": true,
+        "hasSideEffect": true,
+        "inputs": [
+          {
+            "name": "target",
+            "type": "entity",
+            "required": true
+          },
+          {
+            "name": "amount",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "source",
+            "type": "entity",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "result",
+            "type": "boolean",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  "view": {
+    "fields": {}
+  },
+  "expect": {
+    "csx": "007-guide-minimal.expected.csx"
+  }
+}

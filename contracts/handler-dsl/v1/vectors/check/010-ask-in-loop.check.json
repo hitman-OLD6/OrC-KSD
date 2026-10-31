@@ -1,0 +1,64 @@
+{
+  "kind": "check",
+  "name": "ask 出现在 iterate 循环体内（同一 handler 内不发起重复交互）",
+  "refs": [
+    "R23",
+    "R26",
+    "SPEC §10.2"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "iterate",
+        "over": {
+          "view": "Units"
+        },
+        "as": "u",
+        "actions": [
+          {
+            "op": "ask",
+            "kind": "unit",
+            "prompt": "选一个单位"
+          }
+        ]
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 1142203374,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "attack": "number",
+      "defense": "number",
+      "kredits": "number",
+      "name": "string"
+    },
+    "nodes": []
+  },
+  "view": {
+    "fields": {
+      "Target": {
+        "type": "entity"
+      },
+      "Defense": {
+        "type": "number",
+        "writable": true
+      },
+      "Units": {
+        "type": "list<entity>"
+      },
+      "Name": {
+        "type": "string"
+      }
+    }
+  },
+  "expect": {
+    "code": "ask-in-loop",
+    "nodePath": "actions[0].actions[0]"
+  }
+}

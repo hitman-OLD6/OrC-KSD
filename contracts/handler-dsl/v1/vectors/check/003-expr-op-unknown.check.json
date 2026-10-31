@@ -1,0 +1,104 @@
+{
+  "kind": "check",
+  "name": "未知算子 div（v1 不提供除法）",
+  "refs": [
+    "R26",
+    "D7",
+    "SPEC §5"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "damage",
+        "target": {
+          "view": "Target"
+        },
+        "amount": {
+          "op": "sub",
+          "args": [
+            {
+              "lit": 4
+            },
+            {
+              "op": "div",
+              "args": [
+                {
+                  "lit": 8
+                },
+                {
+                  "lit": 2
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 1142203374,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "attack": "number",
+      "defense": "number",
+      "kredits": "number",
+      "name": "string"
+    },
+    "nodes": [
+      {
+        "name": "damage",
+        "source": {
+          "face": "EffectRuntime",
+          "method": "DamageAsync",
+          "faceType": "Orc.Game.Effects.EffectRuntime",
+          "tokenParameter": "ct"
+        },
+        "hasAwait": true,
+        "hasSideEffect": true,
+        "inputs": [
+          {
+            "name": "target",
+            "type": "entity",
+            "required": true
+          },
+          {
+            "name": "amount",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "source",
+            "type": "entity",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "result",
+            "type": "boolean",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  "view": {
+    "fields": {
+      "Target": {
+        "type": "entity"
+      },
+      "Defense": {
+        "type": "number"
+      }
+    }
+  },
+  "expect": {
+    "code": "expr-op-unknown",
+    "nodePath": "actions[0].amount.args[1]"
+  }
+}

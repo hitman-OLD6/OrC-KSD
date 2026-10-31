@@ -1,0 +1,855 @@
+{
+  "schemaVersion": 1,
+  "catalogRevision": 1142203374,
+  "scannedFaces": [
+    "Orc.Game.Cards.KeywordEffectActionFace",
+    "Orc.Game.Effects.EffectRuntime"
+  ],
+  "readables": {
+    "attack": "number",
+    "defense": "number",
+    "deployCost": "number",
+    "hqHealth": "number",
+    "kredits": "number",
+    "maxKredits": "number",
+    "name": "string",
+    "opCost": "number",
+    "zone": "string"
+  },
+  "nodes": [
+    {
+      "name": "death",
+      "source": {
+        "face": "KeywordEffectActionFace",
+        "method": "DeathAsync",
+        "implicitHost": "host",
+        "faceType": "Orc.Game.Cards.KeywordEffectActionFace",
+        "static": true,
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "killer",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "triggerCard",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "addToHand",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "AddToHandAsync",
+        "implicitHost": "viewer",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "cardName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "count",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "battle",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "BattleAsync",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "first",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "second",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "buff",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "BuffAsync",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "attack",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "defense",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "duration",
+          "type": "string",
+          "required": false,
+          "enum": [
+            "Permanent",
+            "TurnEnd",
+            "NextOwnerTurnStart"
+          ],
+          "enumType": "Orc.Game.Effects.EffectDuration"
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "costMod",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "CostModAsync",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "delta",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "duration",
+          "type": "string",
+          "required": false,
+          "enum": [
+            "Permanent",
+            "TurnEnd",
+            "NextOwnerTurnStart"
+          ],
+          "enumType": "Orc.Game.Effects.EffectDuration"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "damage",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "DamageAsync",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "amount",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "deployCostMod",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "DeployCostModAsync",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "delta",
+          "type": "number",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "draw",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "DrawAsync",
+        "implicitHost": "viewer",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "count",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "fetchFromDeck",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "FetchFromDeckAsync",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "status",
+          "type": "string",
+          "required": true,
+          "enumType": "enum"
+        },
+        {
+          "name": "card",
+          "type": "entity",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "gainPointSlots",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "GainPointSlotsAsync",
+        "implicitHost": "viewer",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "amount",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "gainPoints",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "GainPointsAsync",
+        "implicitHost": "viewer",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "amount",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "grant",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "GrantAsync",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "keyword",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "value",
+          "type": "number",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "kill",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "KillAsync",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "losePointSlots",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "LosePointSlotsAsync",
+        "implicitHost": "viewer",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "amount",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "losePoints",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "LosePointsAsync",
+        "implicitHost": "viewer",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "amount",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "move",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "MoveAsync",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "zone",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "pickHandCards",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "PickHandCardsAsync",
+        "implicitHost": "viewer",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "min",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "max",
+          "type": "number",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "status",
+          "type": "string",
+          "required": true,
+          "enumType": "enum"
+        },
+        {
+          "name": "cards",
+          "type": "list\u003Centity\u003E",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "pin",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "PinAsync",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "rerunAuras",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "RerunAurasAsync",
+        "implicitHost": "host",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "revoke",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "RevokeAsync",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "keyword",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "setKeywordValue",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "SetKeywordValueAsync",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "keyword",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "value",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "shuffleIn",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "ShuffleInAsync",
+        "implicitHost": "viewer",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "cardName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "count",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "silence",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "SilenceAsync",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "upgrade",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "UpgradeAsync",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "outcome",
+          "type": "string",
+          "required": true,
+          "enumType": "enum"
+        }
+      ]
+    },
+    {
+      "name": "stop",
+      "hasAwait": false,
+      "hasSideEffect": true,
+      "inputs": [],
+      "outputs": []
+    },
+    {
+      "name": "interrupt",
+      "hasAwait": false,
+      "hasSideEffect": true,
+      "inputs": [],
+      "outputs": []
+    }
+  ]
+}
