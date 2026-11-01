@@ -1,0 +1,53 @@
+{
+  "kind": "check",
+  "name": "script 缺 outputs（inputs 给了空数组）",
+  "refs": [
+    "V4",
+    "SPEC §3"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "script",
+        "inputs": [],
+        "body": "return;"
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 223446220,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "hq": {
+        "hqHealth": "number",
+        "name": "string"
+      },
+      "player": {
+        "hqHealth": "number",
+        "kredits": "number",
+        "maxKredits": "number"
+      },
+      "unit": {
+        "attack": "number",
+        "defense": "number",
+        "deployCost": "number",
+        "name": "string",
+        "opCost": "number",
+        "zone": "string"
+      }
+    },
+    "nodes": []
+  },
+  "view": {
+    "fields": {}
+  },
+  "expect": {
+    "code": "pin-missing",
+    "nodePath": "actions[0].outputs"
+  }
+}

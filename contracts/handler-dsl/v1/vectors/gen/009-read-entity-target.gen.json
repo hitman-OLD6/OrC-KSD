@@ -1,0 +1,120 @@
+{
+  "kind": "gen",
+  "name": "read.of 实体表达式（读被遍历实体的属性）",
+  "refs": [
+    "D2",
+    "SPEC §4.5",
+    "SPEC §12.8"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "iterate",
+        "over": {
+          "view": "Units"
+        },
+        "as": "u",
+        "actions": [
+          {
+            "op": "branch",
+            "test": {
+              "op": "le",
+              "args": [
+                {
+                  "read": {
+                    "of": {
+                      "var": "u"
+                    },
+                    "path": "defense"
+                  }
+                },
+                {
+                  "lit": 2
+                }
+              ]
+            },
+            "then": [
+              {
+                "op": "draw",
+                "count": {
+                  "lit": 1
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 1142203374,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "hq": {
+        "hqHealth": "number",
+        "name": "string"
+      },
+      "player": {
+        "hqHealth": "number",
+        "kredits": "number",
+        "maxKredits": "number"
+      },
+      "unit": {
+        "attack": "number",
+        "defense": "number",
+        "deployCost": "number",
+        "name": "string",
+        "opCost": "number",
+        "zone": "string"
+      }
+    },
+    "nodes": [
+      {
+        "name": "draw",
+        "source": {
+          "face": "EffectRuntime",
+          "method": "DrawAsync",
+          "implicitHost": "viewer",
+          "faceType": "Orc.Game.Effects.EffectRuntime",
+          "tokenParameter": "ct"
+        },
+        "hasAwait": true,
+        "hasSideEffect": true,
+        "inputs": [
+          {
+            "name": "count",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "source",
+            "type": "entity",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "result",
+            "type": "number",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  "view": {
+    "fields": {
+      "Units": {
+        "type": "list<entity>"
+      }
+    }
+  },
+  "expect": {
+    "csx": "009-read-entity-target.expected.csx"
+  }
+}

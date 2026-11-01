@@ -158,7 +158,8 @@ contracts/handler-dsl/v1/
 { "lit": 2 }                                                  // 字面量（number / string / boolean）
 { "var": "drawn" }                                            // 绑定引用（§9 作用域规则）
 { "view": "Defense" }                                          // 当前执行帧的视图字段
-{ "read": { "of": "self", "path": "attack" } }                 // 卡属性／玩家资源读取
+{ "read": { "of": "self", "path": "attack" } }                 // 读宿主卡自身
+{ "read": { "of": { "var": "t" }, "path": "defense" } }        // 读某个实体（如被遍历的那个）
 { "op": "sub", "args": [ { "view": "Defense" }, { "lit": 1 } ] } // 算子应用（可嵌套）
 ```
 
@@ -166,7 +167,13 @@ contracts/handler-dsl/v1/
 2. `lit` 的 JSON 类型决定类型：number → `number`、string → `string`、boolean → `boolean`；其它 JSON 类型（null／数组／对象）＝`pin-unknown`。
 3. `var` 的绑定名必须在作用域内可见（§9），否则 `bind-scope`。
 4. `view` 的字段名必须在挂载点目标成员的视图声明里，否则 `pin-unknown`。
-5. `read.of` 取值集（v1 封闭）：`self`／`viewer`；`read.path` 取值集由目录声明的**可读项**给出，未知＝`pin-unknown`。
+5. `read.of` **两种形态，恰取其一**：
+   - **保留字面量** `self`／`viewer`（字符串）——读宿主卡自身／宿主归属的玩家；
+   - **实体表达式**（对象，能推导出 `entity` 的值）——读**那个实体自身**的属性。
+     这是「读被遍历的那个单位」的唯一入口：`iterate{over, as:"t"}` 之后写
+     `{ "read": { "of": { "var": "t" }, "path": "defense" } }`。
+     给非 `entity` 类型＝`pin-type`。
+   `read.path` 的取值集由目录按**实体种类**声明；`of` 与 `path` 的组合不成立＝`pin-unknown`（见 §12.8）。
 6. `op` 见 §5；`args` 必须是非空数组。
 
 ---
@@ -400,6 +407,7 @@ sideEffectOf(x) = 自身标记(x) ∨ 任一子节点 sideEffectOf
 | `HandlerDslResult` | 方法 | `outputs: {name,type,kind}[]` | 结果对象的多输出拆解（`kind` ∈ 标量／枚举前缀） |
 | `HandlerDslEnumValues` | 参数／输出 | `values: string[]` | `string` 引脚的允许取值集 |
 | `HandlerDslSubtype` | 参数／输出 | `types: string[]`（∈ `unit`／`hq`／`card`） | 实体引脚的运行期接受子类型集 |
+| `HandlerDslPure` | 方法 | — | 声明**无副作用**（只读查询）。默认规则把一切 `Task`／`Task<T>` 方法判成有副作用——对动作正确，对异步查询（如 `unitsOf`）过头。**只标真正无副作用的**：标错会让前端允许复制一个实际不可复制的节点，比不标更糟 |
 
 标注字段的取值类型**按 §6 封闭集**，不为标注另造一套 DSL。
 
@@ -423,21 +431,48 @@ sideEffectOf(x) = 自身标记(x) ∨ 任一子节点 sideEffectOf
 
 ### §12.8 可读项（`read.path`）
 
-可读项由目录声明（`readables`），v1 初版：
+可读项**按实体种类分组**声明——「能读什么」只取决于 `read.of` 最终定位到的那一类实体，
+与 `of` 写成 `self`／`viewer` 还是实体表达式无关。
 
-| path | 类型 | 含义 |
+```jsonc
+"readables": {
+  "unit":   { "attack": "number", "defense": "number", "opCost": "number",
+              "deployCost": "number", "name": "string", "zone": "string" },
+  "hq":     { "hqHealth": "number", "name": "string" },
+  "player": { "kredits": "number", "maxKredits": "number", "hqHealth": "number" }
+}
+```
+
+| path | 类型 | 含义 | 出现在 |
+| --- | --- | --- | --- |
+| `attack` | `number` | 攻击力（实时值，含修饰链） | `unit` |
+| `defense` | `number` | 防御力（实时值，含修饰链） | `unit` |
+| `opCost` | `number` | 行动费 | `unit` |
+| `deployCost` | `number` | 部署费 | `unit` |
+| `zone` | `string` | 所在区域标识 | `unit` |
+| `hqHealth` | `number` | HQ 血量 | `hq`、`player` |
+| `kredits` | `number` | 玩家当前点数 | `player` |
+| `maxKredits` | `number` | 玩家点数上限 | `player` |
+| `name` | `string` | 实体名 | `unit`、`hq` |
+
+**目标 → 种类集合的折算**（三种形态）：
+
+| `of` 形态 | 种类集合 | 说明 |
 | --- | --- | --- |
-| `attack` | `number` | 攻击力（实时值，含修饰链） |
-| `defense` | `number` | 防御力（实时值，含修饰链） |
-| `opCost` | `number` | 行动费 |
-| `deployCost` | `number` | 部署费 |
-| `hqHealth` | `number` | HQ 血量 |
-| `kredits` | `number` | 玩家当前点数 |
-| `maxKredits` | `number` | 玩家点数上限 |
-| `name` | `string` | 实体名 |
-| `zone` | `string` | 所在区域标识 |
+| `"self"` | `unit ∪ hq` | 宿主卡是单位还是总部静态未知，取并集 |
+| `"viewer"` | `player` | 宿主归属的玩家 |
+| 实体表达式 | 由静态子类型决定；未知 ⇒ `unit ∪ hq` | 如 `ask.kind=hq` 的遍历元素 ⇒ 只有 `hq` |
 
-未知 `path` ＝`pin-unknown`（复用码，不新增）。
+`of` 与 `path` 的组合不成立（如 `self` 配 `kredits`、`viewer` 配 `attack`）＝`pin-unknown`
+（**复用码，不新增**；错误路径指向 `.read.path`）。
+
+> **为什么按种类分组而不是按 `self`／`viewer`**：`of` 放开成实体表达式后，「调用者视角」这个维度就站不住了
+> ——`{"var":"t"}` 既不是 self 也不是 viewer，但 `t` 是单位就得能读 `attack`。
+> 种类是唯一与 `of` 形态无关的维度。
+>
+> 这张表也不是新发明的语义：运行期 `ReadValue` 早就按 owner 严格分区（`of=self` 读 `kredits` 会抛
+> `NotSupportedException`）。v1 早期把它留成了「扁平表 + 只收 self／viewer」，于是存在一条
+> 「校验通过、运行期抛异常」的缝——分组就是把这个既有事实搬到元数据。
 
 ### §12.9 合成节点（`stop`／`interrupt`）
 
@@ -454,6 +489,27 @@ sideEffectOf(x) = 自身标记(x) ∨ 任一子节点 sideEffectOf
 
 `DslCatalog` 的实现在**构造时**注入这两个节点；从目录快照反序列化时**跳过**它们的 `nodes` 条目
 （否则同一节点被注入两次）。生成码固定为 `ctx.Stop()`／`ctx.Interrupt()`，不经 `EffectRuntime`。
+
+### §12.10 只读查询原语（`unitsOf`）
+
+`iterate.over` 的来源若只有 `ask`（必须弹窗问玩家）或视图里恰好声明了实体列表，
+「每个我方单位 +1 攻击」这类最基础的 DIY 写法就表达不出来——**界面怎么设计都造不出一个不存在的原语**。
+故 v1 起收录一个只读查询节点：
+
+| 节点 | 引脚 | 输出 | 标记 |
+| --- | --- | --- | --- |
+| `unitsOf` | `side`（`string`，取值集 `self`／`enemy`／`any`，必填）、`zone`（`string`，可选） | `result`：`list<entity>` | `hasAwait=true`、`hasSideEffect=false` |
+
+- 它**不是**合成节点：由 `[HandlerDslActionFace]` 门面上的真实方法 ＋ 标注扫描得来（§12.5），
+  所以目录一升级前端就自动看到，无需契约包改动。
+- **`hasAwait=true` 是对的**：它要读世界状态，会挂起。因此折叠规则（§2.7）判它**不可复制**——
+  复制一份等于在两个时刻各查一次；作者要共享就写 `let`。这正是 §8.6 的意图，不是限制。
+- **`hasSideEffect=false`** 靠 `[HandlerDslPure]` 显式声明（§12.4）：默认规则把一切 `Task` 方法判成有副作用，
+  对动作正确、对异步查询过头。
+
+**本版未收录**（有意，非遗漏）：`firstOf`／`randomOf`。
+两者都能用 `unitsOf` ＋ `iterate` ＋ 条件表达；而它们各自的语义坑（空集时返回什么、随机两次结果不同）
+在 v1 尚无自洽答案，宁可不加。
 
 ---
 

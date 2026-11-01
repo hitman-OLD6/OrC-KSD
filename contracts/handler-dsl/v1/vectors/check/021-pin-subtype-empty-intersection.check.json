@@ -1,0 +1,91 @@
+{
+  "kind": "check",
+  "name": "引脚 subtypes 与实体静态子类型交集为空",
+  "refs": [
+    "V2",
+    "SPEC §7.6"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "ask",
+        "kind": "unit",
+        "prompt": "选单位",
+        "bind": "us"
+      },
+      {
+        "op": "iterate",
+        "over": {
+          "var": "us"
+        },
+        "as": "u",
+        "actions": [
+          {
+            "op": "killHq",
+            "target": {
+              "var": "u"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 223446220,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "hq": {
+        "hqHealth": "number",
+        "name": "string"
+      },
+      "player": {
+        "hqHealth": "number",
+        "kredits": "number",
+        "maxKredits": "number"
+      },
+      "unit": {
+        "attack": "number",
+        "defense": "number",
+        "deployCost": "number",
+        "name": "string",
+        "opCost": "number",
+        "zone": "string"
+      }
+    },
+    "nodes": [
+      {
+        "name": "killHq",
+        "source": {
+          "face": "TestFace",
+          "method": "KillHqAsync",
+          "implicitHost": "host"
+        },
+        "hasAwait": true,
+        "hasSideEffect": true,
+        "inputs": [
+          {
+            "name": "target",
+            "type": "entity",
+            "required": true,
+            "subtypes": [
+              "hq"
+            ]
+          }
+        ],
+        "outputs": []
+      }
+    ]
+  },
+  "view": {
+    "fields": {}
+  },
+  "expect": {
+    "code": "pin-type",
+    "nodePath": "actions[1].actions[0].target"
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "kind": "check",
+  "name": "read 的目标与读取项组合不成立（self 读 kredits）",
+  "refs": [
+    "V3",
+    "D1",
+    "SPEC §12.8"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "write",
+        "field": "Field",
+        "value": {
+          "read": {
+            "of": "self",
+            "path": "kredits"
+          }
+        }
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 223446220,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "hq": {
+        "hqHealth": "number",
+        "name": "string"
+      },
+      "player": {
+        "hqHealth": "number",
+        "kredits": "number",
+        "maxKredits": "number"
+      },
+      "unit": {
+        "attack": "number",
+        "defense": "number",
+        "deployCost": "number",
+        "name": "string",
+        "opCost": "number",
+        "zone": "string"
+      }
+    },
+    "nodes": []
+  },
+  "view": {
+    "fields": {
+      "Field": {
+        "type": "number",
+        "writable": true
+      }
+    }
+  },
+  "expect": {
+    "code": "pin-unknown",
+    "nodePath": "actions[0].value.read.path"
+  }
+}

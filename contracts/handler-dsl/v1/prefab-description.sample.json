@@ -1,0 +1,1898 @@
+{
+  "packRoot": "<packRoot>",
+  "prefabAssetId": "test.parent",
+  "prefab": {
+    "id": "test.parent",
+    "kind": "component",
+    "layer": "asset",
+    "chain": [
+      "test.parent"
+    ],
+    "requiresHost": "unit",
+    "activeWhen": "placed",
+    "oneShot": false,
+    "disposalSignal": "card.destroyed",
+    "authorizesModing": true
+  },
+  "draft": {
+    "path": "modings/test.child.draft.moding.json",
+    "draftAssetId": "test.child.draft",
+    "declaredParentId": "test.parent",
+    "overriddenMembers": [
+      "onDeployed"
+    ],
+    "addedMembers": [
+      "onNew"
+    ],
+    "mounts": [],
+    "wraps": []
+  },
+  "members": [
+    {
+      "name": "onDeployed",
+      "address": "self#onDeployed",
+      "inherited": false,
+      "overridden": true,
+      "added": false,
+      "declaredBy": "test.child.draft",
+      "visibility": [
+        "callable",
+        "hostable"
+      ],
+      "isSignal": false,
+      "signalTiming": null,
+      "sealed": false,
+      "overridable": true,
+      "seamNames": [],
+      "viewFields": [
+        {
+          "name": "Defense",
+          "type": "number",
+          "writable": true,
+          "required": false
+        }
+      ],
+      "handlerSource": "dsl",
+      "handlerId": "test.child.draft#onDeployed",
+      "mountedTo": [],
+      "wrappedAt": []
+    },
+    {
+      "name": "onNew",
+      "address": "self#onNew",
+      "inherited": false,
+      "overridden": false,
+      "added": true,
+      "declaredBy": "test.child.draft",
+      "visibility": [
+        "callable"
+      ],
+      "isSignal": false,
+      "signalTiming": null,
+      "sealed": false,
+      "overridable": false,
+      "seamNames": [],
+      "viewFields": [],
+      "handlerSource": "script",
+      "handlerId": "test.child.draft#onNew",
+      "mountedTo": [],
+      "wrappedAt": []
+    }
+  ],
+  "mountableTargets": [
+    {
+      "address": "engine#card.burned",
+      "member": "card.burned",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#card.damaged",
+      "member": "card.damaged",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Amount",
+          "type": "number",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#card.data",
+      "member": "card.data",
+      "timing": "any",
+      "owner": "engine",
+      "viewFields": [
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#card.destroyed",
+      "member": "card.destroyed",
+      "timing": "any",
+      "owner": "engine",
+      "viewFields": [
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#card.died",
+      "member": "card.died",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Killer",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#card.discarded",
+      "member": "card.discarded",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#card.drawn",
+      "member": "card.drawn",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#card.dying",
+      "member": "card.dying",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Killer",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#card.hand.add",
+      "member": "card.hand.add",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#card.leaving",
+      "member": "card.leaving",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Reason",
+          "type": "string",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#card.load",
+      "member": "card.load",
+      "timing": "load",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#card.placed",
+      "member": "card.placed",
+      "timing": "placed",
+      "owner": "engine",
+      "viewFields": [
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#card.played",
+      "member": "card.played",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#card.stat.changed",
+      "member": "card.stat.changed",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "ChangedFields",
+          "type": "string[]",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#counter.disarmed",
+      "member": "counter.disarmed",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Reason",
+          "type": "string",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#counter.triggered",
+      "member": "counter.triggered",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#deck.shuffled",
+      "member": "deck.shuffled",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Deck",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#effect.removed",
+      "member": "effect.removed",
+      "timing": "any",
+      "owner": "engine",
+      "viewFields": [
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Effect",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#keyword.attack.finished",
+      "member": "keyword.attack.finished",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#point.changed",
+      "member": "point.changed",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "OldPoints",
+          "type": "number",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "NewPoints",
+          "type": "number",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#point.gained",
+      "member": "point.gained",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Amount",
+          "type": "number",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#point.lost",
+      "member": "point.lost",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Amount",
+          "type": "number",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#slot.changed",
+      "member": "slot.changed",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "OldSlots",
+          "type": "number",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "NewSlots",
+          "type": "number",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#slot.gained",
+      "member": "slot.gained",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Amount",
+          "type": "number",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#slot.lost",
+      "member": "slot.lost",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Amount",
+          "type": "number",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#turn.end",
+      "member": "turn.end",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "TurnNumber",
+          "type": "number",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#turn.end.before",
+      "member": "turn.end.before",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "TurnNumber",
+          "type": "number",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#turn.start",
+      "member": "turn.start",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "TurnNumber",
+          "type": "number",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#turn.start.after",
+      "member": "turn.start.after",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "TurnNumber",
+          "type": "number",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#turn.start.before",
+      "member": "turn.start.before",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "TurnNumber",
+          "type": "number",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Player",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#unit.acted",
+      "member": "unit.acted",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Unit",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#unit.combat.survived",
+      "member": "unit.combat.survived",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Unit",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#unit.damage.dealt",
+      "member": "unit.damage.dealt",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Unit",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Card",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Amount",
+          "type": "number",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#unit.deployed",
+      "member": "unit.deployed",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Unit",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Position",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#unit.joined",
+      "member": "unit.joined",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Unit",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Position",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#unit.position.changed",
+      "member": "unit.position.changed",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Unit",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "OldPosition",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "NewPosition",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#unit.revealed",
+      "member": "unit.revealed",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Unit",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#unit.types.changed",
+      "member": "unit.types.changed",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Unit",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "AddedType",
+          "type": "string",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#unit.upgraded",
+      "member": "unit.upgraded",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Unit",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    }
+  ],
+  "wrappableMembers": [
+    {
+      "address": "engine#action-budget",
+      "member": "action-budget",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": [
+        "MoveDelta",
+        "AttackDelta"
+      ]
+    },
+    {
+      "address": "engine#attack-damage",
+      "member": "attack-damage",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#battle-damage",
+      "member": "battle-damage",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": [
+        "Amount"
+      ]
+    },
+    {
+      "address": "engine#card.burned",
+      "member": "card.burned",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#card.damaged",
+      "member": "card.damaged",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#card.data",
+      "member": "card.data",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#card.destroyed",
+      "member": "card.destroyed",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#card.died",
+      "member": "card.died",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#card.discarded",
+      "member": "card.discarded",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#card.drawn",
+      "member": "card.drawn",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#card.dying",
+      "member": "card.dying",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#card.hand.add",
+      "member": "card.hand.add",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#card.leaving",
+      "member": "card.leaving",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#card.load",
+      "member": "card.load",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#card.placed",
+      "member": "card.placed",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#card.played",
+      "member": "card.played",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#card.stat.changed",
+      "member": "card.stat.changed",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#combat-damage",
+      "member": "combat-damage",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": [
+        "Amount"
+      ]
+    },
+    {
+      "address": "engine#command",
+      "member": "command",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#counter.disarmed",
+      "member": "counter.disarmed",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#counter.triggered",
+      "member": "counter.triggered",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#damage-apply",
+      "member": "damage-apply",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": [
+        "Amount",
+        "IsZeroed"
+      ]
+    },
+    {
+      "address": "engine#death",
+      "member": "death",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#death.handle",
+      "member": "death.handle",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#death.veto",
+      "member": "death.veto",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#deck.shuffled",
+      "member": "deck.shuffled",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#deploy",
+      "member": "deploy",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#deploy-keyword",
+      "member": "deploy-keyword",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#draw.handle",
+      "member": "draw.handle",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#draw.specific",
+      "member": "draw.specific",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#draw.top",
+      "member": "draw.top",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#effect-damage",
+      "member": "effect-damage",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": [
+        "Amount"
+      ]
+    },
+    {
+      "address": "engine#effect.removed",
+      "member": "effect.removed",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#hand.add",
+      "member": "hand.add",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#hand.add.handle",
+      "member": "hand.add.handle",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#join",
+      "member": "join",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#join.deploy",
+      "member": "join.deploy",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#join.frontline",
+      "member": "join.frontline",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#join.handle",
+      "member": "join.handle",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#join.support",
+      "member": "join.support",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#keyword.attack.finished",
+      "member": "keyword.attack.finished",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#move",
+      "member": "move",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#move.handle",
+      "member": "move.handle",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#order.cast",
+      "member": "order.cast",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#order.finalize",
+      "member": "order.finalize",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#play",
+      "member": "play",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#point.changed",
+      "member": "point.changed",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#point.gained",
+      "member": "point.gained",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#point.lost",
+      "member": "point.lost",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#pre-play",
+      "member": "pre-play",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#reveal",
+      "member": "reveal",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#slot.changed",
+      "member": "slot.changed",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#slot.gained",
+      "member": "slot.gained",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#slot.lost",
+      "member": "slot.lost",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#targeting",
+      "member": "targeting",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#turn.end",
+      "member": "turn.end",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#turn.end.before",
+      "member": "turn.end.before",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#turn.start",
+      "member": "turn.start",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#turn.start.after",
+      "member": "turn.start.after",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#turn.start.before",
+      "member": "turn.start.before",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#unit-attack",
+      "member": "unit-attack",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#unit-move",
+      "member": "unit-move",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#unit.acted",
+      "member": "unit.acted",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#unit.combat.survived",
+      "member": "unit.combat.survived",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#unit.damage.dealt",
+      "member": "unit.damage.dealt",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#unit.deployed",
+      "member": "unit.deployed",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#unit.joined",
+      "member": "unit.joined",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#unit.position.changed",
+      "member": "unit.position.changed",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#unit.revealed",
+      "member": "unit.revealed",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#unit.types.changed",
+      "member": "unit.types.changed",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#unit.upgraded",
+      "member": "unit.upgraded",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#unitize",
+      "member": "unitize",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#use-counter",
+      "member": "use-counter",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "engine#veteran",
+      "member": "veteran",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
+      "address": "self#onDeployed",
+      "member": "onDeployed",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": [
+        "Defense"
+      ]
+    }
+  ],
+  "diagnostics": []
+}

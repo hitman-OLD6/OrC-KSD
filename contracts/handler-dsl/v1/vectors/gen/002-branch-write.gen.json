@@ -54,9 +54,23 @@
       "Orc.Game.Effects.EffectRuntime"
     ],
     "readables": {
-      "attack": "number",
-      "defense": "number",
-      "name": "string"
+      "hq": {
+        "hqHealth": "number",
+        "name": "string"
+      },
+      "player": {
+        "hqHealth": "number",
+        "kredits": "number",
+        "maxKredits": "number"
+      },
+      "unit": {
+        "attack": "number",
+        "defense": "number",
+        "deployCost": "number",
+        "name": "string",
+        "opCost": "number",
+        "zone": "string"
+      }
     },
     "nodes": [
       {

@@ -237,6 +237,19 @@ revision 变了就重拉，不要用「启动时拉一次、一直用」。
 > 这两个前端桥接层（`Kards.Ui.OrcBridge`）**已经引用**了，不需要新增引用。
 > 你会用到的 DTO 都在 `Orc.Game` / `Orc.Packages` 里，**不必**引用 `Orc.HandlerDsl`（那是后端实现）。
 
+**怎么拿到实例**（两个都是**同步**方法，没有 `Async` 后缀）：
+
+```csharp
+// 目录：无参构造＝扫描引擎本程序集的动作面；也可注入 environment（测试用）
+var catalogFacade = new HandlerCatalogFacade();
+
+// 编辑器：需要 registry ＋ 可写根策略，且**先开会话**才谈得上提交
+var editor = new AssetEditor(registry, policy);
+editor.BeginSession(new EditorSessionRequest(/* 包根等 */));
+```
+
+`DescribePrefab` 与 `Commit` 都是实例方法，必须在会话内调用。
+
 ### 5.1 节点目录（引擎能力）
 
 ```csharp
@@ -248,8 +261,8 @@ HandlerCatalogDto GetCatalog(); // 全量：节点 + 引脚 + 可读项
 ```csharp
 record HandlerCatalogDto(
     int CatalogRevision,
-    IReadOnlyList<string> ScannedFaces,          // 节点来自哪些门面（调试用）
-    IReadOnlyDictionary<string, string> Readables, // read.path 的封闭取值 → 类型名
+    IReadOnlyList<string> ScannedFaces,                       // 节点来自哪些门面（调试用）
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> Readables, // 见 §5.4
     IReadOnlyList<HandlerCatalogNodeDto> Nodes);
 
 record HandlerCatalogNodeDto(
@@ -308,6 +321,10 @@ record PrefabDescription(
 
 **`ViewFields[].Writable` 是 `write` 节点可写字段的唯一依据。** 不要从别处推断。
 
+> 完整结构别靠文档想象：契约包里有一份**真实输出**
+> （`prefab-description.sample.json`，含 2 个成员、39 个可挂载目标、75 个可包装成员），
+> 它由测试产出，接口一变样本就跟着变。
+
 `MountableTargets` 里每条都带 `Timing`——**必须校验**：
 把 `load` 时机的信号挂给 `active-when: placed` 的组件，装载期会被拒。这个错误在编辑器里就该拦住。
 
@@ -321,6 +338,44 @@ EditorCommitResult Commit(string relativePath, string content);
 - `relativePath` 相对**包根**。
 - 接受的后缀：`*.card.json` / `*.prefab.json` / `*.deck.json` / `*.moding.json` / `*.hdsl.json`。
 - `.hdsl.json` 走**快速通道**：写入即完成，不解析、不校验、不碰 lock。
+
+### 5.4 `read` 的两种 `of` 形态与可读项
+
+`read` 的目标（`of`）有两种，**恰取其一**：
+
+```jsonc
+{ "read": { "of": "self",   "path": "attack" } }          // 保留字面量：读宿主卡自己
+{ "read": { "of": "viewer", "path": "kredits" } }         // 保留字面量：读宿主归属的玩家
+{ "read": { "of": { "var": "t" }, "path": "defense" } }   // 实体表达式：读「那个实体」自己
+```
+
+第三种是**「若被遍历的单位防御 ≤ 2」这类写法的唯一入口**——没有它，被遍历的实体只能当动作参数，
+进不了任何比较。
+
+`Readables` 按**实体种类**分组（不是按 `self`／`viewer`）：
+
+```jsonc
+"readables": {
+  "unit":   { "attack": "number", "defense": "number", "opCost": "number",
+              "deployCost": "number", "name": "string", "zone": "string" },
+  "hq":     { "hqHealth": "number", "name": "string" },
+  "player": { "kredits": "number", "maxKredits": "number", "hqHealth": "number" }
+}
+```
+
+**你的取值菜单要按目标折算种类，再滤 `path`**：
+
+| `of` 形态 | 种类集合 |
+| --- | --- |
+| `"self"` | `unit ∪ hq`（宿主是单位还是总部静态未知，取并集） |
+| `"viewer"` | `player` |
+| 实体表达式 | 由静态子类型决定；未知 ⇒ `unit ∪ hq` |
+
+所以「读取 我方.attack」「读取 自己.kredits」这两种无意义选项不会再出现——
+`self` 配 `kredits`、`viewer` 配 `attack` 都是 `pin-unknown`（复用码，指向 `.read.path`）。
+
+> 注意：这条规则**不是新语义**。运行期 `ReadValue` 早就按 owner 严格分区（`of=self` 读 `kredits` 抛
+> `NotSupportedException`）；分类只是把那条既有事实搬到元数据，让校验期能提前拦住。
 
 ---
 
@@ -374,6 +429,7 @@ actions[] 数组  ←→  引脚上的表达式树    ←→  let / bind / as
 | `write` | 小卡片 | `field`（从可写字段选）＋ `value`（值） |
 | `ask` | **交互节点**（特殊色） | 若干属性 ＋ 可选出引脚 |
 | `script` | 代码块 | `body`（文本域）。**`inputs`／`outputs` 只是声明，v1 不接线**（见 §7.4） |
+| `unitsOf` | **查询节点**（用区别于动作的色，不可复制） | `side`（下拉 `self`／`enemy`／`any`）＋ `zone`（可空）→ 输出 `list<entity>` |
 | 动作节点 | 普通圆角矩形 | 目录声明的引脚 ＋ 可选 `bind` |
 | `stop` / `interrupt` | 终止符号 | 无引脚 |
 
@@ -476,7 +532,7 @@ sideEffectOf(x) = 自身标记(x) ∨ 任一子节点 sideEffectOf
 | --- | --- | --- |
 | `graph-shape` | ①不是对象 ②子节点不是数组 ③深度 > 64 ④`"else": []` ⑤`then` 缺失或为空 | 该节点路径 |
 | `node-unknown` | `op` 不在「10 个内建 op ∪ 目录节点名」内 | 该节点 |
-| `pin-unknown` | 节点出现目录未声明的引脚名；或 `read.path` 不在 `Readables` 内 | 该引脚 |
+| `pin-unknown` | 节点出现目录未声明的引脚名；或 `read.path` 不在**目标实体种类**的可读项内（如 `self` 配 `kredits`） | 该引脚／`.read.path` |
 | `pin-missing` | 必填引脚无值 | 该引脚 |
 | `pin-type` | 表达式推导类型 ≠ 引脚期望类型；或实体子类型静态确定且无交集 | 该引脚 |
 | `bind-scope` | 名字未定义／已定义（单赋值）／遮蔽外层／与视图字段同名；`bind` 形态非法（单输出写成对象、多输出键集不等） | 该 `bind`／该名字 |
@@ -641,7 +697,8 @@ contracts/handler-dsl/v1/
 ├── SPEC.md                  ← 规范正文（权威）
 ├── schema.json              ← DSL 文档的 JSON Schema（可直接用于编辑器校验）
 ├── catalog.schema.json      ← 目录元模型（你收到的 GetCatalog 结果应符合它）
-├── catalog.snapshot.json    ← 真实目录快照（26 个节点，可直接当 mock 数据）
+├── catalog.snapshot.json    ← 真实目录快照（27 个节点，可直接当 mock 数据）
+├── prefab-description.sample.json ← `DescribePrefab` 的**真实输出**（一份带草案的合成包，路径已脱敏）
 ├── vectors/
 │   ├── check/*.check.json   ← 你的测试数据（19 条，每码至少一条）
 │   └── gen/*.gen.json       ← 后端专有（8 条），你不用管

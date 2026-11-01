@@ -1,0 +1,145 @@
+{
+  "kind": "gen",
+  "name": "只读原语 unitsOf（iterate 的来源）",
+  "refs": [
+    "D3",
+    "SPEC §12.10"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "unitsOf",
+        "side": {
+          "lit": "enemy"
+        },
+        "bind": "foes"
+      },
+      {
+        "op": "iterate",
+        "over": {
+          "var": "foes"
+        },
+        "as": "f",
+        "actions": [
+          {
+            "op": "damage",
+            "target": {
+              "var": "f"
+            },
+            "amount": {
+              "lit": 1
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 223446220,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "hq": {
+        "hqHealth": "number",
+        "name": "string"
+      },
+      "player": {
+        "hqHealth": "number",
+        "kredits": "number",
+        "maxKredits": "number"
+      },
+      "unit": {
+        "attack": "number",
+        "defense": "number",
+        "deployCost": "number",
+        "name": "string",
+        "opCost": "number",
+        "zone": "string"
+      }
+    },
+    "nodes": [
+      {
+        "name": "unitsOf",
+        "source": {
+          "face": "KeywordEffectActionFace",
+          "method": "UnitsOfAsync",
+          "implicitHost": "host",
+          "faceType": "Orc.Game.Cards.KeywordEffectActionFace",
+          "static": true,
+          "tokenParameter": "ct"
+        },
+        "hasAwait": true,
+        "hasSideEffect": false,
+        "inputs": [
+          {
+            "name": "side",
+            "type": "string",
+            "required": true,
+            "enum": [
+              "self",
+              "enemy",
+              "any"
+            ]
+          },
+          {
+            "name": "zone",
+            "type": "string",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "result",
+            "type": "list<entity>",
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "damage",
+        "source": {
+          "face": "EffectRuntime",
+          "method": "DamageAsync",
+          "faceType": "Orc.Game.Effects.EffectRuntime",
+          "tokenParameter": "ct"
+        },
+        "hasAwait": true,
+        "hasSideEffect": true,
+        "inputs": [
+          {
+            "name": "target",
+            "type": "entity",
+            "required": true
+          },
+          {
+            "name": "amount",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "source",
+            "type": "entity",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "result",
+            "type": "boolean",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  "view": {
+    "fields": {}
+  },
+  "expect": {
+    "csx": "010-units-of.expected.csx"
+  }
+}

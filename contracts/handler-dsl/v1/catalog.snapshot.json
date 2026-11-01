@@ -1,20 +1,28 @@
 {
   "schemaVersion": 1,
-  "catalogRevision": 1142203374,
+  "catalogRevision": 223446220,
   "scannedFaces": [
     "Orc.Game.Cards.KeywordEffectActionFace",
     "Orc.Game.Effects.EffectRuntime"
   ],
   "readables": {
-    "attack": "number",
-    "defense": "number",
-    "deployCost": "number",
-    "hqHealth": "number",
-    "kredits": "number",
-    "maxKredits": "number",
-    "name": "string",
-    "opCost": "number",
-    "zone": "string"
+    "hq": {
+      "hqHealth": "number",
+      "name": "string"
+    },
+    "player": {
+      "hqHealth": "number",
+      "kredits": "number",
+      "maxKredits": "number"
+    },
+    "unit": {
+      "attack": "number",
+      "defense": "number",
+      "deployCost": "number",
+      "name": "string",
+      "opCost": "number",
+      "zone": "string"
+    }
   },
   "nodes": [
     {
@@ -50,6 +58,43 @@
         {
           "name": "result",
           "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "unitsOf",
+      "source": {
+        "face": "KeywordEffectActionFace",
+        "method": "UnitsOfAsync",
+        "implicitHost": "host",
+        "faceType": "Orc.Game.Cards.KeywordEffectActionFace",
+        "static": true,
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": false,
+      "inputs": [
+        {
+          "name": "side",
+          "type": "string",
+          "required": true,
+          "enum": [
+            "self",
+            "enemy",
+            "any"
+          ]
+        },
+        {
+          "name": "zone",
+          "type": "string",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "list\u003Centity\u003E",
           "required": true
         }
       ]
