@@ -554,6 +554,13 @@ public static class HandlerDslCatalogScanner
             }
         }
 
+        // 默认规则把一切 Task／Task<T> 方法判成有副作用——对动作正确，对**异步查询**过头。
+        // [HandlerDslPure] 显式纠正这一点；hasAwait 不受影响（查询确实要挂起）。
+        if (method.GetCustomAttribute<HandlerDslPureAttribute>(inherit: false) is not null)
+        {
+            hasSideEffect = false;
+        }
+
         return new MethodScaffold(
             NodeNameOf(method)!,
             method.Name,

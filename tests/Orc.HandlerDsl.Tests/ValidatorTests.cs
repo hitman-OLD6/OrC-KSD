@@ -146,6 +146,69 @@ public class ValidatorTests
         Assert.Contains(errors, static e => e.Code == "bind-scope");
     }
 
+    /// <summary>
+    /// <c>read.of</c> 放开成实体表达式后，「若该单位防御 ≤ 2」这类判定才写得出来——
+    /// 这是 v1 早期最大的表达力缺口（被遍历的实体只能当动作参数，进不了比较）。
+    /// </summary>
+    [Fact]
+    public void read的目标可以是实体表达式_能读被遍历实体的属性()
+    {
+        var errors = HandlerDslValidator.Validate(
+            """
+            {"schemaVersion":1,"actions":[
+              {"op":"iterate","over":{"view":"Units"},"as":"u","actions":[
+                {"op":"branch",
+                 "test":{"op":"le","args":[{"read":{"of":{"var":"u"},"path":"defense"}},{"lit":2}]},
+                 "then":[{"op":"draw","count":{"lit":1}}]}]}]}
+            """,
+            Fixtures.Catalog,
+            View);
+
+        Assert.Empty(errors);
+    }
+
+    /// <summary>
+    /// 契约早先那处缝：<c>readables</c> 是扁平表、<c>of</c> 只收 <c>self</c>／<c>viewer</c>，
+    /// 于是下面的组合能过校验而在运行期抛 <c>NotSupportedException</c>。现在校验期就拒绝。
+    /// </summary>
+    [Theory]
+    [InlineData(DslReadables.Self, "kredits")]  // 单位没有「点数」
+    [InlineData(DslReadables.Viewer, "attack")] // 玩家没有「攻击力」
+    public void read的目标与读取项组合不成立_报pin_unknown(string of, string path)
+    {
+        // 用占位符替换而不是内插原始字符串：JSON 里的连续右大括号会与 `$$"""` 的插值定界符打架。
+        const string template =
+            """{"schemaVersion":1,"actions":[{"op":"write","field":"Field","value":{"read":{"of":"%OF%","path":"%PATH%"}}}]}""";
+
+        var document = template.Replace("%OF%", of, StringComparison.Ordinal)
+            .Replace("%PATH%", path, StringComparison.Ordinal);
+
+        var errors = HandlerDslValidator.Validate(document, Fixtures.Catalog, View);
+
+        Assert.Contains(errors, static e =>
+            e.Code == "pin-unknown" && e.NodePath.EndsWith(".read.path", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// 实体表达式的**静态子类型能收窄可读项**：<c>ask.kind=hq</c> ⇒ 遍历元素是 <c>entity{hq}</c>，
+    /// 而 <c>attack</c> 只属于单位，故拒绝。这条把「按种类分组」真正用起来。
+    /// </summary>
+    [Fact]
+    public void read的实体表达式_按静态子类型收窄可读项()
+    {
+        var errors = HandlerDslValidator.Validate(
+            """
+            {"schemaVersion":1,"actions":[
+              {"op":"ask","kind":"hq","prompt":"选总部","bind":"hqs"},
+              {"op":"iterate","over":{"var":"hqs"},"as":"h","actions":[
+                {"op":"write","field":"Field","value":{"read":{"of":{"var":"h"},"path":"attack"}}}]}]}
+            """,
+            Fixtures.Catalog,
+            View);
+
+        Assert.Contains(errors, static e => e.Code == "pin-unknown");
+    }
+
     [Fact]
     public void 校验语料覆盖全部十三个码_每码至少一条拒绝用例()
     {

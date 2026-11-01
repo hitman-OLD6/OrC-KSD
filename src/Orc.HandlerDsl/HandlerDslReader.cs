@@ -932,17 +932,43 @@ public static class HandlerDslReader
         var ofPath = $"{path}.read.of";
         var propPath = $"{path}.read.path";
 
-        if (!element.TryGetProperty("of", out var ofElement) || ofElement.ValueKind != JsonValueKind.String)
+        if (!element.TryGetProperty("of", out var ofElement))
         {
-            errors.Add(Error(HandlerDslErrorCodes.PinMissing, ofPath, "read 缺少 of（取值集：self／viewer）。"));
+            errors.Add(Error(HandlerDslErrorCodes.PinMissing, ofPath,
+                "read 缺少 of（保留字面量 self／viewer，或一个实体表达式）。"));
             return null;
         }
 
-        var of = ofElement.GetString()!;
-        if (!ReadTargets.Contains(of))
+        // of 有两种形态：保留字面量（self／viewer）或任意实体表达式。
+        // 后者是「读被遍历的那个实体」的唯一入口——早期只收字面量时，「若该单位防御 ≤ 2」写不出来。
+        string? reservedTarget = null;
+        DslExpression? target = null;
+
+        if (ofElement.ValueKind == JsonValueKind.String)
+        {
+            var of = ofElement.GetString()!;
+            if (!ReadTargets.Contains(of))
+            {
+                errors.Add(Error(HandlerDslErrorCodes.PinUnknown, ofPath,
+                    $"read.of 的保留字面量只允许 self／viewer（实为 '{of}'）；"
+                    + "要读某个实体自身的属性，请把 of 写成实体表达式（如 {\"var\":\"t\"}）。"));
+                return null;
+            }
+
+            reservedTarget = of;
+        }
+        else if (ofElement.ValueKind == JsonValueKind.Object)
+        {
+            target = ParseExpression(ofElement, ofPath, catalog, errors);
+            if (target is null)
+            {
+                return null;
+            }
+        }
+        else
         {
             errors.Add(Error(HandlerDslErrorCodes.PinUnknown, ofPath,
-                $"read.of '{of}' 超出封闭集：只允许 self／viewer。"));
+                "read.of 必须是保留字面量字符串（self／viewer）或一个实体表达式对象。"));
             return null;
         }
 
@@ -959,15 +985,21 @@ public static class HandlerDslReader
             return null;
         }
 
-        if (catalog is not null && !catalog.Readables.ContainsKey(readProperty))
+        // 保留字面量形态可以在**解析期**就判完 path：种类集合由 self／viewer 直接确定。
+        // 表达式形态不行——那要知道 of 的静态类型，由类型检查器负责（路径同样指向 .read.path）。
+        if (catalog is not null && reservedTarget is not null)
         {
-            errors.Add(Error(HandlerDslErrorCodes.PinUnknown, propPath,
-                $"read.path '{readProperty}' 不在目录声明的可读项内（可用："
-                + $"{string.Join("／", catalog.Readables.Keys)}）。"));
-            return null;
+            var kinds = DslReadables.KindsOf(reservedTarget, null);
+            if (!DslReadables.TryResolve(catalog.Readables, kinds, readProperty, out _, out var available))
+            {
+                errors.Add(Error(HandlerDslErrorCodes.PinUnknown, propPath,
+                    $"read.path '{readProperty}' 不在 of={reservedTarget} 可读的项内"
+                    + $"（{DslReadables.DescribeKinds(kinds)} 可用：{string.Join("／", available)}）。"));
+                return null;
+            }
         }
 
-        return new ReadExpression(path, of, readProperty);
+        return new ReadExpression(path, reservedTarget, target, readProperty);
     }
 
     private static DslExpression? ParseOp(

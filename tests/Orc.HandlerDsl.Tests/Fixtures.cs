@@ -27,12 +27,23 @@ internal static class Fixtures
     public static DslCatalog Catalog { get; } = new(
         7,
         new[] { Damage(), Draw(), Fetch(), Announce(), Kill() },
-        new Dictionary<string, PinType>(StringComparer.Ordinal)
+        new Dictionary<string, IReadOnlyDictionary<string, PinType>>(StringComparer.Ordinal)
         {
-            ["attack"] = PinType.Number,
-            ["defense"] = PinType.Number,
-            ["kredits"] = PinType.Number,
-            ["name"] = PinType.String,
+            [DslReadableKinds.Unit] = new Dictionary<string, PinType>(StringComparer.Ordinal)
+            {
+                ["attack"] = PinType.Number,
+                ["defense"] = PinType.Number,
+                ["name"] = PinType.String,
+            },
+            [DslReadableKinds.Hq] = new Dictionary<string, PinType>(StringComparer.Ordinal)
+            {
+                ["hqHealth"] = PinType.Number,
+                ["name"] = PinType.String,
+            },
+            [DslReadableKinds.Player] = new Dictionary<string, PinType>(StringComparer.Ordinal)
+            {
+                ["kredits"] = PinType.Number,
+            },
         });
 
     /// <summary>damage(target: entity{unit,hq}, amount: number) → 无输出。</summary>

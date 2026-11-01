@@ -168,6 +168,52 @@ public class PrefabDescriptionTests : IDisposable
 
     // ── 夹具 ────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// 导出**真实的 <see cref="PrefabDescription"/> 输出**到契约包（仅在 <c>ORC_WRITE_PREFAB_SAMPLE=1</c> 时写盘）。
+    /// <para>
+    /// 前端要一份样本来接界面（`write` 候选、`write-forbidden` 判据都靠它）。文档里的结构说明容易读漏字段，
+    /// 一份真实序列化结果最省事——而且它由测试产出，接口一变样本就跟着变，不会腐坏。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void 预制体描述样例_可导出到契约包()
+    {
+        if (Environment.GetEnvironmentVariable("ORC_WRITE_PREFAB_SAMPLE") is not "1")
+        {
+            return;
+        }
+
+        Write(DraftPath, Draft);
+        var description = NewEditor().DescribePrefab(_pack, ParentId, DraftPath);
+
+        // 脱敏：包根是临时目录，写进契约包既无意义又会泄漏本机路径。
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            description with { PackRoot = "<packRoot>" },
+            new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            });
+
+        var path = Path.Combine(
+            FindRepoRoot(), "contracts", "handler-dsl", "v1", "prefab-description.sample.json");
+        File.WriteAllText(path, json + "\n", new System.Text.UTF8Encoding(false));
+        Assert.True(File.Exists(path), $"样例未写出：{path}");
+    }
+
+    /// <summary>从测试输出目录向上找仓库根（与其它导出开关同一思路）。</summary>
+    private static string FindRepoRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null && !File.Exists(Path.Combine(current.FullName, "OrcEngine.sln")))
+        {
+            current = current.Parent;
+        }
+
+        return current?.FullName ?? throw new DirectoryNotFoundException("未能定位仓库根（OrcEngine.sln）。");
+    }
+
     private AssetEditor NewEditor()
         => new(new AssetRegistry(), new EditableRootPolicy(_root));
 

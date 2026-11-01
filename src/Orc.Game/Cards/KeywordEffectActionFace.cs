@@ -125,6 +125,46 @@ public static class KeywordEffectActionFace
     }
 
     /// <summary>
+    /// <c>unitsOf</c> 节点的运行时实现：列出某阵营在某区域的单位。
+    /// <para>
+    /// **存在的理由**：<c>iterate.over</c> 此前只能来自 <c>ask</c>（必须弹窗问玩家）或视图里恰好声明了
+    /// 实体列表，于是「每个我方单位 +1 攻击」这种最基础的 DIY 写法根本表达不出来——
+    /// 界面怎么设计都造不出一个不存在的原语。
+    /// </para>
+    /// <para>
+    /// 标 <see cref="HandlerDslPureAttribute"/>：它只读世界状态、不改任何东西。默认规则会把
+    /// 一切 <c>Task</c> 方法判成有副作用，那会让前端以为这是个动作。
+    /// </para>
+    /// </summary>
+    /// <param name="host">宿主卡（隐式宿主；用于解析运行时与阵营归属）。</param>
+    /// <param name="side">阵营：<c>self</c>／<c>enemy</c>／<c>any</c>。</param>
+    /// <param name="zone">区域过滤（省略＝不限）。</param>
+    /// <param name="ct">取消令牌。</param>
+    [HandlerDslNode("unitsOf")]
+    [HandlerDslPure]
+    public static async Task<IReadOnlyList<Card>> UnitsOfAsync(
+        Card host,
+        [HandlerDslEnumValues("self", "enemy", "any")] string side,
+        string? zone = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+
+        if (EffectRuntime.ResolveFor(host) is not { } runtime)
+        {
+            return Array.Empty<Card>();
+        }
+
+        // `any` 与省略同义：EffectSelector 里 side 为空就是「不限定阵营」。
+        var normalizedSide = string.IsNullOrEmpty(side) || string.Equals(side, "any", StringComparison.Ordinal)
+            ? null
+            : side;
+
+        return await runtime.SelectAsync(host, new EffectSelector("all", normalizedSide, zone), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// <c>read</c> 变体的运行时读取入口（SPEC §12.8 的可读项）：返回**实时值**（含修饰链）。
     /// <para>
     /// 未知可读项＝<see cref="NotSupportedException"/>（fail-fast：宁可当场失败，也不返回一个「看起来正常」的 0

@@ -43,10 +43,18 @@ public static class HandlerDslCatalogJson
 
             writer.WriteEndArray();
 
+            // 可读项按**实体种类**分组（unit／hq／player）：能读什么只取决于「读谁是哪一类」，
+            // 与调用者视角无关——of 放开成实体表达式后，这是唯一自洽的维度。
             writer.WriteStartObject("readables");
-            foreach (var pair in catalog.Readables.OrderBy(static p => p.Key, StringComparer.Ordinal))
+            foreach (var group in catalog.Readables.OrderBy(static p => p.Key, StringComparer.Ordinal))
             {
-                writer.WriteString(pair.Key, pair.Value.Format());
+                writer.WriteStartObject(group.Key);
+                foreach (var pair in group.Value.OrderBy(static p => p.Key, StringComparer.Ordinal))
+                {
+                    writer.WriteString(pair.Key, pair.Value.Format());
+                }
+
+                writer.WriteEndObject();
             }
 
             writer.WriteEndObject();
@@ -87,12 +95,26 @@ public static class HandlerDslCatalogJson
                 faces.AddRange(faceArray.EnumerateArray().Select(static f => f.GetString()!));
             }
 
-            var readables = new Dictionary<string, PinType>(StringComparer.Ordinal);
+            var readables = new Dictionary<string, IReadOnlyDictionary<string, PinType>>(StringComparer.Ordinal);
             if (root.TryGetProperty("readables", out var readablesElement))
             {
-                foreach (var property in readablesElement.EnumerateObject())
+                foreach (var group in readablesElement.EnumerateObject())
                 {
-                    readables[property.Name] = PinType.Parse(property.Value.GetString()!);
+                    if (group.Value.ValueKind != JsonValueKind.Object)
+                    {
+                        throw new FormatException(
+                            $"readables 必须按实体种类分组（如 \"unit\": {{ \"attack\": \"number\" }}），"
+                            + $"但 \"{group.Name}\" 的值不是对象——旧版的扁平 readables 请用 "
+                            + "ORC_WRITE_CATALOG=1 重新导出。");
+                    }
+
+                    var items = new Dictionary<string, PinType>(StringComparer.Ordinal);
+                    foreach (var pair in group.Value.EnumerateObject())
+                    {
+                        items[pair.Name] = PinType.Parse(pair.Value.GetString()!);
+                    }
+
+                    readables[group.Name] = items;
                 }
             }
 

@@ -433,10 +433,16 @@ public static class HandlerDslGenerator
 
         private string ReadCall(ReadExpression read)
         {
-            var call = $"Orc.Game.Cards.KeywordEffectActionFace.ReadValue({SelfVariable}, "
-                + $"{Quote(read.Of)}, {Quote(read.Property)})";
+            // 两种 of 形态在这里归一：读「某个实体自身」的属性 ≡ `ReadValue(那个实体, "self", path)`。
+            // 所以放开 of 不需要动运行期——`ReadValue` 的首参本来就是「读谁」。
+            var host = read.Target is { } target ? Expr(target) : SelfVariable;
+            var of = read.Target is not null ? DslReadables.Self : read.ReservedTarget!;
 
-            if (!_catalog.Readables.TryGetValue(read.Property, out var type))
+            var call = $"Orc.Game.Cards.KeywordEffectActionFace.ReadValue({host}, "
+                + $"{Quote(of)}, {Quote(read.Property)})";
+
+            var type = ReadableTypeOf(read.Property);
+            if (type is null)
             {
                 return call;
             }
@@ -449,6 +455,23 @@ public static class HandlerDslGenerator
                 PinTypeKind.Boolean => $"(bool){call}",
                 _ => call,
             };
+        }
+
+        /// <summary>
+        /// 跨实体种类查可读项类型。同名项在不同种类下类型必然一致（校验器保证 path 在目标种类内合法），
+        /// 所以取首个命中即可——生成器在 <see cref="HandlerDslValidator"/> 之后运行，不会遇到非法组合。
+        /// </summary>
+        private PinType? ReadableTypeOf(string path)
+        {
+            foreach (var group in _catalog.Readables.Values)
+            {
+                if (group.TryGetValue(path, out var type))
+                {
+                    return type;
+                }
+            }
+
+            return null;
         }
 
         private string OpExpr(OpExpression op)

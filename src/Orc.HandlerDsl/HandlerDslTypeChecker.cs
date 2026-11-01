@@ -445,14 +445,7 @@ public static class HandlerDslTypeChecker
                     return fieldType;
 
                 case ReadExpression read:
-                    if (_catalog.Readables.TryGetValue(read.Property, out var readType))
-                    {
-                        return readType;
-                    }
-
-                    Error(HandlerDslErrorCodes.PinUnknown, read.Path,
-                        $"read.path '{read.Property}' 不在目录声明的可读项内。");
-                    return null;
+                    return InferRead(read, scope);
 
                 case OpExpression op:
                     return InferOperator(op, scope);
@@ -461,6 +454,47 @@ public static class HandlerDslTypeChecker
                     Error(HandlerDslErrorCodes.PinUnknown, expression.Path, "未知的表达式形态。");
                     return null;
             }
+        }
+
+        /// <summary>
+        /// <c>read</c> 的类型：**先定目标可能属于哪几类实体，再在该集合下查 path**。
+        /// <para>
+        /// 这是 v1 早期那处「契约缝」的收口：<c>readables</c> 曾是扁平表、<c>of</c> 只收
+        /// <c>self</c>／<c>viewer</c>，于是 <c>of=self, path=kredits</c> 能过校验而在运行期抛异常。
+        /// 现在两者都在这里对齐。
+        /// </para>
+        /// </summary>
+        private PinType? InferRead(ReadExpression read, Scope scope)
+        {
+            PinType? targetType = null;
+
+            if (read.Target is { } target)
+            {
+                targetType = InferExpression(target, scope);
+                if (targetType is null)
+                {
+                    return null; // 目标本身已报错，不重复报
+                }
+
+                if (targetType.Kind != PinTypeKind.Entity)
+                {
+                    Error(HandlerDslErrorCodes.PinType, read.Path + ".read.of",
+                        $"read.of 的表达式必须是 entity（要读谁的属性），实为 {targetType.Format()}。");
+                    return null;
+                }
+            }
+
+            var kinds = DslReadables.KindsOf(read.ReservedTarget, targetType);
+            if (!DslReadables.TryResolve(_catalog.Readables, kinds, read.Property, out var type, out var available))
+            {
+                var targetText = read.ReservedTarget is { } reserved ? $"of={reserved}" : "of=<实体表达式>";
+                Error(HandlerDslErrorCodes.PinUnknown, read.Path + ".read.path",
+                    $"read.path '{read.Property}' 不在 {targetText} 可读的项内"
+                    + $"（{DslReadables.DescribeKinds(kinds)} 可用：{string.Join("／", available)}）。");
+                return null;
+            }
+
+            return type;
         }
 
         private PinType? InferOperator(OpExpression op, Scope scope)

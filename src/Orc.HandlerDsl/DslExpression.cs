@@ -93,22 +93,47 @@ public sealed class ViewExpression : DslExpression
     public string Field { get; }
 }
 
-/// <summary>卡属性／玩家资源读取变体（<c>{ "read": { "of": "self", "path": "attack" } }</c>）。</summary>
+/// <summary>
+/// 属性读取变体（<c>{ "read": { "of": …, "path": "attack" } }</c>）。
+/// <para>
+/// <see cref="Of"/> 有两种形态，**恰有一个非空**：
+/// </para>
+/// <list type="bullet">
+/// <item><see cref="ReservedTarget"/>：保留字面量 <c>self</c>／<c>viewer</c>（简写形态）；</item>
+/// <item><see cref="Target"/>：任意**实体表达式**（如 <c>{"var":"t"}</c>）——
+/// 用来读「被遍历的那个实体」自身的属性，这是 v1 早期写不出「若该单位防御 ≤ 2」的根因。</item>
+/// </list>
+/// <para>
+/// 两种形态在生成码里归一：读某个实体自身的属性 ≡ <c>ReadValue(那个实体, "self", path)</c>，
+/// 所以运行期<b>零改动</b>（<c>ReadValue</c> 的首参本来就是「读谁」）。
+/// </para>
+/// </summary>
 public sealed class ReadExpression : DslExpression
 {
     /// <summary>构造。</summary>
-    public ReadExpression(string path, string @of, string property)
+    /// <param name="path">节点路径。</param>
+    /// <param name="reservedTarget">保留字面量目标（<c>self</c>／<c>viewer</c>）；用表达式形态时传 null。</param>
+    /// <param name="target">实体表达式目标；用保留字面量时传 null。</param>
+    /// <param name="property">读取项（取值集由目录的 <c>readables</c> 按实体种类声明）。</param>
+    public ReadExpression(string path, string? reservedTarget, DslExpression? target, string property)
         : base(path)
     {
-        Of = @of;
+        ReservedTarget = reservedTarget;
+        Target = target;
         Property = property;
     }
 
-    /// <summary>读取对象（封闭集：<c>self</c>／<c>viewer</c>）。</summary>
-    public string Of { get; }
+    /// <summary>保留字面量目标（封闭集：<c>self</c>／<c>viewer</c>）；表达式形态下为 null。</summary>
+    public string? ReservedTarget { get; }
+
+    /// <summary>实体表达式目标；保留字面量形态下为 null。</summary>
+    public DslExpression? Target { get; }
 
     /// <summary>读取项（取值集由目录的 <c>readables</c> 声明）。</summary>
     public string Property { get; }
+
+    /// <summary>是否为「保留字面量」形态（否则是实体表达式形态）。</summary>
+    public bool IsReserved => ReservedTarget is not null;
 }
 
 /// <summary>算子应用变体（<c>{ "op": "sub", "args": [ … ] }</c>，可嵌套）。</summary>

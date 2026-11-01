@@ -46,12 +46,15 @@ public sealed record HandlerCatalogNodeDto(
 /// </summary>
 /// <param name="CatalogRevision">目录内容版本（与 <see cref="HandlerCatalogFacade.CatalogRevision"/> 恒一致）。</param>
 /// <param name="ScannedFaces">本次扫描的门面类型名清单（回答「这个节点来自哪个门面」）。</param>
-/// <param name="Readables">可读项（<c>read.path</c> 的封闭取值集 → 类型名）。</param>
+/// <param name="Readables">
+/// 可读项：**实体种类（<c>unit</c>／<c>hq</c>／<c>player</c>）→ （<c>read.path</c> 取值 → 类型名）</c>。
+/// 分组维度是「读谁是哪一类实体」，与 <c>read.of</c> 写成 <c>self</c>／<c>viewer</c> 还是实体表达式无关。
+/// </param>
 /// <param name="Nodes">全部节点（含合成节点 <c>stop</c>／<c>interrupt</c>）。</param>
 public sealed record HandlerCatalogDto(
     int CatalogRevision,
     IReadOnlyList<string> ScannedFaces,
-    IReadOnlyDictionary<string, string> Readables,
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> Readables,
     IReadOnlyList<HandlerCatalogNodeDto> Nodes);
 
 /// <summary>
@@ -107,7 +110,11 @@ public sealed class HandlerCatalogFacade
         return new HandlerCatalogDto(
             catalog.Revision,
             catalog.ScannedFaces,
-            catalog.Readables.ToDictionary(static p => p.Key, static p => p.Value.Format(), StringComparer.Ordinal),
+            catalog.Readables.ToDictionary(
+                static g => g.Key,
+                static g => (IReadOnlyDictionary<string, string>)g.Value.ToDictionary(
+                    static p => p.Key, static p => p.Value.Format(), StringComparer.Ordinal),
+                StringComparer.Ordinal),
             catalog.Nodes.Select(ProjectNode).ToArray());
     }
 

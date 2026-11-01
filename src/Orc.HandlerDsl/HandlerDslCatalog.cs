@@ -161,8 +161,19 @@ public interface IHandlerDslCatalog : Orc.Core.IHandlerCatalog
     /// <summary>全部节点（顺序稳定，供枚举与一致性比对）。</summary>
     IReadOnlyList<DslNodeSignature> Nodes { get; }
 
-    /// <summary>可读项（<c>read.path</c> 的封闭取值集 → 类型）。</summary>
-    IReadOnlyDictionary<string, PinType> Readables { get; }
+    /// <summary>
+    /// 可读项：**实体种类 → （<c>read.path</c> 的取值 → 类型）**。
+    /// <para>
+    /// 按**实体种类**分组，不是按 <c>read.of</c> 的 <c>self</c>／<c>viewer</c> 分组——
+    /// 因为 <c>of</c> 可以是一个实体表达式（如 <c>{"var":"t"}</c>），此时「owner 视角」不成立，
+    /// 能读什么只取决于那个实体是哪一类（单位／总部／玩家）。
+    /// </para>
+    /// <para>
+    /// 这张表把运行期 <c>EffectRuntime</c> 早已存在的分区（<c>self</c> 读 <c>kredits</c> 会抛
+    /// <see cref="NotSupportedException"/>）上移到元数据，使校验期能拒掉无意义的组合。
+    /// </para>
+    /// </summary>
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, PinType>> Readables { get; }
 
     /// <summary>按名查节点。</summary>
     bool TryGetNode(string name, out DslNodeSignature node);
@@ -186,7 +197,7 @@ public sealed class DslCatalog : IHandlerDslCatalog
     public DslCatalog(
         int revision,
         IEnumerable<DslNodeSignature> nodes,
-        IReadOnlyDictionary<string, PinType>? readables = null,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, PinType>>? readables = null,
         IReadOnlyList<string>? scannedFaces = null)
     {
         ArgumentNullException.ThrowIfNull(nodes);
@@ -238,7 +249,7 @@ public sealed class DslCatalog : IHandlerDslCatalog
     public IReadOnlyList<DslNodeSignature> Nodes { get; }
 
     /// <inheritdoc />
-    public IReadOnlyDictionary<string, PinType> Readables { get; }
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, PinType>> Readables { get; }
 
     /// <summary>本次扫描的门面类型名清单（回答「这个节点来自哪个门面」；上下文原语不在其中）。</summary>
     public IReadOnlyList<string> ScannedFaces { get; }
@@ -292,22 +303,182 @@ public static class HandlerDslContextNodes
 }
 
 /// <summary>
+/// 可读项的**实体种类**（<c>read.of</c> 最终定位到的实体属于哪一类）。
+/// <para>
+/// 分组的依据是「能读什么只取决于实体是哪一类」，与调用者视角无关——这是把
+/// <c>read.of</c> 从 <c>self</c>／<c>viewer</c> 放开成实体表达式之后唯一自洽的维度。
+/// </para>
+/// </summary>
+public static class DslReadableKinds
+{
+    /// <summary>单位卡。</summary>
+    public const string Unit = "unit";
+
+    /// <summary>总部。</summary>
+    public const string Hq = "hq";
+
+    /// <summary>玩家。</summary>
+    public const string Player = "player";
+
+    /// <summary>全部种类（顺序稳定）。</summary>
+    public static IReadOnlyList<string> All { get; } = new[] { Unit, Hq, Player };
+
+    /// <summary>「卡」的并集（单位 ＋ 总部）——<c>read.of=self</c> 的宿主可能是两者之一。</summary>
+    public static IReadOnlyList<string> Cards { get; } = new[] { Unit, Hq };
+}
+
+/// <summary>
 /// v1 的可读项初版集合（SPEC §12.8）。真实取值集由目录声明；这里只是「无目录时」的兜底与文档锚点。
 /// </summary>
 public static class DslReadables
 {
-    /// <summary>可读项 → 类型（只含标量；实体属性不算「可读项」，走视图声明）。</summary>
-    public static IReadOnlyDictionary<string, PinType> V1 { get; } =
-        new Dictionary<string, PinType>(StringComparer.Ordinal)
+    /// <summary><c>read.of</c> 的保留字面量：读宿主卡自身。</summary>
+    public const string Self = "self";
+
+    /// <summary><c>read.of</c> 的保留字面量：读宿主归属的玩家。</summary>
+    public const string Viewer = "viewer";
+
+    /// <summary>保留字面量全集（<c>of</c> 写成字符串时只允许这两个取值）。</summary>
+    public static IReadOnlyList<string> ReservedTargets { get; } = new[] { Self, Viewer };
+
+    /// <summary>
+    /// 实体种类 → （可读项 → 类型）。
+    /// <para>
+    /// 与运行期 <c>KeywordEffectActionFace.ReadValue</c> 的分支**逐条对应**：
+    /// <c>of=self</c> 只认单位/总部的项，<c>of=viewer</c> 只认玩家的项，越界在运行期抛
+    /// <see cref="NotSupportedException"/>。表在这里＝把那条事实搬到校验期。
+    /// </para>
+    /// </summary>
+    public static IReadOnlyDictionary<string, IReadOnlyDictionary<string, PinType>> V1 { get; } =
+        new Dictionary<string, IReadOnlyDictionary<string, PinType>>(StringComparer.Ordinal)
         {
-            ["attack"] = PinType.Number,
-            ["defense"] = PinType.Number,
-            ["opCost"] = PinType.Number,
-            ["deployCost"] = PinType.Number,
-            ["hqHealth"] = PinType.Number,
-            ["kredits"] = PinType.Number,
-            ["maxKredits"] = PinType.Number,
-            ["name"] = PinType.String,
-            ["zone"] = PinType.String,
+            [DslReadableKinds.Unit] = new Dictionary<string, PinType>(StringComparer.Ordinal)
+            {
+                ["attack"] = PinType.Number,
+                ["defense"] = PinType.Number,
+                ["opCost"] = PinType.Number,
+                ["deployCost"] = PinType.Number,
+                ["name"] = PinType.String,
+                ["zone"] = PinType.String,
+            },
+            [DslReadableKinds.Hq] = new Dictionary<string, PinType>(StringComparer.Ordinal)
+            {
+                ["hqHealth"] = PinType.Number,
+                ["name"] = PinType.String,
+            },
+            [DslReadableKinds.Player] = new Dictionary<string, PinType>(StringComparer.Ordinal)
+            {
+                ["kredits"] = PinType.Number,
+                ["maxKredits"] = PinType.Number,
+                ["hqHealth"] = PinType.Number,
+            },
         };
+
+    /// <summary>
+    /// 给定种类集合，求可读项的并集（后者覆盖前者的同名项——同名项的标量类型必然一致）。
+    /// </summary>
+    public static IReadOnlyDictionary<string, PinType> Union(IEnumerable<string> kinds)
+    {
+        ArgumentNullException.ThrowIfNull(kinds);
+        var merged = new Dictionary<string, PinType>(StringComparer.Ordinal);
+        foreach (var kind in kinds)
+        {
+            if (!V1.TryGetValue(kind, out var items))
+            {
+                continue;
+            }
+
+            foreach (var pair in items)
+            {
+                merged[pair.Key] = pair.Value;
+            }
+        }
+
+        return merged;
+    }
+
+    /// <summary>
+    /// 把 <c>read.of</c> 的目标折算成「可能的实体种类集合」。
+    /// <para>
+    /// 三条来源，语义都只是「这个目标可能是哪几类实体」：<c>viewer</c>＝玩家；
+    /// <c>self</c>＝宿主卡（单位或总部，静态未知）；实体表达式＝由它的静态子类型决定，
+    /// 子类型未知时取卡的两类。
+    /// </para>
+    /// </summary>
+    /// <param name="reservedTarget"><c>self</c>／<c>viewer</c>；用表达式形态时传 null。</param>
+    /// <param name="expressionTargetType">实体表达式推导出的类型（可含子类型集）；保留字面量形态传 null。</param>
+    public static IReadOnlyList<string> KindsOf(string? reservedTarget, PinType? expressionTargetType)
+    {
+        if (string.Equals(reservedTarget, Viewer, StringComparison.Ordinal))
+        {
+            return new[] { DslReadableKinds.Player };
+        }
+
+        if (string.Equals(reservedTarget, Self, StringComparison.Ordinal))
+        {
+            return DslReadableKinds.Cards;
+        }
+
+        // 实体表达式：子类型里属于「卡」的部分；一个都没定 ⇒ 卡的两类都算可能。
+        if (expressionTargetType is { Kind: PinTypeKind.Entity } && expressionTargetType.Subtypes.Count > 0)
+        {
+            var kinds = expressionTargetType.Subtypes
+                .Where(static s => s is DslReadableKinds.Unit or DslReadableKinds.Hq)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            if (kinds.Length > 0)
+            {
+                return kinds;
+            }
+        }
+
+        return DslReadableKinds.Cards;
+    }
+
+    /// <summary>
+    /// 在给定种类集合下解析读取项。
+    /// </summary>
+    /// <param name="readables">目录声明的可读项表。</param>
+    /// <param name="kinds">目标的可能实体种类（见 <see cref="KindsOf"/>）。</param>
+    /// <param name="path">读取项名。</param>
+    /// <param name="type">命中时的类型（未命中＝null）。</param>
+    /// <param name="available">该种类集合下可用的项（**并集**，用于诊断文案）。</param>
+    public static bool TryResolve(
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, PinType>> readables,
+        IReadOnlyList<string> kinds,
+        string path,
+        out PinType? type,
+        out IReadOnlyList<string> available)
+    {
+        ArgumentNullException.ThrowIfNull(readables);
+        ArgumentNullException.ThrowIfNull(kinds);
+
+        var found = new HashSet<string>(StringComparer.Ordinal);
+        type = null;
+
+        foreach (var kind in kinds)
+        {
+            if (!readables.TryGetValue(kind, out var items))
+            {
+                continue;
+            }
+
+            foreach (var pair in items)
+            {
+                found.Add(pair.Key);
+            }
+
+            if (type is null && items.TryGetValue(path, out var itemType))
+            {
+                type = itemType;
+            }
+        }
+
+        available = found.Order(StringComparer.Ordinal).ToArray();
+        return type is not null;
+    }
+
+    /// <summary>诊断文案里的种类说明（<c>self</c>／<c>viewer</c>／实体表达式）。</summary>
+    public static string DescribeKinds(IReadOnlyList<string> kinds) =>
+        string.Join("／", kinds ?? Array.Empty<string>());
 }

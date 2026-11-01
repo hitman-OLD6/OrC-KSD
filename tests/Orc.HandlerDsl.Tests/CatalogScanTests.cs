@@ -188,8 +188,11 @@ public class CatalogScanTests
             Assert.All(node.Outputs, pin => Assert.False(string.IsNullOrWhiteSpace(pin.Name)));
         });
 
-        // 可读项来自目录（read.path 的封闭取值集）。
-        Assert.Contains("attack", catalog.Readables.Keys);
+        // 可读项来自目录（read.path 的封闭取值集），按实体种类分组：
+        // 「能读什么」只取决于读谁是哪一类实体，与 of 写成 self／viewer 还是表达式无关。
+        Assert.Contains("attack", catalog.Readables[DslReadableKinds.Unit].Keys);
+        Assert.Contains("kredits", catalog.Readables[DslReadableKinds.Player].Keys);
+        Assert.DoesNotContain("kredits", catalog.Readables[DslReadableKinds.Unit].Keys);
     }
 
     [Fact]

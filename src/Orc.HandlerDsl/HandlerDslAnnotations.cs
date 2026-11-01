@@ -109,6 +109,22 @@ public sealed class HandlerDslEnumValuesAttribute : Attribute
 }
 
 /// <summary>
+/// 声明该方法**没有副作用**（只读查询），用于纠正默认映射规则的保守判定。
+/// <para>
+/// 默认规则把一切 <c>Task</c>／<c>Task&lt;T&gt;</c> 方法都判成「有副作用」——对动作是对的，
+/// 对**异步查询**（如 <c>unitsOf</c>）就过头了：它只是读世界状态，不改变任何东西。
+/// 这个区别前端看得见（副作用图标），也影响折叠语义（有副作用的节点不可复制），所以值得标出来。
+/// </para>
+/// <para>
+/// <b>只标真正无副作用的</b>：标错会让前端允许复制一个实际上不可复制的节点，比不标更糟。
+/// </para>
+/// </summary>
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
+public sealed class HandlerDslPureAttribute : Attribute
+{
+}
+
+/// <summary>
 /// 实体引脚的运行期接受子类型集（<c>unit</c>／<c>hq</c>／<c>card</c>，SPEC §6.4）。
 /// <para>仅供前端连线提示与静态子类型判定；图校验期只对**基类型**做硬拒绝。</para>
 /// </summary>
