@@ -12,7 +12,10 @@
     "activeWhen": "placed",
     "oneShot": false,
     "disposalSignal": "card.destroyed",
-    "authorizesModing": true
+    "authorizesModing": true,
+    "isTemplate": false,
+    "label": null,
+    "description": null
   },
   "draft": {
     "path": "modings/test.child.draft.moding.json",
@@ -55,7 +58,9 @@
       "handlerSource": "dsl",
       "handlerId": "test.child.draft#onDeployed",
       "mountedTo": [],
-      "wrappedAt": []
+      "wrappedAt": [],
+      "requiresImplementation": false,
+      "label": null
     },
     {
       "name": "onNew",
@@ -76,7 +81,9 @@
       "handlerSource": "script",
       "handlerId": "test.child.draft#onNew",
       "mountedTo": [],
-      "wrappedAt": []
+      "wrappedAt": [],
+      "requiresImplementation": false,
+      "label": null
     }
   ],
   "mountableTargets": [

@@ -43,6 +43,36 @@
    "items": {
     "$ref": "#/$defs/node"
    }
+  },
+  "builtInOps": {
+   "type": "array",
+   "description": "内建 op 的能力分区（R36）：sequence/branch/loop/while/iterate/choice/let/write/ask/script。与 nodes 分属两张表——内建 op 没有引脚条目，但可用性同样要诚实呈现（choice 编译能过、运行期抛 NotSupportedException）。不裁剪：preview 也出现，只影响排序与提示。",
+   "items": {
+    "type": "object",
+    "required": [
+     "op",
+     "stage"
+    ],
+    "properties": {
+     "op": {
+      "type": "string",
+      "description": "op 名（＝DSL 里 \"op\" 的取值）。"
+     },
+     "stage": {
+      "type": "string",
+      "enum": [
+       "alpha",
+       "preview"
+      ],
+      "description": "alpha＝这版真能跑；preview＝目录里有、现在跑不起来。"
+     },
+     "problem": {
+      "type": "string",
+      "description": "人读原因（仅 preview；alpha 恒缺省）。"
+     }
+    },
+    "additionalProperties": false
+   }
   }
  },
  "$defs": {
@@ -100,6 +130,18 @@
      "items": {
       "$ref": "#/$defs/pin"
      }
+    },
+    "stage": {
+     "type": "string",
+     "enum": [
+      "alpha",
+      "preview"
+     ],
+     "description": "能力分区（R36）：alpha＝这版真能跑；preview＝目录里有、但现在跑不起来。缺省 alpha。不裁剪目录——preview 节点照样出现，只影响排序与提示。"
+    },
+    "problem": {
+     "type": "string",
+     "description": "人读原因（仅 preview；alpha 恒缺省）。写清「缺什么」，不要只写「未实现」。"
     }
    }
   },

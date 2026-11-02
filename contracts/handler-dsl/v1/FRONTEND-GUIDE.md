@@ -263,7 +263,8 @@ record HandlerCatalogDto(
     int CatalogRevision,
     IReadOnlyList<string> ScannedFaces,                       // 节点来自哪些门面（调试用）
     IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> Readables, // 见 §5.4
-    IReadOnlyList<HandlerCatalogNodeDto> Nodes);
+    IReadOnlyList<HandlerCatalogNodeDto> Nodes,
+    IReadOnlyList<HandlerBuiltinOpDto> BuiltInOps);           // 见 §5.5：内建 op 的能力分区
 
 record HandlerCatalogNodeDto(
     string Name,                    // 就是 DSL 里的 op 取值
@@ -271,7 +272,9 @@ record HandlerCatalogNodeDto(
     bool HasSideEffect,             // 折叠判定用（§8）
     string? FaceType,               // 来源类型；合成节点（stop/interrupt）为空
     IReadOnlyList<HandlerCatalogPinDto> Inputs,
-    IReadOnlyList<HandlerCatalogPinDto> Outputs);
+    IReadOnlyList<HandlerCatalogPinDto> Outputs,
+    string Stage = "alpha",         // "alpha" | "preview"（§5.5）
+    string? Problem = null);        // preview 的人读原因；alpha 恒为 null
 
 record HandlerCatalogPinDto(
     string Name,
@@ -376,6 +379,38 @@ EditorCommitResult Commit(string relativePath, string content);
 
 > 注意：这条规则**不是新语义**。运行期 `ReadValue` 早就按 owner 严格分区（`of=self` 读 `kredits` 抛
 > `NotSupportedException`）；分类只是把那条既有事实搬到元数据，让校验期能提前拦住。
+
+### 5.5 能力分区：哪些东西现在跑不起来
+
+目录里有两类可拖的东西，**两类都有 `alpha`/`preview` 分区**：
+
+```csharp
+record HandlerBuiltinOpDto(
+    string Op,          // sequence / branch / loop / while / iterate / choice / let / write / ask / script
+    string Stage,       // "alpha" | "preview"
+    string? Problem);   // preview 的人读原因；alpha 恒为 null
+```
+
+- **`Nodes`**（有引脚的调用原语）：看 `Stage`／`Problem` 两个字段。
+- **`BuiltInOps`**（内建控制流，前端硬编码、目录里没有引脚条目）：看这张表。**`choice` 是 `preview`**。
+
+**`preview` 的含义**：目录里有、现在**跑不起来**。当前只有 `choice` ——
+它编译能过，但运行期一律抛 `NotSupportedException`（选项呈现需要前端桥接，尚未接入）。
+
+**不许因为 `preview` 就把它藏起来。** 分区只决定**排序与提示**：
+
+```text
+展示顺序：alpha 在前，preview 在后（各自沿用原来的分组/命名顺序）
+preview 条目：置灰 + 角标，hover 显示 Problem 原文
+拖到画布上：允许（作者可以先把图搭出来），但保存前给出阻断性提示
+```
+
+理由：藏起来会让作者以为这版没有这个能力，转而去别处绕——那比"标出来但说明原因"糟糕得多。
+
+> 判据是**显式标注/登记**，不是自动探针。原因：`choice` 编译能过、运行才炸，
+> 用「编译一次」判据会把它判成 alpha（比不标更糟）；而多数节点需要真实对局上下文才能跑，
+> 探针会把它们误判成 preview。**这条机制要能自动变绿**——引擎接通 S10 后会先让一条行为测试变红，
+> 逼后端回来删掉登记，不需要人记得回来改名单。
 
 ---
 
