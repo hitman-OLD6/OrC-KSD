@@ -27,6 +27,26 @@ public static class HandlerDslContract
     public static bool IsBuiltinOp(string? op) =>
         !string.IsNullOrEmpty(op) && BuiltinOps.Contains(op, StringComparer.Ordinal);
 
+    /// <summary>
+    /// **内建 op 的预览态原因**（R36）：op 在语法里合法、编译能过，但**现在跑不起来**。
+    /// <para>
+    /// 为什么不在目录节点上加标注：内建 op 不是扫描出来的节点（`sequence`／`branch`／`loop`／…
+    /// 由前端硬编码、目录里根本没有条目），它们的可用性无处可标；而 `choice` 的运行时实现
+    /// <c>ChooseAsync</c> 本身在**排除清单**里（只由生成码调用），标注也读不到。
+    /// 表在这里＝唯一能同时被目录导出与前端消费的位置。
+    /// </para>
+    /// <para>
+    /// 语义与节点分区一致：**只影响排序与提示，不裁剪**——`choice` 照样出现在内建 op 清单里。
+    /// 接通能力后删掉对应条目即可（守护测试会先变红）。
+    /// </para>
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> PreviewOps { get; } =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["choice"] = "选项呈现需前端桥接（S10）尚未接入：编译能过，运行期一律抛 NotSupportedException。"
+                + "接通交互通道后删掉本条。",
+        };
+
     /// <summary>根节点路径（一切定位的起点，SPEC §14.2）。</summary>
     public const string RootPath = "$";
 

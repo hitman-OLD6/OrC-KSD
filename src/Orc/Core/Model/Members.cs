@@ -1,6 +1,105 @@
 namespace Orc.Core.Model;
 
 /// <summary>
+/// **模板守卫档**（R32／D24）：模板成员在作者效果体**之前**插入的过滤代码种类。
+/// <para>
+/// 信号是全局广播（<c>engine#unit.deployed</c> 上任何单位部署都会跑到每条边），模板声明守卫后由
+/// **生成器**合成过滤代码——作者不可见、不可编辑、不可删除。档的可用性只由**白名单**决定
+/// （<c>Subjects</c>／<c>Players</c>），不按载荷顺序或字段类型推断（D27）。
+/// </para>
+/// <para>
+/// 摊平产物**不含本声明**：守卫已烘进 csx 文本（D24／D25 推论）。产物若保留 <c>guard</c>，
+/// 再次摊平会重复加守卫。
+/// </para>
+/// </summary>
+public enum HandlerGuard
+{
+    /// <summary>不生成过滤代码（任何广播都执行；模板文案不显示本档）。</summary>
+    Any = 0,
+
+    /// <summary>本单位：宿主卡与载荷里的「主体卡字段」引用相等。</summary>
+    Self = 1,
+
+    /// <summary>友方：宿主卡的归属玩家与载荷里的玩家字段引用相等。</summary>
+    OwnerSame = 2,
+
+    /// <summary>敌方：宿主卡的归属玩家与载荷里的玩家字段不相等（<c>Owner</c> 为 null ＝按「不同主」）。</summary>
+    OwnerDifferent = 3,
+}
+
+/// <summary>
+/// 守卫的**代码合成参数**（生成器输入；纯数据）：档 ＋ 两个白名单解析出的载荷字段名。
+/// <para>
+/// 字段名来自信号定义侧的 <c>Subjects</c>／<c>Players</c> 白名单，**不由载荷顺序推断**——
+/// 载荷里 <c>Player</c>／<c>Deck</c>／<c>Position</c>／<c>Source</c> 全是 <c>entity</c>，
+/// 按「第一个实体字段」推断会把回合五连判成可用而比较对象恒不命中（D27）。
+/// </para>
+/// </summary>
+/// <param name="Guard">守卫档（<see cref="HandlerGuard.Any"/>＝不合成，调用方不应构造本记录）。</param>
+/// <param name="SubjectField">主体卡字段名（<c>self</c> 档用；如 <c>Unit</c>／<c>Card</c>）。</param>
+/// <param name="PlayerField">玩家字段名（<c>owner-*</c> 档用；如 <c>Player</c>）。</param>
+public sealed record HandlerGuardSpec(HandlerGuard Guard, string SubjectField, string PlayerField);
+
+/// <summary>守卫的**文本名与中文名**（schema 取值 ＋ 模板文案派生；代码常量，不落数据文件）。</summary>
+public static class HandlerGuardNames
+{
+    /// <summary><c>any</c> 档文本名。</summary>
+    public const string Any = "any";
+
+    /// <summary><c>self</c> 档文本名。</summary>
+    public const string Self = "self";
+
+    /// <summary><c>owner-same</c> 档文本名。</summary>
+    public const string OwnerSame = "owner-same";
+
+    /// <summary><c>owner-different</c> 档文本名。</summary>
+    public const string OwnerDifferent = "owner-different";
+
+    /// <summary>全部档的文本名（声明序：any／self／owner-same／owner-different）。</summary>
+    public static IReadOnlyList<string> All { get; } = new[] { Any, Self, OwnerSame, OwnerDifferent };
+
+    /// <summary>档 → 文本名。</summary>
+    /// <exception cref="ArgumentOutOfRangeException">未定义的档。</exception>
+    public static string Format(HandlerGuard guard) => guard switch
+    {
+        HandlerGuard.Any => Any,
+        HandlerGuard.Self => Self,
+        HandlerGuard.OwnerSame => OwnerSame,
+        HandlerGuard.OwnerDifferent => OwnerDifferent,
+        _ => throw new ArgumentOutOfRangeException(nameof(guard), guard, "未定义的守卫档。"),
+    };
+
+    /// <summary>文本名 → 档（未知＝null）。</summary>
+    public static HandlerGuard? Parse(string? text)
+    {
+        if (text is null)
+        {
+            return null;
+        }
+
+        return text.Trim() switch
+        {
+            Any => HandlerGuard.Any,
+            Self => HandlerGuard.Self,
+            OwnerSame => HandlerGuard.OwnerSame,
+            OwnerDifferent => HandlerGuard.OwnerDifferent,
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// 档的中文名（R35 文案派生用；<see cref="HandlerGuard.Any"/>＝**null＝不显示**——`any` 档模板文案不带括号）。
+    /// </summary>
+    public static string? DisplayName(HandlerGuard guard) => guard switch
+    {
+        HandlerGuard.Self => "本单位",
+        HandlerGuard.OwnerSame => "友方",
+        HandlerGuard.OwnerDifferent => "敌方",
+        _ => null,
+    };
+}
+
+/// <summary>
 /// 预制体来源层（R1e 第 7 条：内核基础预制体与游戏层 <c>extends</c> 追加的成员同处 <c>engine</c> 根下，
 /// 解析对来源层无差别，但审查面要标出来源层）。
 /// </summary>
@@ -138,6 +237,17 @@ public sealed class MemberDefinition
     /// 不依赖本字段（沿用 <see cref="ComponentDisposalPolicy.IsReservedMember"/> 的保留名判定，不新增名单）。
     /// </para>
     /// </param>
+    /// <param name="abstractMember">
+    /// **成员级抽象**（R30／R31；缺省 false）：该成员的 handler 是空洞，必须由子实现。
+    /// <para>
+    /// **只有摊平期读它**（S14／D28）：装载链不判「成员是否已实现」——成品里 handler 为 null 与
+    /// 「纯编排成员」不可区分。抽象性**沿继承链合并**：子覆写 ⇒ 不再抽象；子可重新声明 <c>abstract: true</c> 再打开。
+    /// </para>
+    /// </param>
+    /// <param name="guard">
+    /// **守卫档**（R32／D24；null＝不守卫）：模板成员声明它，生成器在作者效果体之前合成过滤代码。
+    /// 沿继承链**继承**（子覆写不重声明＝沿用父的档），因为作者看不见也改不到它。
+    /// </param>
     /// <exception cref="ArgumentException">
     /// name 为空或纯空白；band 未在 bands 方案中声明；bands 含空白项或重复名；seams 含空白项或重复名。
     /// </exception>
@@ -153,7 +263,9 @@ public sealed class MemberDefinition
         string? band = null,
         IReadOnlyList<string>? bands = null,
         IReadOnlyList<string>? seams = null,
-        bool sealedMember = false)
+        bool sealedMember = false,
+        bool abstractMember = false,
+        HandlerGuard? guard = null)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -175,7 +287,29 @@ public sealed class MemberDefinition
         Bands = scheme;
         Seams = ValidateSeams(name, seams);
         Sealed = sealedMember;
+        Abstract = abstractMember;
+        Guard = guard;
     }
+
+    /// <summary>以父守卫补全子成员（守卫沿继承链继承，R32：作者看不见也改不到）。</summary>
+    internal MemberDefinition WithInheritedGuard(HandlerGuard? parentGuard)
+        => parentGuard is null || Guard is not null
+            ? this
+            : new MemberDefinition(
+                Name,
+                View,
+                Visibility,
+                OwnEdges,
+                Validation,
+                Layer,
+                DeclaredBy,
+                SignalTiming,
+                Band,
+                Bands,
+                Seams,
+                Sealed,
+                Abstract,
+                parentGuard);
 
     /// <summary>
     /// 具名缝声明的合法性校验（fail-fast）：空白项、重复名一律拒绝（重复名会让"按名取包装器列表"变成多解）。
@@ -381,6 +515,20 @@ public sealed class MemberDefinition
     public bool Sealed { get; }
 
     /// <summary>
+    /// **成员级抽象**（R30／R31；缺省 false＝已实现）：该成员的 handler 是空洞，必须由子实现。
+    /// <para>
+    /// 摊平期**唯一**的强制点（S14／D28）：装载链不读本字段。抽象性沿继承链合并——子覆写即不再抽象。
+    /// </para>
+    /// </summary>
+    public bool Abstract { get; }
+
+    /// <summary>
+    /// **守卫档**（R32；null＝不守卫）：模板成员声明，生成器把它合成进 csx 首行过滤代码；
+    /// 摊平产物**不携带**本字段（守卫已烘进文本，D24／D25）。
+    /// </summary>
+    public HandlerGuard? Guard { get; }
+
+    /// <summary>
     /// 「实际上不可覆写」：成员级 <see cref="Sealed"/> 或 <c>framework.</c> 保留名（恒 sealed，R2 第 4 条）。
     /// </summary>
     public bool IsEffectivelySealed => Sealed || ComponentDisposalPolicy.IsReservedMember(Name);
@@ -433,7 +581,8 @@ public sealed class MemberDefinition
             }
         }
 
-        return child;
+        // 守卫沿继承链继承（R32）：作者看不见 guard，子覆写「不重声明」＝沿用父的档，不是「取消守卫」。
+        return child.WithInheritedGuard(Guard);
     }
 
     /// <summary>

@@ -138,3 +138,26 @@ public sealed class HandlerDslSubtypeAttribute : Attribute
     /// <summary>运行期接受的子类型集。</summary>
     public IReadOnlyList<string> Types { get; }
 }
+
+/// <summary>
+/// **预览态标注**（R36）：本节点在目录里可见，但**现在跑不起来**。
+/// <para>
+/// 存在理由：`choice` 这类节点**编译能过、运行才炸**——按「编译一次」自动判据会把它判成可用，
+/// 作者在画布上得不到任何提示，选中即失败。标注是**显式事实**，且必须由一条行为测试背书
+/// （标注与事实脱节即测试红，逼人回来改）。
+/// </para>
+/// <para>
+/// 语义边界：`preview` 只影响**展示顺序与提示**，绝不裁剪目录——藏起来会让作者以为这版没有这个能力。
+/// 引擎补上对应能力后删掉标注即可，那条行为测试会先变红。
+/// </para>
+/// </summary>
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
+public sealed class HandlerDslPreviewAttribute : Attribute
+{
+    /// <summary>构造。</summary>
+    /// <param name="problem">人读原因（写清「缺什么」，不要只写「未实现」）。</param>
+    public HandlerDslPreviewAttribute(string problem) => Problem = problem;
+
+    /// <summary>人读原因。</summary>
+    public string Problem { get; }
+}

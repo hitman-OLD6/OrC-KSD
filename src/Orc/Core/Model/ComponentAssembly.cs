@@ -298,6 +298,26 @@ public sealed class ComponentAttachmentSet
         return attachment;
     }
 
+    /// <summary>
+    /// **授予**一个组件实例（R37）：与 <see cref="Construct"/> 的唯一差别是**不查重**。
+    /// <para>
+    /// 声明期重复引用仍是错误（R3i：同一 prefab 在同一宿主上至多一份），但**运行期授予**允许重复——
+    /// 同一张卡两次被授予同一效果就是两份实例，各自独立撤销（撤销靠句柄，不按 id 找）。
+    /// 这条口子只在授予路径上开，装载路径的 <see cref="Construct"/> 行为逐字不变。
+    /// </para>
+    /// </summary>
+    internal ComponentAttachment Grant(OrchestrationRuntime runtime, string prefabId, string name)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        ArgumentException.ThrowIfNullOrWhiteSpace(prefabId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        var component = runtime.CreateEntity(prefabId, name, Host);
+        var attachment = new ComponentAttachment(this, Host, component, _attachments.Count + 1);
+        _attachments.Add(attachment);
+        return attachment;
+    }
+
     /// <summary>装配所有命中时点的组件（<c>active-when: loaded</c> 在宿主加载时、<c>placed</c> 在入场时）。</summary>
     internal int Assemble(ActiveWhen phase)
     {
@@ -376,6 +396,45 @@ public sealed partial class OrchestrationRuntime
         }
 
         return set.Construct(this, prefabId, name);
+    }
+
+    /// <summary>
+    /// **运行期授予**一个组件实例并立即装配（R37）：给一张**已经在场**的卡凭空加一份效果。
+    /// <para>
+    /// 与 <see cref="AddComponent"/> 的差别只有两点：①**允许同一 prefab 重复**（授予是运行期行为，
+    /// 不受 R3i 的「声明期至多一份」约束）；②<b>跳过装载期规划</b>——授予的组件走自己的 <c>mounts</c> 声明建边，
+    /// 视同它此刻才被装配。
+    /// </para>
+    /// <para>
+    /// 撤销由调用方持有返回的 <see cref="ComponentAttachment"/>（<c>Dispose</c> 即卸边）；引擎侧的
+    /// 「随宿主销毁 / 离场撤销」策略不在这里——那是 <c>Orc.Game</c> 的效果授予服务（授权时机依赖游戏层信号）。
+    /// </para>
+    /// </summary>
+    /// <exception cref="ArgumentNullException">host／prefabId／name 为 null。</exception>
+    /// <exception cref="PrefabLoadException">预制体不存在、不是组件，或装配失败。</exception>
+    public ComponentAttachment GrantComponent(OrchestrationEntity host, string prefabId, string name)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        ArgumentException.ThrowIfNullOrWhiteSpace(prefabId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        var type = Catalog.Resolve(prefabId);
+        if (type.Kind != EntityKind.Component)
+        {
+            throw new PrefabLoadException(
+                PrefabErrorCategories.Structure,
+                $"预制体 '{prefabId}' 不是组件实体（kind={type.Kind}），不能作为效果授予 '{host.Name}'。");
+        }
+
+        if (!_componentSets.TryGetValue(host, out var set))
+        {
+            set = new ComponentAttachmentSet(host);
+            _componentSets[host] = set;
+        }
+
+        var attachment = set.Grant(this, prefabId, name).Assemble();
+        Assembled?.Invoke(attachment);
+        return attachment;
     }
 
     /// <summary>

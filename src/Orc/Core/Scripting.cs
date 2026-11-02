@@ -302,6 +302,27 @@ public interface IHandlerDslCompiler
 }
 
 /// <summary>
+/// **带守卫的编译**（R32／D24；内核纯接口，**不改变 <see cref="IHandlerDslCompiler.Compile"/> 的签名**）。
+/// <para>
+/// 为什么单开一个接口：守卫是模板成员才有的输入，普通成员的编译路径必须逐字不变（存量零行为变化）；
+/// 而 <see cref="IHandlerDslCompiler.Compile"/> 的三参形状被契约测试逐字断言（内核只认纯数据、不带 DSL 类型系统）。
+/// 编译器**没有**实现本接口时的处理：摊平／装载遇到带守卫的成员＝<c>capability</c> 错误
+/// （能力缺失，与「没有编译器」同一口径，D6／D14），不是静默不加守卫。
+/// </para>
+/// </summary>
+public interface IHandlerDslGuardedCompiler
+{
+    /// <summary>按守卫档编译：守卫代码由生成器写在作者效果体**之前**（作者 DSL 无法覆盖或删除）。</summary>
+    /// <param name="dslJson">DSL 文档的 JSON 文本。</param>
+    /// <param name="catalog">节点目录。</param>
+    /// <param name="view">挂载点目标成员的视图声明（null＝未知视图，保守拒绝）。</param>
+    /// <param name="guard">守卫合成参数（主体卡字段／玩家字段已由信号白名单解析）。</param>
+    /// <exception cref="ArgumentNullException">dslJson／catalog／guard 为 null。</exception>
+    HandlerDslCompileResult CompileGuarded(
+        string dslJson, IHandlerCatalog catalog, HandlerDslView? view, Model.HandlerGuardSpec guard);
+}
+
+/// <summary>
 /// **handler DSL 的装配件**（内核形态、纯接口）：编译器 ＋ 目录，装配到 <see cref="LogicEngine.HandlerDsl"/>。
 /// <para>
 /// 为什么把两者捆在一起：<see cref="IHandlerDslCompiler.Compile"/> 的目录是**调用参数**（D4：
@@ -317,7 +338,18 @@ public interface IHandlerDslCompiler
 /// </summary>
 /// <param name="Compiler">编译器（实现由 satellite 注入，如 <c>Orc.HandlerDsl.HandlerDslCompiler</c>）。</param>
 /// <param name="Catalog">本次装配使用的节点目录（运行期扫描结果）。</param>
-public sealed record HandlerDslEnvironment(IHandlerDslCompiler Compiler, IHandlerCatalog Catalog);
+public sealed record HandlerDslEnvironment(IHandlerDslCompiler Compiler, IHandlerCatalog Catalog)
+{
+    /// <summary>
+    /// **守卫解析器**（R32；可空）：<c>(档, 信号名) → 合成参数</c>，字段名由**信号定义侧的白名单**给出。
+    /// <para>
+    /// 为什么是注入而不是内核查表：白名单分层（内核 4 条在 <c>Orc.Core</c>、游戏层 35 条在 <c>Orc.Game</c>，
+    /// D26），合并只能落在上层；内核装载器因此只认这个纯函数。null ＝本环境不解析守卫——
+    /// 遇到带守卫的成员＝<c>capability</c> 错误（不静默不加守卫）。
+    /// </para>
+    /// </summary>
+    public Func<Model.HandlerGuard, string, Model.HandlerGuardSpec?>? GuardResolver { get; init; }
+}
 
 /// <summary>
 /// 节点目录（内核侧的**最小**只读面）：可调用原语的清单与版本的查询入口。

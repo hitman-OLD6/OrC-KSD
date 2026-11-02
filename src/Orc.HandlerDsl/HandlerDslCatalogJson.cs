@@ -144,6 +144,16 @@ public static class HandlerDslCatalogJson
         writer.WriteStartObject();
         writer.WriteString("name", node.Name);
 
+        // 能力分区（R36）：alpha 是缺省，不写进快照——只有 preview 才需要落盘（并带原因）。
+        if (node.Stage == DslNodeStage.Preview)
+        {
+            writer.WriteString("stage", "preview");
+            if (node.Problem is not null)
+            {
+                writer.WriteString("problem", node.Problem);
+            }
+        }
+
         // 合成节点（stop／interrupt）没有来源门面：省略 source（快照侧不会把它们判成孤儿，SPEC §12.9）。
         if (node.Face is not null || node.Method is not null || node.ImplicitHost is not null || node.FaceType is not null)
         {
@@ -288,7 +298,12 @@ public static class HandlerDslCatalogJson
             implicitHost,
             isStatic,
             faceType,
-            tokenParameter);
+            tokenParameter,
+            stage: element.TryGetProperty("stage", out var stage)
+                   && string.Equals(stage.GetString(), "preview", StringComparison.Ordinal)
+                ? DslNodeStage.Preview
+                : DslNodeStage.Alpha,
+            problem: element.TryGetProperty("problem", out var problem) ? problem.GetString() : null);
     }
 
     private static IReadOnlyList<DslPin> ReadPins(JsonElement nodeElement, string field)

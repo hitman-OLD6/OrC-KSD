@@ -11,7 +11,18 @@ public sealed class ComponentAsset
 {
     /// <summary>创建组件资产。</summary>
     /// <exception cref="ArgumentNullException">id／集合为 null。</exception>
-    /// <exception cref="ArgumentException">id 为空或纯空白。</exception>
+    /// <exception cref="ArgumentException">id 为空或纯空白；extends 自指；抽象资产显式关闭授权。</exception>
+    /// <param name="extends">父资产 id（null＝自包含）。</param>
+    /// <param name="authorizesModing">
+    /// 资产级可重载开关（R2；缺省关闭）。**null＝未声明**——与显式 <c>false</c> 区分：
+    /// 抽象资产（<paramref name="isAbstract"/>）未声明时**缺省推导为 true**，显式 <c>false</c> ＝装载期拒绝（D29）。
+    /// </param>
+    /// <param name="isAbstract">
+    /// **资产级抽象**（R30）：本资产是模板、不是可装配组件——被卡牌 <c>components</c> 引用＝装载期拒绝
+    /// （「模板不可实例化」）。资产级仍可注册、可被编辑期展开（否则草案的父无从解析，D28）。
+    /// </param>
+    /// <param name="label">展示名（R35；null＝未声明，前端回退显示 id）。</param>
+    /// <param name="description">展示描述（R35；null＝未声明）。模板的 description 取信号的 <c>Notes</c>。</param>
     public ComponentAsset(
         string id,
         HostKind requiresHost,
@@ -24,10 +35,22 @@ public sealed class ComponentAsset
         IReadOnlyList<WrapDeclaration> wraps,
         IReadOnlyList<ComponentJudgeWrapAsset> judgeWraps,
         string? extends = null,
-        bool authorizesModing = false)
+        bool? authorizesModing = null,
+        bool isAbstract = false,
+        string? label = null,
+        string? description = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentNullException.ThrowIfNull(privateFields);
+
+        if (isAbstract && authorizesModing == false)
+        {
+            // D29 的二分：未声明＝推导 true（零诊断）；显式 false ＝矛盾，装载期拒绝（不宽容、不提示）。
+            throw new ArgumentException(
+                $"资产 '{id}' 声明了 abstract: true 却显式关闭 authorize-moding: false："
+                + "抽象资产必须可被覆写（模板不可被覆写就没有意义）——这是显式矛盾，不是可忽略的冗余声明。",
+                nameof(authorizesModing));
+        }
 
         Id = id;
         RequiresHost = requiresHost;
@@ -40,7 +63,11 @@ public sealed class ComponentAsset
         Wraps = wraps ?? throw new ArgumentNullException(nameof(wraps));
         JudgeWraps = judgeWraps ?? throw new ArgumentNullException(nameof(judgeWraps));
         Extends = string.IsNullOrWhiteSpace(extends) ? null : extends.Trim();
-        AuthorizesModing = authorizesModing;
+        Abstract = isAbstract;
+        // 缺省推导（不是判定时隐式视作 true）：读入时就把值落定，下游无需再问「它是不是抽象」。
+        AuthorizesModing = isAbstract || (authorizesModing ?? false);
+        Label = string.IsNullOrWhiteSpace(label) ? null : label.Trim();
+        Description = string.IsNullOrWhiteSpace(description) ? null : description;
 
         if (Extends is not null && string.Equals(Extends, Id, StringComparison.Ordinal))
         {
@@ -94,8 +121,21 @@ public sealed class ComponentAsset
 
     /// <summary>
     /// 资产级「本资产可被 moding」开关（R2；缺省关闭）。父未打开＝任何成员覆写都是装载期拒绝。
+    /// <para>抽象资产（<see cref="Abstract"/>）恒为 true（D29：未声明时缺省推导、显式 false 已拒绝）。</para>
     /// </summary>
     public bool AuthorizesModing { get; }
+
+    /// <summary>
+    /// **资产级抽象**（R30；D28）：本资产是模板——可注册、可被编辑期展开，但**不得被 <c>components</c> 引用**
+    /// 进对局（装载期拒绝「模板不可实例化」）。与成员级抽象是两件事，判定点不同。
+    /// </summary>
+    public bool Abstract { get; }
+
+    /// <summary>展示名（R35；null＝未声明，前端回退显示 <see cref="Id"/>）。</summary>
+    public string? Label { get; }
+
+    /// <summary>展示描述（R35；null＝未声明）。模板的 description 直接取信号的 <c>Notes</c>。</summary>
+    public string? Description { get; }
 
     /// <summary>
     /// 判定器包装的 handler 资产 id（判定器名 + 资产 id：同一判定器可被多个资产各包一层，
@@ -152,7 +192,9 @@ public sealed class ComponentAsset
                 band: member.Band,
                 bands: member.Bands,
                 seams: member.Seams,
-                sealedMember: member.Sealed));
+                sealedMember: member.Sealed,
+                abstractMember: member.Abstract,
+                guard: member.Guard));
         }
 
         var wraps = new List<WrapDeclaration>(Wraps.Count + JudgeWraps.Count);
@@ -178,7 +220,10 @@ public sealed class ComponentAsset
             activeWhen: ActiveWhen,
             oneShot: OneShot,
             disposalSignal: DisposalSignal,
-            authorizesModing: AuthorizesModing);
+            authorizesModing: AuthorizesModing,
+            isAbstract: Abstract,
+            label: Label,
+            description: Description);
     }
 }
 
@@ -191,6 +236,12 @@ public sealed class ComponentAsset
 /// <param name="Bands">段序声明（有序段名；null＝单段方案）。</param>
 /// <param name="Seams">handler 内部的具名插入点（null／空＝不声明；R1i 修订 2026-10-29：seam 恢复）。</param>
 /// <param name="Sealed">成员级封死（R2；缺省 false＝可覆写；父用它逐个排除成员）。</param>
+/// <param name="Abstract">
+/// 成员级抽象（R30／R31；缺省 false＝已实现）：handler 是空洞、必须由子实现。
+/// **只在摊平期判**（D28）；摊平产物不得携带本字段。
+/// </param>
+/// <param name="Guard">守卫档（R32；null＝不守卫）。**摊平产物不得携带本字段**（守卫已烘进 csx）。</param>
+/// <param name="Label">展示名（R35；null＝未声明，前端回退显示成员名）。</param>
 public sealed record ComponentMemberAsset(
     string Name,
     MemberVisibility Visibility,
@@ -199,7 +250,10 @@ public sealed record ComponentMemberAsset(
     string? Band = null,
     IReadOnlyList<string>? Bands = null,
     IReadOnlyList<string>? Seams = null,
-    bool Sealed = false);
+    bool Sealed = false,
+    bool Abstract = false,
+    HandlerGuard? Guard = null,
+    string? Label = null);
 
 /// <summary>handler 资产声明：id ＋ 入口名 ＋ （csx 源码 ／ 程序集键 ／ handler DSL 文档，三选一）。</summary>
 /// <param name="Id">资产 id（全局唯一；多份资产可引用同一 id）。</param>

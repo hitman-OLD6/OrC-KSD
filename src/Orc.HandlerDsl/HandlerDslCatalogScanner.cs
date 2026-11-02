@@ -251,7 +251,9 @@ public static class HandlerDslCatalogScanner
                 implicitHost: first.ImplicitHost,
                 isStatic: first.IsStatic,
                 faceType: first.FaceType,
-                cancellationTokenParameter: first.CancellationTokenParameter));
+                cancellationTokenParameter: first.CancellationTokenParameter,
+                stage: first.PreviewProblem is null ? DslNodeStage.Alpha : DslNodeStage.Preview,
+                problem: first.PreviewProblem));
         }
 
         if (errors.Count > 0)
@@ -572,7 +574,8 @@ public static class HandlerDslCatalogScanner
             outputs,
             hasAwait,
             hasSideEffect,
-            cancellationTokenParameter);
+            cancellationTokenParameter,
+            method.GetCustomAttribute<HandlerDslPreviewAttribute>()?.Problem);
     }
 
     private static bool TryUnwrapTask(Type type, out Type payload)
@@ -695,5 +698,6 @@ public static class HandlerDslCatalogScanner
         IReadOnlyList<DslPin> Outputs,
         bool HasAwait,
         bool HasSideEffect,
-        string? CancellationTokenParameter);
+        string? CancellationTokenParameter,
+        string? PreviewProblem);
 }

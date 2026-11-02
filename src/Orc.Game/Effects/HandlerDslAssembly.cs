@@ -33,6 +33,12 @@ public static class HandlerDslAssembly
                 "handler DSL 目录扫描失败（动作面标注不完整）：" + string.Join("；", scan.Errors));
         }
 
-        return new HandlerDslEnvironment(new HandlerDslCompiler(), scan.Catalog);
+        return new HandlerDslEnvironment(new HandlerDslCompiler(), scan.Catalog)
+        {
+            // 守卫解析（R32／D27）：字段名真源在**信号定义侧**的白名单（本层合并内核 4 ＋ 游戏层 35），
+            // 内核装载器见不到这张表，故以纯函数注入。
+            GuardResolver = static (guard, signal)
+                => Model.SignalGuards.TryResolve(guard, signal, out var spec, out _) ? spec : null,
+        };
     }
 }

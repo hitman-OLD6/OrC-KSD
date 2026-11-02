@@ -61,6 +61,127 @@ public static class GameSignals
     /// <summary>游戏层 35 个信号成员（声明序，来源层＝游戏）。</summary>
     public static IReadOnlyList<MemberDefinition> Members { get; } = Build();
 
+    /// <summary>
+    /// 游戏层 35 条信号的**中文名**（R35／D25：文案真源在信号定义处）。
+    /// <para>
+    /// 覆盖率守护逐层各一条：<c>GameSignals.Names ≡ GameSignals.Labels.Keys</c>（与内核那条**互不合并**，D26）。
+    /// 模板库的 <c>label</c> 由生成器从「信号中文名 ＋ guard 中文名」派生（如「部署时（本单位）」），人不手写。
+    /// </para>
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> Labels { get; } = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        [GameUpdates.TurnStartBefore] = "回合开始前",
+        [GameUpdates.TurnStart] = "回合开始时",
+        [GameUpdates.TurnStartAfter] = "回合开始后",
+        [GameUpdates.TurnEndBefore] = "回合结束前",
+        [GameUpdates.TurnEnd] = "回合结束时",
+        [GameUpdates.CardPlayed] = "打出时",
+        [GameUpdates.CardDrawn] = "抽到时",
+        [GameUpdates.CardStatChanged] = "数值变更时",
+        [GameUpdates.CardLoad] = "加载时",
+        [GameUpdates.CardHandAdd] = "加入手牌时",
+        [GameUpdates.CardDiscarded] = "弃置时",
+        [GameUpdates.CardBurned] = "爆牌时",
+        [GameUpdates.CardDied] = "死亡时",
+        [GameUpdates.CardDying] = "死亡确认时",
+        [GameUpdates.CardLeaving] = "非死亡离场时",
+        [GameUpdates.KeywordAttackFinished] = "词条攻击收尾时",
+        [GameUpdates.UnitJoined] = "单位加入时",
+        [GameUpdates.UnitDeployed] = "部署时",
+        [GameUpdates.UnitPositionChanged] = "位置变化时",
+        [GameUpdates.UnitUpgraded] = "升为老兵时",
+        [GameUpdates.UnitRevealed] = "揭示时",
+        [GameUpdates.CardDamaged] = "受到伤害时",
+        [GameUpdates.UnitActed] = "行动后",
+        [GameUpdates.UnitDamageDealt] = "造成伤害时",
+        [GameUpdates.CounterTriggered] = "反制触发时",
+        [GameUpdates.CounterDisarmed] = "反制解除时",
+        [GameUpdates.UnitCombatSurvived] = "战斗存活时",
+        [GameUpdates.DeckShuffled] = "洗牌时",
+        [GameUpdates.UnitTypesChanged] = "类型变更时",
+        [GameUpdates.SlotGained] = "获得槽位时",
+        [GameUpdates.SlotLost] = "失去槽位时",
+        [GameUpdates.SlotChanged] = "槽位变化时",
+        [GameUpdates.PointGained] = "获得点数时",
+        [GameUpdates.PointLost] = "失去点数时",
+        [GameUpdates.PointChanged] = "点数变化时",
+    };
+
+    /// <summary>
+    /// 语义边界说明（R35／D25；可选）——模板的 <c>description</c> **直接取本表**，生成器不另写一份。
+    /// <para>
+    /// <c>card.leaving</c> 的「非死亡」必须写在这里（R29 第 3 条）：作者看到模板文案就知道
+    /// 「单位被打死时不触发」，不必去读引擎实现。
+    /// </para>
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> Notes { get; } = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        [GameUpdates.CardLeaving] =
+            "非死亡离场：单位被移除、回手或撤退回手时触发；**死亡不触发**——死亡走 card.dying／card.died，三者互斥不重叠。",
+        [GameUpdates.CardDied] = "死亡完成（战斗数值链判定后）。要覆盖「被打死」的场景请用本档，不要用非死亡离场档。",
+        [GameUpdates.CardDying] = "死亡已确认、效果卸载前的宿主结算阶段；载荷同 card.died。",
+    };
+
+    /// <summary>
+    /// **主体卡字段白名单**（R32／D27）：信号 → 载荷里表示「宿主卡自身」的字段名，未登记⇒不出 <c>self</c> 档。
+    /// <para>
+    /// 22 条登记（26 条含内核 4 条）：回合五连／<c>deck.shuffled</c>／<c>slot.*</c>／<c>point.*</c> 的实体字段是
+    /// <c>Player</c>／<c>Deck</c>／<c>Source</c>，拿宿主卡去比**恒不命中**，故不登记（方向偏向漏登记）。
+    /// </para>
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> Subjects { get; } = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        [GameUpdates.CardPlayed] = GameUpdates.PayloadCard,
+        [GameUpdates.CardDrawn] = GameUpdates.PayloadCard,
+        [GameUpdates.CardStatChanged] = GameUpdates.PayloadCard,
+        [GameUpdates.CardHandAdd] = GameUpdates.PayloadCard,
+        [GameUpdates.CardDiscarded] = GameUpdates.PayloadCard,
+        [GameUpdates.CardBurned] = GameUpdates.PayloadCard,
+        [GameUpdates.CardDied] = GameUpdates.PayloadCard,
+        [GameUpdates.CardDying] = GameUpdates.PayloadCard,
+        [GameUpdates.CardLeaving] = GameUpdates.PayloadCard,
+        [GameUpdates.KeywordAttackFinished] = GameUpdates.PayloadCard,
+        [GameUpdates.UnitJoined] = GameUpdates.PayloadUnit,
+        [GameUpdates.UnitDeployed] = GameUpdates.PayloadUnit,
+        [GameUpdates.UnitPositionChanged] = GameUpdates.PayloadUnit,
+        [GameUpdates.UnitUpgraded] = GameUpdates.PayloadUnit,
+        [GameUpdates.UnitRevealed] = GameUpdates.PayloadUnit,
+        [GameUpdates.UnitActed] = GameUpdates.PayloadUnit,
+        [GameUpdates.UnitCombatSurvived] = GameUpdates.PayloadUnit,
+        [GameUpdates.UnitTypesChanged] = GameUpdates.PayloadUnit,
+        [GameUpdates.UnitDamageDealt] = GameUpdates.PayloadUnit,
+        [GameUpdates.CardDamaged] = GameUpdates.PayloadCard,
+        [GameUpdates.CounterTriggered] = GameUpdates.PayloadCard,
+        [GameUpdates.CounterDisarmed] = GameUpdates.PayloadCard,
+    };
+
+    /// <summary>
+    /// **玩家字段白名单**（R32／D27）：信号 → 载荷里的玩家字段名，未登记⇒不出 <c>owner-*</c> 档。
+    /// <para>19 条登记（回合五连 ＋ 卡动作三条 ＋ 反制两条 ＋ 卡组/资源六条 ＋ 抽到/手牌两条）。</para>
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> Players { get; } = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        [GameUpdates.TurnStartBefore] = GameUpdates.PayloadPlayer,
+        [GameUpdates.TurnStart] = GameUpdates.PayloadPlayer,
+        [GameUpdates.TurnStartAfter] = GameUpdates.PayloadPlayer,
+        [GameUpdates.TurnEndBefore] = GameUpdates.PayloadPlayer,
+        [GameUpdates.TurnEnd] = GameUpdates.PayloadPlayer,
+        [GameUpdates.CardPlayed] = GameUpdates.PayloadPlayer,
+        [GameUpdates.CardDrawn] = GameUpdates.PayloadPlayer,
+        [GameUpdates.CardHandAdd] = GameUpdates.PayloadPlayer,
+        [GameUpdates.CardDiscarded] = GameUpdates.PayloadPlayer,
+        [GameUpdates.CardBurned] = GameUpdates.PayloadPlayer,
+        [GameUpdates.CounterTriggered] = GameUpdates.PayloadPlayer,
+        [GameUpdates.CounterDisarmed] = GameUpdates.PayloadPlayer,
+        [GameUpdates.DeckShuffled] = GameUpdates.PayloadPlayer,
+        [GameUpdates.SlotGained] = GameUpdates.PayloadPlayer,
+        [GameUpdates.SlotLost] = GameUpdates.PayloadPlayer,
+        [GameUpdates.SlotChanged] = GameUpdates.PayloadPlayer,
+        [GameUpdates.PointGained] = GameUpdates.PayloadPlayer,
+        [GameUpdates.PointLost] = GameUpdates.PayloadPlayer,
+        [GameUpdates.PointChanged] = GameUpdates.PayloadPlayer,
+    };
+
     private static MemberDefinition[] Build()
     {
         var card = (GameUpdates.PayloadCard, ViewFieldType.Entity);

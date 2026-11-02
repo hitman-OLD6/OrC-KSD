@@ -126,6 +126,106 @@ public class HandlerDslEndToEndTests
     }
 
     /// <summary>
+    /// **模板 → 草案 → 摊平 → 装载 → 打出**：证明模板内置的守卫在**运行期**真的过滤。
+    /// <para>
+    /// 关键断言不是「自己打出时触发」（那只证明挂载对），而是「**别人**打出时零触发」——
+    /// 信号是全局广播：<c>engine#card.played</c> 上的边在任何卡打出时都会跑到。
+    /// 守卫若没生成、或比较对象取错，抽牌照样会发生，而文本级/编译级测试都看不出来。
+    /// </para>
+    /// <para>
+    /// 干扰卡是自造的 <c>diy.blank</c>（只有类别与费用、**没有任何 effect 组件**），
+    /// 因此它打出时只有 fire-support 那条边在场——抽没抽牌完全由守卫决定。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task 模板派生的效果_守卫在运行期拦住别人打的牌()
+    {
+        using var pack = TempDslPack.Plain();
+        var dsl = Orc.Game.Effects.HandlerDslAssembly.Create();
+        var templateRoot = Path.Combine(DiyExampleKit.FindRepoRoot(), "packs", "effect-templates");
+
+        const string dslDocument =
+            """{ "schemaVersion": 1, "actions": [ { "op": "draw", "count": { "lit": 1 } } ] }""";
+        File.WriteAllText(
+            Path.Combine(pack.EffectsDirectory, "handler-dsl", "template-on-played.hdsl.json"), dslDocument);
+
+        // 草案：继承模板（父无 handler），只实现空洞成员 onHook。
+        const string draftPath = "modings/diy.fire-support.effect.moding.json";
+        Directory.CreateDirectory(Path.Combine(pack.Root, "modings"));
+        File.WriteAllText(Path.Combine(pack.Root, draftPath), $$"""
+        {
+          "schemaVersion": 4,
+          "asset": {
+            "kind": "moding",
+            "id": "diy.fire-support.effect.draft",
+            "product": { "id": "diy.fire-support.effect" },
+            "extends": "template.card.played.self",
+            "requires-host": "any",
+            "active-when": "loaded",
+            "one-shot": false,
+            "private-fields": [],
+            "members": [
+              {
+                "name": "onHook",
+                "visibility": [ "mountable" ],
+                "view": { "fields": [
+                  { "name": "Card", "type": "entity", "writable": false, "required": false },
+                  { "name": "Player", "type": "entity", "writable": false, "required": false },
+                  { "name": "Source", "type": "entity", "writable": false, "required": false }
+                ] },
+                "handler": {
+                  "id": "diy.fire-support.effect.draft#onHook",
+                  "entry": "HandleAsync",
+                  "dsl": "handler-dsl/template-on-played.hdsl.json",
+                  "dslHash": "{{HandlerContent.Hash(dslDocument)}}"
+                }
+              }
+            ],
+            "mounts": [],
+            "wraps": []
+          }
+        }
+        """);
+
+        var flattened = Orc.Packages.Editing.ModingFlattener.Flatten(pack.Root, draftPath, dsl, templateRoot);
+        Assert.True(flattened.Success, flattened.Describe());
+        File.WriteAllText(
+            Path.Combine(pack.EffectsDirectory, flattened.ProductId + ".component.json"),
+            flattened.ProductJson!);
+
+        // 干扰卡：只有类别与费用，没有任何 effect 组件（必须在建局前写入——装载期一次性读卡目录）。
+        File.WriteAllText(Path.Combine(pack.CardsDirectory, "diy.blank.card.json"), """
+        {
+          "schemaVersion": 1,
+          "id": "diy.blank",
+          "name": "空白指令",
+          "components": [
+            { "component": "typeCategory", "type": ["order"] },
+            { "component": "factionCost", "faction": "Germany", "kredits": 0 },
+            { "component": "tagData", "rarity": "Standard" }
+          ]
+        }
+        """);
+
+        var match = await pack.CreateMatchAsync();
+        var playerA = match.Players[0];
+
+        // ① 别人打的牌：守卫必须拦住（打出 −1，不抽牌）。
+        var blank = await DiyExampleKit.PrepareCommandAsync(match, playerA, "diy.blank");
+        var beforeBlank = playerA.Hand.Count;
+        var blankResult = await match.PlayManager.PlayOrderAsync(blank);
+        Assert.Equal(PlayResultStatus.Success, blankResult.Status);
+        Assert.Equal(beforeBlank - 1, playerA.Hand.Count);
+
+        // ② 自己打出：守卫通过（打出 −1、抽 +1 ⇒ 手牌数不变）。
+        var command = await DiyExampleKit.PrepareCommandAsync(match, playerA, TempDslPack.CardId);
+        var beforeSelf = playerA.Hand.Count;
+        var selfResult = await match.PlayManager.PlayOrderAsync(command);
+        Assert.Equal(PlayResultStatus.Success, selfResult.Status);
+        Assert.Equal(beforeSelf, playerA.Hand.Count);
+    }
+
+    /// <summary>
     /// 临时卡包：<c>cards/</c> 里一张指令卡（复用 samples 的 <c>diy.fire-support</c>），
     /// <c>effects/</c> 里一个同名组件资产，其 handler 指向 <c>effects/handler-dsl/*.hdsl.json</c>。
     /// <para>
@@ -142,6 +242,9 @@ public class HandlerDslEndToEndTests
         private readonly string _root;
 
         /// <summary>用 DSL 文档构造（handler 指向 <c>handler-dsl/on-played.hdsl.json</c>）。</summary>
+        /// <summary>原始 samples 包（不覆写任何组件）：模板摊平用例自行写入产物。</summary>
+        public static TempDslPack Plain() => new(null, null);
+
         public static TempDslPack WithDsl(string dslDocument) =>
             new(dslDocument, $$"""
                 {
@@ -161,7 +264,7 @@ public class HandlerDslEndToEndTests
                 }
                 """);
 
-        private TempDslPack(string? dslDocument, string handlerJson)
+        private TempDslPack(string? dslDocument, string? handlerJson)
         {
             _root = Path.Combine(Path.GetTempPath(), "orc-hdsl-e2e-" + Guid.NewGuid().ToString("N"));
 
@@ -181,8 +284,12 @@ public class HandlerDslEndToEndTests
                 File.WriteAllText(Path.Combine(dslDirectory, "on-played.hdsl.json"), dslDocument);
             }
 
-            File.WriteAllText(
-                Path.Combine(effects, ComponentId + ".component.json"), ComponentJson(handlerJson));
+            // handlerJson 为 null ＝ 保持 samples 原样（模板摊平用例自行覆写组件文件）。
+            if (handlerJson is not null)
+            {
+                File.WriteAllText(
+                    Path.Combine(effects, ComponentId + ".component.json"), ComponentJson(handlerJson));
+            }
 
             CardsDirectory = cards;
             EffectsDirectory = effects;
@@ -205,6 +312,9 @@ public class HandlerDslEndToEndTests
         public string CardsDirectory { get; }
 
         public string EffectsDirectory { get; }
+
+        /// <summary>包根（摊平器需要它）。</summary>
+        public string Root => _root;
 
         public async Task<Orc.Game.Match> CreateMatchAsync()
         {

@@ -39,6 +39,21 @@ public static class AssetSchema
     public const string FilePattern = "*.component.json";
 
     /// <summary>
+    /// **资产 id 的保留前缀**（D30）：`template.` 命名空间归模板库所有，普通资产使用即装载期拒绝。
+    /// <para>
+    /// 与 <see cref="ComponentDisposalPolicy.ReservedPrefix"/>（`framework.`，管**成员名**）形态同类、
+    /// **命名空间不同**：一处是成员名、一处是资产 id，**不得复用同一个判定函数**
+    /// （否则 `framework.` 会误伤资产 id、`template.` 会误伤成员名）。
+    /// </para>
+    /// </summary>
+    public const string TemplateIdPrefix = "template.";
+
+    /// <summary>该资产 id 是否属于模板命名空间（**唯一判据**是前缀，不靠形状猜；D30）。</summary>
+    /// <param name="id">资产 id（null／空白＝false）。</param>
+    public static bool IsTemplateId(string? id)
+        => !string.IsNullOrWhiteSpace(id) && id.StartsWith(TemplateIdPrefix, StringComparison.Ordinal);
+
+    /// <summary>
     /// 旧 schema 的字段名（任一出现＝拒绝装载）：它们是"名字字符串挂载"时代的产物，
     /// 新 schema 里由成员地址／相位／视图字段清单取代（R1d／R1e／R1i）。
     /// <para>
@@ -131,7 +146,11 @@ public static class AssetSchema
         }
 
         var extends = OptionalString(element, "extends");
-        var authorizesModing = OptionalBool(element, "authorize-moding") ?? false;
+        // 无缺省值：null＝**未声明**，与显式 false 区分（D29 的二分——抽象资产未声明＝推导 true、显式 false＝拒绝）。
+        var authorizesModing = OptionalBool(element, "authorize-moding");
+        var isAbstract = OptionalBool(element, "abstract") ?? false;
+        var label = OptionalString(element, "label");
+        var description = OptionalString(element, "description");
 
         var requiresHost = ParseHostKind(OptionalString(element, "requires-host") ?? "any", source);
         var activeWhen = ParseActiveWhen(OptionalString(element, "active-when"));
@@ -258,7 +277,7 @@ public static class AssetSchema
         {
             return new ComponentAsset(
                 id, requiresHost, activeWhen, oneShot, disposalSignal, privateFields, members, mounts, wraps, judgeWraps,
-                extends, authorizesModing);
+                extends, authorizesModing, isAbstract, label, description);
         }
         catch (ArgumentException ex)
         {
@@ -423,7 +442,27 @@ public static class AssetSchema
         var seams = ReadSeams(member, source, $"成员 '{name}' 的 seams");
         var sealedMember = OptionalBool(member, "sealed") ?? false;
 
-        return new ComponentMemberAsset(name, visibility, view, handler, band, bands, seams, sealedMember);
+        // 成员级抽象（R30／R31）：只给模板用。**产物的拒绝不在这里**——同一读取器既要读模板也要读产物，
+        // 「产物中出现该字段＝手工篡改」由产物装载链（AssetPackLoader）按结构非法字段拒绝（D28）。
+        var abstractMember = OptionalBool(member, "abstract") ?? false;
+
+        // 守卫档（R32）：未知取值＝结构错误（不允许静默退化成「不守卫」——那是静默失效）。
+        var guardText = OptionalString(member, "guard");
+        HandlerGuard? guard = null;
+        if (guardText is not null)
+        {
+            guard = HandlerGuardNames.Parse(guardText)
+                ?? throw Error(
+                    PrefabErrorCategories.Structure,
+                    source,
+                    $"成员 '{name}' 的 guard='{guardText}' 未定义（只允许 "
+                    + $"{string.Join("／", HandlerGuardNames.All)}，R32）。");
+        }
+
+        var label = OptionalString(member, "label");
+
+        return new ComponentMemberAsset(
+            name, visibility, view, handler, band, bands, seams, sealedMember, abstractMember, guard, label);
     }
 
     /// <summary>
@@ -545,9 +584,28 @@ public static class AssetSchema
                 writer.WriteString("extends", extends);
             }
 
-            if (asset.AuthorizesModing)
+            // 抽象资产的授权是**缺省推导**出来的（D29），不写成显式声明——模板文件里不出现该字段，
+            // 读回时仍推导为 true（「写了 true」与「没写」在这里语义相同，少一个字段少一处可漂移的副本）。
+            if (asset.AuthorizesModing && !asset.Abstract)
             {
                 writer.WriteBoolean("authorize-moding", true);
+            }
+
+            // 资产级抽象（R30）：只在真时写——普通资产不引入噪声字段（存量零改动，R35 第 1 条同口径）。
+            if (asset.Abstract)
+            {
+                writer.WriteBoolean("abstract", true);
+            }
+
+            // 展示文案（R35）：未声明不写入（回退显示 id／成员名的判断留给前端与 DTO）。
+            if (asset.Label is { } label)
+            {
+                writer.WriteString("label", label);
+            }
+
+            if (asset.Description is { } description)
+            {
+                writer.WriteString("description", description);
             }
 
             writer.WriteString("requires-host", FormatHostKind(asset.RequiresHost));
@@ -575,6 +633,11 @@ public static class AssetSchema
             {
                 writer.WriteStartObject();
                 writer.WriteString("name", member.Name);
+                if (member.Label is { } memberLabel)
+                {
+                    writer.WriteString("label", memberLabel);
+                }
+
                 writer.WriteStartArray("visibility");
                 foreach (var flag in VisibilityNames(member.Visibility))
                 {
@@ -629,6 +692,18 @@ public static class AssetSchema
                 if (member.Sealed)
                 {
                     writer.WriteBoolean("sealed", true);
+                }
+
+                // 成员级抽象与守卫档（R30／R32）：只有**模板资产**会写；摊平产物两者皆无
+                // （抽象已在摊平期强制、守卫已烘进 csx——产物若保留 guard，再次摊平会重复加守卫）。
+                if (member.Abstract)
+                {
+                    writer.WriteBoolean("abstract", true);
+                }
+
+                if (member.Guard is { } guard)
+                {
+                    writer.WriteString("guard", HandlerGuardNames.Format(guard));
                 }
 
                 if (member.Handler is { } handler)

@@ -114,6 +114,10 @@ public static class KeywordEffectActionFace
     /// <param name="ct">取消令牌。</param>
     /// <exception cref="ArgumentNullException">host 或 labels 为 null。</exception>
     /// <exception cref="NotSupportedException">总是抛出：选项呈现需前端桥接（S10）。</exception>
+    /// <remarks>
+    /// **本方法在排除清单里**（只由生成码调用、不进目录），所以「choice 是预览态」不能标在这里——
+    /// 扫描器根本扫不到它。该事实登记在 <c>HandlerDslContract.PreviewOps</c>（R36）。
+    /// </remarks>
     public static Task<int> ChooseAsync(Card host, string prompt, string[] labels, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(host);

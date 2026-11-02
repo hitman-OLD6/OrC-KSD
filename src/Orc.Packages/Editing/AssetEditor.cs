@@ -267,14 +267,25 @@ public sealed class AssetEditor
     /// </para>
     /// </summary>
     /// <param name="packRoot">包根目录（正式包或 <c>*.tmp</c> 临时包均可；未注册的新包按包根现场构建临时目录）。</param>
-    /// <param name="prefabAssetId">父资产 id（组件资产的 <c>asset.id</c>）。</param>
+    /// <param name="prefabAssetId">父资产 id（组件资产的 <c>asset.id</c>，或模板库里的 <c>template.</c> id）。</param>
     /// <param name="draftPath">草案文件路径（相对包根或绝对；null／空白＝无草案）。</param>
     public PrefabDescription DescribePrefab(string packRoot, string prefabAssetId, string? draftPath = null)
     {
         ArgumentNullException.ThrowIfNull(packRoot);
         ArgumentNullException.ThrowIfNull(prefabAssetId);
-        return PrefabDescriber.Describe(packRoot, prefabAssetId, draftPath);
+        return PrefabDescriber.Describe(packRoot, prefabAssetId, draftPath, _options.TemplateRoot);
     }
+
+    /// <summary>
+    /// **摊平草案**（R33：模板库根随会话生效）：转发到 <see cref="ModingFlattener.Flatten"/>，
+    /// 把本编辑器配置的模板库根作为**只读依赖层**并入目录。
+    /// <para>不写盘——落盘由编辑会话在提交产物时统一处理（与既有口径一致）。</para>
+    /// </summary>
+    /// <param name="packRoot">包根目录。</param>
+    /// <param name="draftPath">草案路径（相对包根或绝对）。</param>
+    /// <param name="dsl">handler DSL 装配件（含 DSL 成员时必需；null＝能力缺失）。</param>
+    public ModingFlattenResult Flatten(string packRoot, string draftPath, Orc.Core.HandlerDslEnvironment? dsl = null)
+        => ModingFlattener.Flatten(packRoot, draftPath, dsl, _options.TemplateRoot);
 
     /// <summary>`asset.get`。</summary>
     /// <exception cref="AssetEditorException">无会话／资产未声明。</exception>

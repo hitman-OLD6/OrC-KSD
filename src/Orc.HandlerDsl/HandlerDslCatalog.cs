@@ -75,7 +75,9 @@ public sealed class DslNodeSignature
         string? implicitHost = null,
         bool isStatic = false,
         string? faceType = null,
-        string? cancellationTokenParameter = null)
+        string? cancellationTokenParameter = null,
+        DslNodeStage stage = DslNodeStage.Alpha,
+        string? problem = null)
     {
         Name = name;
         Inputs = inputs;
@@ -88,10 +90,25 @@ public sealed class DslNodeSignature
         IsStatic = isStatic;
         FaceType = faceType;
         CancellationTokenParameter = cancellationTokenParameter;
+        Stage = stage;
+        Problem = problem;
     }
 
     /// <summary>节点名（契约可见标识；<c>node-unknown</c> 按它判）。</summary>
     public string Name { get; }
+
+    /// <summary>
+    /// 能力分区（R36）：<see cref="DslNodeStage.Alpha"/> ＝这版真能跑；
+    /// <see cref="DslNodeStage.Preview"/> ＝目录里有、但**现在跑不起来**（原因见 <see cref="Problem"/>）。
+    /// <para>
+    /// **不裁剪目录**：preview 节点照样出现在清单里，只影响展示顺序与提示——
+    /// 藏起来会让作者以为这版没有这个能力。判据是显式标注，不是自动探针（见 <c>HandlerDslPreviewAttribute</c>）。
+    /// </para>
+    /// </summary>
+    public DslNodeStage Stage { get; }
+
+    /// <summary>人读原因（<see cref="DslNodeStage.Alpha"/> 恒为 null）。</summary>
+    public string? Problem { get; }
 
     /// <summary>输入引脚。</summary>
     public IReadOnlyList<DslPin> Inputs { get; }
@@ -481,4 +498,16 @@ public static class DslReadables
     /// <summary>诊断文案里的种类说明（<c>self</c>／<c>viewer</c>／实体表达式）。</summary>
     public static string DescribeKinds(IReadOnlyList<string> kinds) =>
         string.Join("／", kinds ?? Array.Empty<string>());
+}
+
+/// <summary>
+/// 节点的**能力分区**（R36）。判据是能否真的跑起来，不是「目录里有没有」。
+/// </summary>
+public enum DslNodeStage
+{
+    /// <summary>这版真能跑：编译通过，且运行期不会因「能力未接入」而失败。</summary>
+    Alpha = 0,
+
+    /// <summary>目录里有、但跑不起来：需要由显式标注给出原因，并由一条行为测试背书。</summary>
+    Preview = 1,
 }

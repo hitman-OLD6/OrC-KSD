@@ -34,7 +34,9 @@ public sealed record HandlerCatalogNodeDto(
     bool HasSideEffect,
     string? FaceType,
     IReadOnlyList<HandlerCatalogPinDto> Inputs,
-    IReadOnlyList<HandlerCatalogPinDto> Outputs);
+    IReadOnlyList<HandlerCatalogPinDto> Outputs,
+    string Stage = "alpha",
+    string? Problem = null);
 
 /// <summary>
 /// **节点目录的全量导出**（S10 入口二／R5／R25／D13）：节点 ＋ 引脚 ＋ **标注展开结果** ＋ 扫描的门面类型清单。
@@ -55,7 +57,21 @@ public sealed record HandlerCatalogDto(
     int CatalogRevision,
     IReadOnlyList<string> ScannedFaces,
     IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> Readables,
-    IReadOnlyList<HandlerCatalogNodeDto> Nodes);
+    IReadOnlyList<HandlerCatalogNodeDto> Nodes,
+    IReadOnlyList<HandlerBuiltinOpDto> BuiltInOps);
+
+/// <summary>
+/// 一个**内建 op** 的能力分区（R36）：<c>sequence</c>／<c>branch</c>／<c>loop</c>／<c>while</c>／<c>iterate</c>／
+/// <c>choice</c>／<c>let</c>／<c>write</c>／<c>ask</c>／<c>script</c>。
+/// <para>
+/// 与节点分属两张表：内建 op 由前端硬编码、目录里没有引脚条目，但它们的**可用性**同样需要被诚实呈现
+/// （<c>choice</c> 编译能过、运行期抛）。两张表都不用 stage 裁剪内容——只决定排序与提示。
+/// </para>
+/// </summary>
+/// <param name="Op">op 名（＝DSL 里的 <c>"op"</c> 取值）。</param>
+/// <param name="Stage"><c>alpha</c>／<c>preview</c>。</param>
+/// <param name="Problem">人读原因（<c>alpha</c> 恒为 null）。</param>
+public sealed record HandlerBuiltinOpDto(string Op, string Stage, string? Problem);
 
 /// <summary>
 /// **节点目录门面**（S10 入口二／D13）：回答「引擎能表达什么」，与「这个资产能编辑什么」
@@ -115,7 +131,12 @@ public sealed class HandlerCatalogFacade
                 static g => (IReadOnlyDictionary<string, string>)g.Value.ToDictionary(
                     static p => p.Key, static p => p.Value.Format(), StringComparer.Ordinal),
                 StringComparer.Ordinal),
-            catalog.Nodes.Select(ProjectNode).ToArray());
+            catalog.Nodes.Select(ProjectNode).ToArray(),
+            HandlerDslContract.BuiltinOps
+                .Select(static op => HandlerDslContract.PreviewOps.TryGetValue(op, out var problem)
+                    ? new HandlerBuiltinOpDto(op, "preview", problem)
+                    : new HandlerBuiltinOpDto(op, "alpha", null))
+                .ToArray());
     }
 
     private static HandlerCatalogNodeDto ProjectNode(DslNodeSignature node)
@@ -125,7 +146,10 @@ public sealed class HandlerCatalogFacade
             node.HasSideEffect,
             node.FaceType,
             node.Inputs.Select(ProjectPin).ToArray(),
-            node.Outputs.Select(ProjectPin).ToArray());
+            node.Outputs.Select(ProjectPin).ToArray(),
+            // 能力分区（R36）：小写字符串，与 JSON 契约同形；alpha 的 Problem 恒为 null。
+            node.Stage == DslNodeStage.Preview ? "preview" : "alpha",
+            node.Stage == DslNodeStage.Preview ? node.Problem : null);
 
     private static HandlerCatalogPinDto ProjectPin(DslPin pin)
     {

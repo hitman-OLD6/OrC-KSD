@@ -33,6 +33,46 @@ public static class KernelSignals
     /// <summary>内核 4 个信号成员（声明序，来源层＝内核）。</summary>
     public static IReadOnlyList<MemberDefinition> Members { get; } = Build();
 
+    /// <summary>
+    /// 内核 4 条信号的**中文名**（R35／D25：文案真源在信号定义处，与 <see cref="Names"/> **逐条对齐**）。
+    /// <para>
+    /// 覆盖率由守护测试锁住（<c>Names ≡ Labels.Keys</c>）——写成单条「39 对 39」会让内核漏写永远绿（D26）。
+    /// 与游戏层**分表**：内核中文名必须跟内核信号定义同层，否则内核加信号要跨层改表。
+    /// </para>
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> Labels { get; } = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        [Updates.CardPlaced] = "放置时",
+        [Updates.CardDestroyed] = "销毁时",
+        [Updates.CardData] = "数据变更时",
+        [Updates.EffectRemoved] = "效果移除时",
+    };
+
+    /// <summary>内核信号的语义边界说明（R35／D25；可选，模板的 <c>description</c> 直接取它）。</summary>
+    public static IReadOnlyDictionary<string, string> Notes { get; } = new Dictionary<string, string>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// **主体卡字段白名单**（R32／D27）：信号 → 载荷里表示「宿主卡自身」的字段名。
+    /// <para>
+    /// 未登记 ⇒ 不出 <c>self</c> 档模板。**判据不是载荷顺序、也不是字段类型**——载荷里
+    /// <c>Card</c>／<c>Effect</c> 都是 <c>entity</c>，按序推断必误判（漏登记只少一个模板，
+    /// 错登记会造出一个永不触发的模板，方向必须偏向漏登记）。
+    /// </para>
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> Subjects { get; } = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        [Updates.CardPlaced] = PayloadCard,
+        [Updates.CardDestroyed] = PayloadCard,
+        [Updates.CardData] = PayloadCard,
+        [Updates.EffectRemoved] = PayloadCard,
+    };
+
+    /// <summary>
+    /// **玩家字段白名单**（R32／D27）：信号 → 载荷里的玩家字段名。内核 4 条都不带玩家字段
+    /// ⇒ 内核信号不出 <c>owner-*</c> 档（反向亦然：游戏层 19 条信号不带主体卡字段）。
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> Players { get; } = new Dictionary<string, string>(StringComparer.Ordinal);
+
     /// <summary>创建内核基础引擎预制体 <c>engine</c>。</summary>
     public static PrefabDefinition CreateEnginePrefab()
         => new(PrefabId, EntityKind.Engine, layer: PrefabLayer.Kernel, members: Members);

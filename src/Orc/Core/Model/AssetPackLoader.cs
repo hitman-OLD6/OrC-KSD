@@ -132,6 +132,35 @@ public static class AssetPackLoader
                 $"同一包内重复声明资产 id '{duplicate.Key}'（{string.Join("、", duplicate.Select(static d => d.File))}）。"));
         }
 
+        // 保留前缀与产物洁净（R30／R31／R34；两条都在**产物装载链**上，不是编辑期判定）：
+        // ① `template.` 是资产 id 的保留命名空间（D30）——模板库只作编辑期只读层，不经本装载链注册；
+        // ② 产物里出现 `members[].abstract` ＝被手工篡改（摊平期已强制实现，产物不该带抽象位）。
+        //    这是**结构校验**，与「成员是否已实现」的语义判定无关（D28：装载链不认识成员级 abstract 语义）。
+        foreach (var (file, asset) in assets)
+        {
+            if (AssetSchema.IsTemplateId(asset.Id))
+            {
+                errors.Add(new PrefabLoadError(
+                    PrefabErrorCategories.Structure,
+                    $"{file} / {asset.Id}",
+                    $"资产 id '{asset.Id}' 使用了保留前缀 '{AssetSchema.TemplateIdPrefix}'："
+                    + "该命名空间归模板库专用（模板只作编辑期只读依赖层，不参与对局装载，R33／D30）。"));
+            }
+
+            foreach (var member in asset.Members)
+            {
+                if (member.Abstract)
+                {
+                    errors.Add(new PrefabLoadError(
+                        PrefabErrorCategories.Structure,
+                        $"{file} / {asset.Id}#{member.Name}",
+                        $"成员 '{member.Name}' 声明了结构非法字段 members[].abstract："
+                        + "摊平产物不含抽象位（抽象在摊平期强制、产物必须成员全实现，R31）——"
+                        + "出现该字段即为手工篡改，请回草案重新摊平。"));
+                }
+            }
+        }
+
         if (errors.Count > 0)
         {
             return new AssetPackLoadResult(label, false, Array.Empty<string>(), errors, files.Length);
@@ -441,18 +470,53 @@ public static class AssetPackLoader
         }
 
         HandlerDslCompileResult result;
-        try
+        if (member.Guard is { } guard && guard != HandlerGuard.Any)
         {
-            result = environment.Compiler.Compile(dslJson, environment.Catalog, ProjectView(member.View));
+            // 守卫合成（R32；第二调用点＝草案装载期，D3）：比较对象只能来自**信号定义侧白名单**。
+            // 信号由本资产自己的挂载声明给出（<c>engine#&lt;信号&gt;</c>），不解析资产 id。
+            var signal = SignalOf(asset, member.Name);
+            var spec = signal is null || environment.GuardResolver is null
+                ? null
+                : environment.GuardResolver(guard, signal);
+
+            if (spec is null)
+            {
+                errors.Add(new PrefabLoadError(
+                    PrefabErrorCategories.Capability,
+                    memberAddress,
+                    $"{file} / {asset.Id} 的成员 '{member.Name}' 声明了守卫（{HandlerGuardNames.Format(guard)}），"
+                    + "但本环境无法解析它的比较对象（未装配守卫解析器，或本资产的挂载声明里没有对应信号）："
+                    + "守卫不可省略——请经 Orc.Game 的 HandlerDslAssembly 装配环境（R32）。"));
+                return null;
+            }
+
+            if (environment.Compiler is not IHandlerDslGuardedCompiler guarded)
+            {
+                errors.Add(new PrefabLoadError(
+                    PrefabErrorCategories.Capability,
+                    memberAddress,
+                    $"{file} / {asset.Id} 的成员 '{member.Name}' 要求守卫合成，但装配的编译器未实现 "
+                    + "IHandlerDslGuardedCompiler（守卫不可省略）。"));
+                return null;
+            }
+
+            result = guarded.CompileGuarded(dslJson, environment.Catalog, ProjectView(member.View), spec);
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        else
         {
-            // 编译器的契约是「不抛」；实现违约时也不让整包装载炸掉——按结构错误收敛（定位仍是成员地址）。
-            errors.Add(new PrefabLoadError(
-                PrefabErrorCategories.Structure,
-                memberAddress,
-                $"{file} / {asset.Id} 的成员 '{member.Name}' 的 DSL 编译抛出异常：{ex.Message}"));
-            return null;
+            try
+            {
+                result = environment.Compiler.Compile(dslJson, environment.Catalog, ProjectView(member.View));
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                // 编译器的契约是「不抛」；实现违约时也不让整包装载炸掉——按结构错误收敛（定位仍是成员地址）。
+                errors.Add(new PrefabLoadError(
+                    PrefabErrorCategories.Structure,
+                    memberAddress,
+                    $"{file} / {asset.Id} 的成员 '{member.Name}' 的 DSL 编译抛出异常：{ex.Message}"));
+                return null;
+            }
         }
 
         if (result.Success && result.Csx is not null)
@@ -518,6 +582,29 @@ public static class AssetPackLoader
     /// 两处各自映射就会出现「摊平时能过、装载时不过」的漂移。
     /// </summary>
     private static HandlerDslView ProjectView(ViewSpec view) => HandlerDslView.FromViewSpec(view);
+
+    /// <summary>
+    /// 成员所挂的信号名（本资产里第一条 <c>engine#&lt;信号&gt;</c> 挂载；无＝null）。
+    /// <para>守卫的比较对象只能从**挂载到的信号**推出——不解析资产 id（D30：id 只负责唯一与可读）。</para>
+    /// </summary>
+    private static string? SignalOf(ComponentAsset asset, string memberName)
+    {
+        foreach (var mount in asset.Mounts)
+        {
+            if (!string.Equals(mount.Member, memberName, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var hash = mount.Target.IndexOf('#', StringComparison.Ordinal);
+            if (hash > 0 && hash + 1 < mount.Target.Length)
+            {
+                return mount.Target[(hash + 1)..];
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>该资产的 <c>owner</c> 通道允许名字（私有字段 ∪ 实体公开属性；S5 第 6d 条）。</summary>
     private static IReadOnlyCollection<string> OwnerMembersOf(ComponentAsset asset)

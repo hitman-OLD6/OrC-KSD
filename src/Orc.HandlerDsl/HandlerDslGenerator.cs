@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using Orc.Core.Model;
 
 namespace Orc.HandlerDsl;
 
@@ -73,31 +74,42 @@ public static class HandlerDslGenerator
     /// <param name="document">已校验的文档。</param>
     /// <param name="catalog">节点目录。</param>
     /// <param name="view">视图声明（只用于 <c>read</c> 的类型转换落型）。</param>
+    /// <param name="guard">
+    /// **模板守卫**（R32；null／<see cref="HandlerGuard.Any"/>＝不合成）：守卫代码写在作者效果体**之前**，
+    /// 作者 DSL 无法覆盖或删除（DSL 没有 return／删除语句，绑定名也不得以 <c>__</c> 开头）。
+    /// </param>
     /// <exception cref="ArgumentNullException">document／catalog 为 null。</exception>
     public static HandlerDslGenerationResult Generate(
-        DslDocument document, IHandlerDslCatalog catalog, DslView? view = null)
+        DslDocument document, IHandlerDslCatalog catalog, DslView? view = null, HandlerGuardSpec? guard = null)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(catalog);
 
-        var emitter = new Emitter(catalog, view ?? DslView.Empty);
+        var effectiveGuard = guard is null || guard.Guard == HandlerGuard.Any ? null : guard;
+        var effectiveView = view ?? DslView.Empty;
+        var emitter = new Emitter(catalog, effectiveView, effectiveGuard);
         var lines = emitter.Emit(document);
         var csx = string.Join("\n", lines) + "\n";
 
         return new HandlerDslGenerationResult(csx, HandlerIdOf(csx), emitter.NodeMap);
     }
 
+    /// <summary>守卫代码里宿主归属玩家的固定变量名（保留前缀：作者绑定名不得以 <c>__</c> 开头）。</summary>
+    public const string GuardOwnerVariable = "__guardOwner";
+
     private sealed class Emitter
     {
         private readonly IHandlerDslCatalog _catalog;
         private readonly DslView _view;
+        private readonly HandlerGuardSpec? _guard;
         private readonly List<string> _lines = new();
         private readonly SortedDictionary<string, int[]> _nodeMap = new(StringComparer.Ordinal);
 
-        public Emitter(IHandlerDslCatalog catalog, DslView view)
+        public Emitter(IHandlerDslCatalog catalog, DslView view, HandlerGuardSpec? guard = null)
         {
             _catalog = catalog;
             _view = view;
+            _guard = guard;
         }
 
         public IReadOnlyDictionary<string, int[]> NodeMap => _nodeMap;
@@ -107,10 +119,12 @@ public static class HandlerDslGenerator
             _lines.Add($"Func<dynamic, Context, CancellationToken, Task> {EntryName} = async (view, ctx, ct) =>");
             _lines.Add("{");
 
-            if (NeedsSelf(document.Actions))
+            if (NeedsSelf(document.Actions) || _guard is not null)
             {
                 Line(1, $"var {SelfVariable} = (Orc.Cards.Card)view.Host;");
             }
+
+            EmitGuard();
 
             // 运行时门面**解析一次**（R28 之外的行为修正）：
             // ①每动作各调一次 ResolveFor 是重复解析；②`ResolveFor(...)!` 在宿主非卡牌时会 NRE，
@@ -127,6 +141,49 @@ public static class HandlerDslGenerator
             EmitActions(document.Actions, 1);
             _lines.Add("};");
             return _lines;
+        }
+
+        /// <summary>
+        /// **守卫合成**（R32／D24）：固定的第一段语句，紧跟在宿主绑定之后、作者效果体之前。
+        /// <para>
+        /// 比较对象来自信号定义侧的白名单（<see cref="HandlerGuardSpec"/>），**不按载荷顺序或字段类型推断**；
+        /// <c>object.ReferenceEquals</c> 两侧都先落成 <c>object</c>（csx 没有 <c>using System</c>，必须写全名），避免 <c>dynamic</c> 参与静态方法的重载解析。
+        /// </para>
+        /// </summary>
+        private void EmitGuard()
+        {
+            if (_guard is null)
+            {
+                return;
+            }
+
+            switch (_guard.Guard)
+            {
+                case HandlerGuard.Self:
+                    Line(1, $"if (!object.ReferenceEquals((object){SelfVariable}, (object)view.{_guard.SubjectField}))");
+                    Line(1, "{");
+                    Line(2, "return;");
+                    Line(1, "}");
+                    break;
+
+                case HandlerGuard.OwnerSame:
+                case HandlerGuard.OwnerDifferent:
+                    // 宿主卡可能无主（Owner 为 null）：owner-same 按「不同主」处理（跳过效果体），
+                    // owner-different 按「不同主」放行；两条都不允许抛异常（R32 第 2 条）。
+                    Line(1, $"var {GuardOwnerVariable} = {SelfVariable} is null ? null : {SelfVariable}.Owner;");
+                    var same = $"object.ReferenceEquals((object){GuardOwnerVariable}, (object)view.{_guard.PlayerField})";
+                    var test = _guard.Guard == HandlerGuard.OwnerSame
+                        ? $"{GuardOwnerVariable} is null || !{same}"
+                        : $"{GuardOwnerVariable} is not null && {same}";
+                    Line(1, $"if ({test})");
+                    Line(1, "{");
+                    Line(2, "return;");
+                    Line(1, "}");
+                    break;
+
+                default:
+                    break; // Any：不合成（调用方本应传 null）
+            }
         }
 
         // ── 结构 ────────────────────────────────────────────────────────────

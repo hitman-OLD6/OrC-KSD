@@ -48,6 +48,12 @@ public sealed class PrefabDefinition
     /// 既有覆写行为逐条不变（R2 第 5、6 条）。
     /// </para>
     /// </param>
+    /// <param name="isAbstract">
+    /// **资产级抽象**（R30／D28）：本资产是模板，不是可装配组件——被卡牌 <c>components</c> 引用＝装载期拒绝。
+    /// 可注册、可被编辑期展开（草案的父必须能解析）。
+    /// </param>
+    /// <param name="label">展示名（R35；null＝未声明）。</param>
+    /// <param name="description">展示描述（R35；null＝未声明）。</param>
     /// <exception cref="ArgumentException">id 为空或纯空白。</exception>
     public PrefabDefinition(
         string id,
@@ -64,7 +70,10 @@ public sealed class PrefabDefinition
         ActiveWhen activeWhen = ActiveWhen.Placed,
         bool oneShot = false,
         string? disposalSignal = null,
-        bool authorizesModing = false)
+        bool authorizesModing = false,
+        bool isAbstract = false,
+        string? label = null,
+        string? description = null)
     {
         if (string.IsNullOrWhiteSpace(id))
         {
@@ -86,6 +95,9 @@ public sealed class PrefabDefinition
         OneShot = oneShot;
         DisposalSignal = disposalSignal;
         AuthorizesModing = authorizesModing;
+        Abstract = isAbstract;
+        Label = label;
+        Description = description;
     }
 
     /// <summary>预制体 id（唯一）。</summary>
@@ -135,6 +147,18 @@ public sealed class PrefabDefinition
     /// 引擎内部层间继承（<see cref="PrefabLayer.Kernel"/>／<see cref="PrefabLayer.Game"/>）不受它约束。
     /// </summary>
     public bool AuthorizesModing { get; }
+
+    /// <summary>
+    /// **资产级抽象**（R30／D28）：模板——不得被 <c>components</c> 引用进对局。
+    /// 判定在**引用解析**（<see cref="PrefabCatalog"/> 展开卡片组件列表时），不在资产注册处。
+    /// </summary>
+    public bool Abstract { get; }
+
+    /// <summary>展示名（R35；null＝未声明）。</summary>
+    public string? Label { get; }
+
+    /// <summary>展示描述（R35；null＝未声明）。</summary>
+    public string? Description { get; }
 }
 
 /// <summary>
@@ -178,6 +202,9 @@ public sealed class PrefabType
         OneShot = leaf.OneShot;
         DisposalSignal = disposalSignal;
         AuthorizesModing = leaf.AuthorizesModing;
+        Abstract = leaf.Abstract;
+        Label = leaf.Label;
+        Description = leaf.Description;
 
         _members = new Dictionary<string, MemberDefinition>(StringComparer.Ordinal);
         foreach (var member in members)
@@ -252,6 +279,15 @@ public sealed class PrefabType
 
     /// <summary>本预制体的资产级可重载开关（R2；叶子的声明；<see cref="PrefabDefinition.AuthorizesModing"/>）。</summary>
     public bool AuthorizesModing { get; }
+
+    /// <summary>本预制体是否为**模板**（R30／D28；叶子的声明）。前端据此标「模板」并允许继承。</summary>
+    public bool Abstract { get; }
+
+    /// <summary>展示名（R35；null＝未声明，前端回退显示 <see cref="Id"/>）。</summary>
+    public string? Label { get; }
+
+    /// <summary>展示描述（R35；null＝未声明）。</summary>
+    public string? Description { get; }
 
     /// <summary>owner 通道允许的名字集合（私有字段 ∪ 实体公开属性；S5 第 6d 条静态检查用）。</summary>
     public IReadOnlySet<string> OwnerMemberNames { get; }
@@ -478,6 +514,20 @@ public sealed class PrefabCatalog
                 PrefabErrorCategories.Structure,
                 $"预制体 '{definition.Id}'（kind={definition.Kind}）声明了组件引用："
                 + "非可组合实体声明组件＝装载期拒绝（R3d；可组合能力目前只对卡牌实体开放）。");
+        }
+
+        // 资产级 abstract（R30／D28）：判定点＝**卡牌 components 的引用解析**，不是资产注册。
+        // 不判的话，被引用的抽象资产会以「无 handler 的纯编排成员」形态静默装配——
+        // 装载层无法把「handler 为 null」与「纯编排成员」区分开，正是 Constraint 禁止的静默失效。
+        foreach (var component in components)
+        {
+            if (_definitions.TryGetValue(component, out var referenced) && referenced.Abstract)
+            {
+                throw new PrefabLoadException(
+                    PrefabErrorCategories.Structure,
+                    $"预制体 '{definition.Id}' 引用了抽象资产 '{component}'：模板不可实例化"
+                    + "（abstract: true ＝只声明、不实现的效果模板，只能作 moding 草案的父，不得装配进对局，R30）。");
+            }
         }
 
         // 同名禁止（R3e / S5 第 6c 条）：视图字段名与同一实体的私有字段名不得相同——

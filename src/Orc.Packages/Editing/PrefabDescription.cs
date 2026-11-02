@@ -48,6 +48,12 @@ public sealed record PrefabDescription(
 /// <param name="AuthorizesModing">
 /// 资产级可重载开关（R2）：关闭时任何成员覆写都是装载期拒绝——前端据此把「重载成员」入口整体灰掉。
 /// </param>
+/// <param name="IsTemplate">
+/// 是否**模板**（R34 第 2 条；＝资产的 <c>abstract: true</c>）：前端据此显示「模板」标记、
+/// 允许「从模板新建」而不是「打开已有资产改名」。
+/// </param>
+/// <param name="Label">展示名（R35；null＝未声明，前端回退显示 <see cref="Id"/>）。</param>
+/// <param name="Description">展示描述（R35；null＝未声明）。</param>
 public sealed record PrefabSummary(
     string Id,
     string Kind,
@@ -57,7 +63,10 @@ public sealed record PrefabSummary(
     string ActiveWhen,
     bool OneShot,
     string DisposalSignal,
-    bool AuthorizesModing);
+    bool AuthorizesModing,
+    bool IsTemplate = false,
+    string? Label = null,
+    string? Description = null);
 
 /// <summary>草案摘要（有草案＝非 null；**只报增量**，展开表由查询现算，D13）。</summary>
 /// <param name="Path">草案相对包根的路径（<c>/</c> 分隔）。</param>
@@ -101,6 +110,10 @@ public sealed record PrefabWrapSummary(string Target, string Phase, string? Seam
 /// <param name="IsSignal">是否信号成员（时机入口）。</param>
 /// <param name="SignalTiming">信号时机（<c>any</c>／<c>load</c>／<c>placed</c>；非信号＝null）。</param>
 /// <param name="Sealed">成员级封死（R2）。</param>
+/// <param name="RequiresImplementation">
+/// 该成员**必须由子实现**（R34 第 2 条；＝成员级 <c>abstract: true</c>）：前端据此把未实现成员标红并拦住摊平。
+/// <para>与 <see cref="Overridable"/> 是两件事：前者＝「父是抽象、必须填」，后者＝「允许覆写、可选改」。</para>
+/// </param>
 /// <param name="Overridable">本次是否允许被覆写（资产级开关打开 且 未封死）。</param>
 /// <param name="SeamNames">handler 内部的具名插入点。</param>
 /// <param name="ViewFields">视图字段（名／类型／可写／必填）。</param>
@@ -108,6 +121,7 @@ public sealed record PrefabWrapSummary(string Target, string Phase, string? Seam
 /// <param name="HandlerId">handler 资产 id（无 handler＝null）。</param>
 /// <param name="MountedTo">本成员被挂到哪些目标地址（已有挂载）。</param>
 /// <param name="WrappedAt">本成员被哪些包装声明指向（目标地址＋相位）。</param>
+/// <param name="Label">展示名（R35；null＝未声明，前端回退显示 <see cref="Name"/>）。</param>
 public sealed record PrefabMemberDescription(
     string Name,
     string Address,
@@ -125,7 +139,9 @@ public sealed record PrefabMemberDescription(
     string? HandlerSource,
     string? HandlerId,
     IReadOnlyList<string> MountedTo,
-    IReadOnlyList<PrefabWrapSummary> WrappedAt);
+    IReadOnlyList<PrefabWrapSummary> WrappedAt,
+    bool RequiresImplementation = false,
+    string? Label = null);
 
 /// <summary>视图字段声明（纯数据；<see cref="Writable"/> 是 <c>write</c> 原语与可写字段清单的**唯一**依据）。</summary>
 /// <param name="Name">字段名。</param>
@@ -179,7 +195,7 @@ public sealed record PrefabWrappableMember(
 /// <summary>
 /// 诊断（**不抛异常**，R1 第 2 条／D13）：父未注册、草案缺失／不一致、资产不可解析等。
 /// </summary>
-/// <param name="Code">机器可读码（<c>pack-missing</c>／<c>parent-missing</c>／<c>parent-invalid</c>／<c>draft-missing</c>／<c>draft-parent-mismatch</c>／<c>asset-invalid</c>）。</param>
+/// <param name="Code">机器可读码（<c>pack-missing</c>／<c>parent-missing</c>／<c>parent-invalid</c>／<c>draft-missing</c>／<c>draft-parent-mismatch</c>／<c>asset-invalid</c>／<c>template-root-missing</c>）。</param>
 /// <param name="Target">出错对象（包根／资产 id／草案路径）。</param>
 /// <param name="Message">人类可读文案。</param>
 public sealed record PrefabDescriptionDiagnostic(string Code, string Target, string Message)
@@ -201,4 +217,14 @@ public sealed record PrefabDescriptionDiagnostic(string Code, string Target, str
 
     /// <summary>包内某份资产无法解析（不阻断其余资产的展开）。</summary>
     public const string AssetInvalid = "asset-invalid";
+
+    /// <summary>
+    /// **模板库根路径未配置**（R34 第 4 条／D30 第 7 个码）：查询的是 <c>template.</c> 前缀的 id，
+    /// 但 <see cref="AssetEditor"/> 构造时没传模板库根。
+    /// <para>
+    /// 与 <see cref="ParentMissing"/> 分开的理由：两者同形同码会让前端**永远不知道该配路径**——
+    /// 「父未注册」是资产问题，「模板库未配置」是配置问题，修复动作完全不同。
+    /// </para>
+    /// </summary>
+    public const string TemplateRootMissing = "template-root-missing";
 }

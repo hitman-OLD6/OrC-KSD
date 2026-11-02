@@ -38,7 +38,16 @@ internal static class PrefabDescriber
     private static readonly IReadOnlyList<string> MemberPhases = new[] { "before", "after", "replace" };
 
     /// <summary>投影一份预制体视图（**不抛异常**：一切失败走 <see cref="PrefabDescription.Diagnostics"/>）。</summary>
-    public static PrefabDescription Describe(string packRoot, string prefabAssetId, string? draftPath)
+    /// <param name="packRoot">包根目录。</param>
+    /// <param name="prefabAssetId">父资产 id（本包效果 id 或模板库里的模板 id）。</param>
+    /// <param name="draftPath">草案路径（null＝无草案）。</param>
+    /// <param name="templateRoot">
+    /// **模板库根路径**（R33／R34：编辑期只读依赖层，可空）。配置后模板 id 可直接解析；
+    /// 未配置时传 <c>template.</c> 前缀的 id ⇒ <see cref="PrefabDescriptionDiagnostic.TemplateRootMissing"/>
+    /// （不是模糊的「父未注册」）。
+    /// </param>
+    public static PrefabDescription Describe(
+        string packRoot, string prefabAssetId, string? draftPath, string? templateRoot = null)
     {
         var diagnostics = new List<PrefabDescriptionDiagnostic>();
 
@@ -51,11 +60,30 @@ internal static class PrefabDescriber
 
         var root = Path.GetFullPath(packRoot);
         var assets = LoadAssets(root, diagnostics);
+
+        // 模板库只读层（R33）：与包内资产**同一发现规则**，合并进目录后才能把模板当父解析。
+        // 它**不参与对局装载**（D29）——这里只是编辑期投影的数据源。
+        var templateAssets = LoadTemplateAssets(templateRoot, diagnostics);
+        foreach (var pair in templateAssets)
+        {
+            assets.TryAdd(pair.Key, pair.Value);
+        }
+
         var catalog = BuildCatalog(assets, diagnostics);
 
         // 父资产未注册＝**返回诊断而不是抛异常**（R1 第 2 条：编辑器据此给出「父未注册」，不展示半张表）。
         if (!catalog.Contains(prefabAssetId))
         {
+            if (AssetSchema.IsTemplateId(prefabAssetId) && templateAssets.Count == 0)
+            {
+                // 第 7 个码（D30）：模板库未配置 != 父未注册——文案必须直指「去配置模板库根路径」。
+                diagnostics.Add(new PrefabDescriptionDiagnostic(
+                    PrefabDescriptionDiagnostic.TemplateRootMissing,
+                    prefabAssetId,
+                    $"模板库根路径未配置：请在 AssetEditor 构造时传入模板库根路径（收到模板 id '{prefabAssetId}'）。"));
+                return Empty(root, prefabAssetId, ReadDraft(root, draftPath, parent: null, diagnostics: diagnostics), diagnostics);
+            }
+
             diagnostics.Add(new PrefabDescriptionDiagnostic(
                 PrefabDescriptionDiagnostic.ParentMissing,
                 prefabAssetId,
@@ -154,6 +182,10 @@ internal static class PrefabDescriber
         var handlerSource = overridden
             ? SourceNameOf(draftMember!.Handler)
             : HandlerOf(member, assets).Source;
+        // 必须实现＝父展开表里的抽象位（R34 第 2 条）：草案重载后（子覆写）该成员**不再**要求实现——
+        // 与摊平期的合并规则同源（R31 第 3 条：子覆写即不再抽象）。
+        var requiresImplementation = !overridden && member.Abstract;
+        var label = overridden ? draftMember!.Label : LabelOf(member, assets);
 
         return new PrefabMemberDescription(
             member.Name,
@@ -187,7 +219,9 @@ internal static class PrefabDescriber
                     wrap.Target.Address.ToString(),
                     PhaseName(wrap.Phase),
                     wrap.Seam))
-                .ToArray());
+                .ToArray(),
+            requiresImplementation,
+            label);
     }
 
     /// <summary>草案新增的成员（父里没有）：新增＝本层，可直接编辑。</summary>
@@ -213,7 +247,10 @@ internal static class PrefabDescriber
             SourceNameOf(declared.Handler),
             declared.Handler?.Id,
             Array.Empty<string>(),
-            Array.Empty<PrefabWrapSummary>());
+            Array.Empty<PrefabWrapSummary>(),
+            // 草案新增的成员：实现与否由草案自己决定（新增成员不是模板抽象位）。
+            RequiresImplementation: false,
+            declared.Label);
 
     /// <summary>
     /// handler 来源（<c>script</c>／<c>dsl</c>／<c>assembly-key</c>）与 id：读**声明该成员的资产**，
@@ -234,6 +271,18 @@ internal static class PrefabDescriber
         return declared?.Handler is { } handler
             ? (handler.Id, SourceNameOf(handler))
             : (null, null);
+    }
+
+    /// <summary>成员的展示名（R35）：读**声明该成员的资产**，不重算、不猜；未声明＝null（前端回退显示成员名）。</summary>
+    private static string? LabelOf(MemberDefinition member, IReadOnlyDictionary<string, ComponentAsset> assets)
+    {
+        if (member.DeclaredBy is null || !assets.TryGetValue(member.DeclaredBy, out var asset))
+        {
+            return null;
+        }
+
+        return asset.Members
+            .FirstOrDefault(m => string.Equals(m.Name, member.Name, StringComparison.Ordinal))?.Label;
     }
 
     /// <summary>handler 来源的文本名（<c>dsl</c>／<c>script</c>／<c>assembly-key</c>；无 handler＝null）。</summary>
@@ -438,6 +487,39 @@ internal static class PrefabDescriber
         }
     }
 
+    /// <summary>
+    /// 读**模板库**（R33：编辑期只读依赖层）：<c>&lt;templateRoot&gt;/effects-v4/*.component.json</c>。
+    /// null／空白／目录不存在＝空层（模板不可用，行为与今天一致，R33 第 5 条）。
+    /// </summary>
+    private static Dictionary<string, ComponentAsset> LoadTemplateAssets(
+        string? templateRoot, List<PrefabDescriptionDiagnostic> diagnostics)
+    {
+        var assets = new Dictionary<string, ComponentAsset>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(templateRoot))
+        {
+            return assets;
+        }
+
+        var directory = Path.Combine(
+            Path.GetFullPath(templateRoot), EffectTemplateLibrary.AssetsDirectory.Replace('/', Path.DirectorySeparatorChar));
+        if (!Directory.Exists(directory))
+        {
+            return assets;
+        }
+
+        foreach (var file in Directory.EnumerateFiles(directory, "*.component.json", SearchOption.TopDirectoryOnly)
+                     .OrderBy(static f => f, StringComparer.Ordinal))
+        {
+            var asset = TryReadAsset(file, diagnostics);
+            if (asset is not null)
+            {
+                assets.TryAdd(asset.Id, asset);
+            }
+        }
+
+        return assets;
+    }
+
     private static IEnumerable<string> EnumerateAssets(string root, string directory, string pattern)
     {
         var path = Path.Combine(root, directory);
@@ -521,7 +603,10 @@ internal static class PrefabDescriber
             type.ActiveWhen == ActiveWhen.Loaded ? "loaded" : "placed",
             type.OneShot,
             type.DisposalSignal,
-            type.AuthorizesModing);
+            type.AuthorizesModing,
+            type.Abstract,
+            type.Label,
+            type.Description);
 
     private static IReadOnlyList<string> VisibilityNames(MemberVisibility visibility)
     {

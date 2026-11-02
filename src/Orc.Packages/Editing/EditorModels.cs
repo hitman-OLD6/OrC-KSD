@@ -253,4 +253,14 @@ public sealed record AssetEditorOptions
     /// <see cref="Orc.Game.Decks.DeckRules.DefaultRequiredSize"/> 对齐，并在 <c>session.begin</c> 回显给作者。
     /// </summary>
     public int RequiredDeckSize { get; init; } = Orc.Game.Decks.DeckRules.DefaultRequiredSize;
+
+    /// <summary>
+    /// **模板库根路径**（R33／R34；null／空白＝模板不可用，行为与今天一致）。
+    /// <para>
+    /// 它是**编辑期只读依赖层**：随本编辑器的所有 <see cref="AssetEditor.DescribePrefab"/>／
+    /// <see cref="AssetEditor.Flatten"/> 生效，**不参与对局装载**（D29）。模板库里的资产只有
+    /// <c>abstract: true</c> 的才能被 <c>extends</c>（R33 第 4 条）。
+    /// </para>
+    /// </summary>
+    public string? TemplateRoot { get; init; }
 }

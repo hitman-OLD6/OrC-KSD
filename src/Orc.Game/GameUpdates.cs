@@ -106,7 +106,27 @@ public static class GameUpdates
     /// <summary>死亡已确认、效果卸载前的宿主结算阶段；载荷同 CardDied。</summary>
     public const string CardDying = "card.dying";
 
-    /// <summary>单位即将离开战场（槽位释放之前）；载荷＝{ Card, Reason }。</summary>
+    /// <summary>
+    /// 单位**非死亡**离场（"card.leaving"；载荷＝{ Card, Reason }；槽位释放之前发射，恰一次）。
+    /// <para>
+    /// **语义边界（R29）**：本信号只表示「离开战场且不是死亡」——**死亡永不触发**。
+    /// 死亡走 <see cref="CardDying"/>（死亡已确认、效果卸载前）与 <see cref="CardDied"/>（死亡完成），
+    /// 三者**互斥、不重叠**：死亡路径零发射本信号，非死亡离场也不发 dying／died。
+    /// 因此「单位离场时抽一张牌」这类监听**不会**在单位被打死时触发——那是设计、不是缺陷；
+    /// 要覆盖死亡场景请改挂 <see cref="CardDied"/>（或 <see cref="CardDying"/>）。
+    /// </para>
+    /// <para>
+    /// 真实存在的三种非死亡离场途径（全仓 <c>LeaveBattlefieldAsync</c> 的调用方）：
+    /// ①<b>被移除</b>（转换替换：旧单位离场，<c>ProgramKeywordComponent</c> 转换组合）；
+    /// ②<b>回手／返回</b>（<c>ProgramKeywordComponent</c> 回手路径）；
+    /// ③<b>玩家主动离场（撤退回手）</b>（<c>McpService</c> 玩家动作）。
+    /// 「从场上洗入卡组」**当前没有入口**（洗入只发生在手牌→卡组），不写成本信号的规格。
+    /// </para>
+    /// <para>
+    /// 实现：<c>CommandManager.LeaveBattlefieldAsync</c> 的 <c>IsDestroyed</c> 前置拒绝即本语义的守卫
+    /// （已死亡单位无法走离场动作）——该守卫与发射点**逐字不动**（R29 不改运行期行为）。
+    /// </para>
+    /// </summary>
     public const string CardLeaving = "card.leaving";
 
     /// <summary>词条临时增益到期相位（攻击收尾后）；载荷＝{ Card }。</summary>

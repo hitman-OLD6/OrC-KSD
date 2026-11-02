@@ -1,4 +1,5 @@
 using Orc.Core;
+using Orc.Core.Model;
 
 namespace Orc.HandlerDsl;
 
@@ -15,7 +16,7 @@ namespace Orc.HandlerDsl;
 /// <c>view</c> 读取 → <c>pin-unknown</c>）。
 /// </para>
 /// </summary>
-public sealed class HandlerDslCompiler : IHandlerDslCompiler
+public sealed class HandlerDslCompiler : IHandlerDslCompiler, IHandlerDslGuardedCompiler
 {
     /// <summary>生成器标识（与 <see cref="HandlerDslGenerator.GeneratorId"/> 同源）。</summary>
     public const string Generator = HandlerDslGenerator.GeneratorId;
@@ -23,12 +24,25 @@ public sealed class HandlerDslCompiler : IHandlerDslCompiler
     /// <inheritdoc />
     /// <exception cref="ArgumentNullException">dslJson 或 catalog 为 null。</exception>
     public HandlerDslCompileResult Compile(string dslJson, IHandlerCatalog catalog, HandlerDslView? view = null)
+        => CompileCore(dslJson, catalog, view, guard: null);
+
+    /// <inheritdoc />
+    /// <exception cref="ArgumentNullException">dslJson／catalog／guard 为 null。</exception>
+    public HandlerDslCompileResult CompileGuarded(
+        string dslJson, IHandlerCatalog catalog, HandlerDslView? view, HandlerGuardSpec guard)
+    {
+        ArgumentNullException.ThrowIfNull(guard);
+        return CompileCore(dslJson, catalog, view, guard);
+    }
+
+    private HandlerDslCompileResult CompileCore(
+        string dslJson, IHandlerCatalog catalog, HandlerDslView? view, HandlerGuardSpec? guard)
     {
         ArgumentNullException.ThrowIfNull(dslJson);
         ArgumentNullException.ThrowIfNull(catalog);
 
         var generated = CompileToGeneration(
-            dslJson, catalog as IHandlerDslCatalog ?? DslCatalog.Empty, view, out var errors);
+            dslJson, catalog as IHandlerDslCatalog ?? DslCatalog.Empty, view, out var errors, guard);
 
         return generated is null
             ? HandlerDslCompileResult.Fail(errors)
@@ -42,9 +56,14 @@ public sealed class HandlerDslCompiler : IHandlerDslCompiler
     /// <param name="catalog">节点目录（内核最小面；不是 <see cref="IHandlerDslCatalog"/> 时按空目录处理）。</param>
     /// <param name="view">挂载点目标成员的视图声明；null＝未知视图（保守拒绝）。</param>
     /// <param name="errors">失败时的全部错误（成功＝空）。</param>
+    /// <param name="guard">模板守卫（null＝不合成；R32）。</param>
     /// <exception cref="ArgumentNullException">dslJson 或 catalog 为 null。</exception>
     public HandlerDslGenerationResult? CompileToGeneration(
-        string dslJson, IHandlerCatalog catalog, HandlerDslView? view, out IReadOnlyList<HandlerDslError> errors)
+        string dslJson,
+        IHandlerCatalog catalog,
+        HandlerDslView? view,
+        out IReadOnlyList<HandlerDslError> errors,
+        HandlerGuardSpec? guard = null)
     {
         ArgumentNullException.ThrowIfNull(dslJson);
         ArgumentNullException.ThrowIfNull(catalog);
@@ -71,7 +90,7 @@ public sealed class HandlerDslCompiler : IHandlerDslCompiler
 
         errors = Array.Empty<HandlerDslError>();
         return HandlerDslGenerator.Generate(
-            read.Document, catalog as IHandlerDslCatalog ?? DslCatalog.Empty, dslView ?? DslView.Empty);
+            read.Document, catalog as IHandlerDslCatalog ?? DslCatalog.Empty, dslView ?? DslView.Empty, guard);
     }
 
     /// <summary>
