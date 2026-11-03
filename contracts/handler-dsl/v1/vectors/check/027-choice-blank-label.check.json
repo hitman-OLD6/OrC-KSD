@@ -1,0 +1,118 @@
+{
+  "kind": "check",
+  "name": "choice 选项文案纯空白（与运行期 IsNullOrWhiteSpace 同口径）",
+  "refs": [
+    "R38",
+    "Q1",
+    "Q2",
+    "SPEC §14.1"
+  ],
+  "document": {
+    "schemaVersion": 1,
+    "actions": [
+      {
+        "op": "choice",
+        "prompt": "选一项",
+        "options": [
+          {
+            "label": "抽 1 张",
+            "actions": [
+              {
+                "op": "stop"
+              }
+            ]
+          },
+          {
+            "label": "   ",
+            "actions": [
+              {
+                "op": "stop"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "catalog": {
+    "schemaVersion": 1,
+    "catalogRevision": 1142203374,
+    "scannedFaces": [
+      "Orc.Game.Cards.KeywordEffectActionFace",
+      "Orc.Game.Effects.EffectRuntime"
+    ],
+    "readables": {
+      "hq": {
+        "hqHealth": "number",
+        "name": "string"
+      },
+      "player": {
+        "hqHealth": "number",
+        "kredits": "number",
+        "maxKredits": "number"
+      },
+      "unit": {
+        "attack": "number",
+        "defense": "number",
+        "deployCost": "number",
+        "name": "string",
+        "opCost": "number",
+        "zone": "string"
+      }
+    },
+    "nodes": [
+      {
+        "name": "draw",
+        "source": {
+          "face": "EffectRuntime",
+          "method": "DrawAsync",
+          "implicitHost": "viewer",
+          "faceType": "Orc.Game.Effects.EffectRuntime",
+          "tokenParameter": "ct"
+        },
+        "hasAwait": true,
+        "hasSideEffect": true,
+        "inputs": [
+          {
+            "name": "count",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "source",
+            "type": "entity",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "result",
+            "type": "number",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  "view": {
+    "fields": {
+      "Target": {
+        "type": "entity"
+      },
+      "Defense": {
+        "type": "number",
+        "writable": true
+      },
+      "Units": {
+        "type": "list<entity>"
+      },
+      "Name": {
+        "type": "string"
+      }
+    }
+  },
+  "expect": {
+    "code": "pin-unknown",
+    "nodePath": "actions[0].options[1].label"
+  }
+}

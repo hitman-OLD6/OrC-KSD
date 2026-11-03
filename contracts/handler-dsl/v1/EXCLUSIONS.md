@@ -74,7 +74,7 @@
 
 | 能力 | 现状 | 失败形态 |
 | --- | --- | --- |
-| `choice` 节点 | 运行时入口 `ChooseAsync` **抛 `NotSupportedException`**：选项呈现需前端桥接（S10） | 运行期当场抛错（**不返回「无选择」哨兵**——那会让 `switch` 走 default／越界，等于「生效到错误分支上」） |
+| `choice` 节点 | **R38 起已接通**：复用 targeter 提交通道（`option` 选择器，标识集＝选项文案），有桥即呈现 `prompt` ＋ N 个选项 | **无桥／取消／非法选择**＝抛 `InvalidOperationException`，消息以 `choice-failed[<reason>]:` 开头；**不返回「无选择」哨兵**（那会让 `switch` 走 default／越界，等于「生效到错误分支上」）。失败即整张牌打出被中断（牌仍在手、未扣费） |
 | `ask` 的 `prompt` | 生成码会传，但**运行期未使用**（提示文案的呈现面属前端桥接 S10） | 无（不影响选靶结果） |
 | `ask` 的 `kind` | 生成码会传，但**运行期未使用**：候选集由选择器与判定器给出，`kind` 只参与**静态**子类型判定（SPEC §7.5） | 无（DSL 层校验仍生效） |
 | `read` 的可读项 | `self`：attack／defense／opCost／deployCost／hqHealth／name／zone；`viewer`：kredits／maxKredits／hqHealth；其余 path **抛 `NotSupportedException`** | 运行期当场抛错（**不返回 0**——那时条件会被判成成立，比失败更糟） |

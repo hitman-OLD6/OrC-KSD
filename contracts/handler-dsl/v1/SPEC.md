@@ -518,12 +518,12 @@ sideEffectOf(x) = 自身标记(x) ∨ 任一子节点 sideEffectOf
 | 对象 | 承载 | 说明 |
 | --- | --- | --- |
 | 有引脚的调用原语 | 节点上的 `stage`／`problem` | 缺省 `alpha`，不写进快照；`preview` 才落盘并带 `problem` |
-| 内建 op（`sequence`／`branch`／`loop`／`while`／`iterate`／`choice`／`let`／`write`／`ask`／`script`） | 顶层 `builtInOps` 数组 | 前端硬编码这些 op、目录里没有引脚条目；`choice` 的运行时实现 `ChooseAsync` 在排除清单里，节点级标注读不到，所以单独一张表 |
+| 内建 op（`sequence`／`branch`／`loop`／`while`／`iterate`／`choice`／`let`／`write`／`ask`／`script`） | 顶层 `builtInOps` 数组 | 前端硬编码这些 op、目录里没有引脚条目；`choice` 的运行时实现 `ChooseAsync` 在排除清单里，节点级标注读不到，所以单独一张表。**R38 起 `choice` 为 `alpha`**（有桥走 `target.submit`、无桥明确失败），该表当前为空 |
 
 **两条硬规矩**：
 
 1. **不裁剪**：`preview` 条目照样出现，只影响排序与提示。藏起来会让作者以为这版没有这个能力。
-2. **判据是显式登记，不是自动探针**：`choice` 编译能过、运行才炸，按「编译一次」判会误判成 `alpha`；
+2. **判据是显式登记，不是自动探针**：`choice` **当初**编译能过、运行才炸（R38 已接通，见上表），按「编译一次」判会误判成 `alpha`；
    多数节点又需要真实对局上下文才能跑，探针会大面积误判。
    登记必须由**行为测试背书**（证明它现在确实会失败）——引擎补上能力后测试先红，逼人回来删登记。
    `PreviewOps` 的键写错会静默失效，另有守护测试校验键都是真实内建 op。
@@ -572,7 +572,7 @@ sideEffectOf(x) = 自身标记(x) ∨ 任一子节点 sideEffectOf
 | --- | --- | --- |
 | `graph-shape` | 不是对象／子节点不是数组／深度超限／`else: []`／`then` 缺失或空 | `structure` |
 | `node-unknown` | `op` 缺失、非字符串、或不在「10 内建 ∪ 目录节点名」 | `structure` |
-| `pin-unknown` | 内建节点表外字段／动作节点未声明引脚／`view` 字段未声明／`read.path` 不在可读项／`read.of` 越界／表达式不是五种变体之一／引脚类型名越界 | `structure` |
+| `pin-unknown` | 内建节点表外字段／动作节点未声明引脚／`view` 字段未声明／`read.path` 不在可读项／`read.of` 越界／表达式不是五种变体之一／引脚类型名越界／`choice.options[].label` 为空（含纯空白）或重复 | `structure` |
 | `pin-missing` | 必填字段／必填引脚缺失 | `structure` |
 | `pin-type` | 引脚类型不符（含 `entity` 接 `number`、实体引脚接 `list<entity>`、静态可确定子类型不匹配） | `structure` |
 | `bind-scope` | 绑定形态错误（单输出写对象）、键集不符、绑定名非法／重名／遮蔽／跨作用域、未定义 `var` | `structure` |
