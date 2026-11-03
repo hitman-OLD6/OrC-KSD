@@ -98,7 +98,8 @@ public static class HandlerDslExclusions
         new HandlerDslExclusion(
             "ChooseAsync(Card, string, string[], CancellationToken)",
             "ChooseAsync",
-            "内建 choice 节点的**运行时实现**（选项呈现），不是给作者连线的原语。",
+            "内建 choice 节点的**运行时实现**（选项呈现），不是给作者连线的原语；"
+            + "选项走 targeter 提交通道（R38），本方法只由生成码调用。",
             "用 choice 节点：本方法只由生成码调用。"),
 
         new HandlerDslExclusion(

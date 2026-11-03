@@ -379,9 +379,12 @@ public static class HandlerDslReader
         }
 
         var options = new List<ChoiceOption>();
+        var seenLabels = new Dictionary<string, string>(StringComparer.Ordinal);
+        var hadOptionItem = false;
         var index = 0;
         foreach (var item in optionsElement.EnumerateArray())
         {
+            hadOptionItem = true;
             var optionPath = $"{optionsPath}[{index}]";
             if (item.ValueKind != JsonValueKind.Object)
             {
@@ -391,7 +394,35 @@ public static class HandlerDslReader
             }
 
             CheckFields(item, optionPath, OptionFields, errors);
-            var label = RequireString(item, "label", $"{optionPath}.label", errors);
+            var labelPath = $"{optionPath}.label";
+            var label = RequireString(item, "label", labelPath, errors);
+
+            // R38 Q1／Q2：`label` 必须**非空且唯一**，在读取期就拒绝——不留到运行期。
+            // 交互通道按 `label` 回填被选项（标识集＝文案）：重复＝`Array.IndexOf` 恒命中第一个，
+            // 即「生效到错误分支上」；空则会在 `IdentifierSetParameter` 构造期抛 `ArgumentException`
+            // （「画得出来、跑起来炸」）。「空」的口径＝`IsNullOrWhiteSpace`——与运行期守卫同口径，
+            // 只拒 "" 会把纯空白留在同一条失败路径上。码复用 `pin-unknown`（不新增码，Q2）。
+            if (label is not null)
+            {
+                if (string.IsNullOrWhiteSpace(label))
+                {
+                    errors.Add(Error(HandlerDslErrorCodes.PinUnknown, labelPath,
+                        "choice.options[].label 不得为空或纯空白：交互通道按文案回填被选项，空文案无法唯一定位分支。"));
+                    label = null;
+                }
+                else if (seenLabels.TryGetValue(label, out var firstPath))
+                {
+                    errors.Add(Error(HandlerDslErrorCodes.PinUnknown, labelPath,
+                        $"choice.options[].label 重复：'{label}' 与 {firstPath} 相同"
+                        + "（交互通道按文案回填被选项，重复即无法唯一定位分支）。"));
+                    label = null;
+                }
+                else
+                {
+                    seenLabels[label] = labelPath;
+                }
+            }
+
             IReadOnlyList<DslNode>? actions;
             if (!item.TryGetProperty("actions", out var actionsElement))
             {
@@ -412,9 +443,15 @@ public static class HandlerDslReader
             index++;
         }
 
+        // 只有「数组本身为空」才是 pin-missing；逐项被拒（label 非法／缺 actions）已各有一条诊断，
+        // 再追加一条「不得为空」会把单错变成双错（向量要求单码单路径，SPEC §15）。
         if (options.Count == 0)
         {
-            errors.Add(Error(HandlerDslErrorCodes.PinMissing, optionsPath, "choice 的 options 不得为空。"));
+            if (!hadOptionItem)
+            {
+                errors.Add(Error(HandlerDslErrorCodes.PinMissing, optionsPath, "choice 的 options 不得为空。"));
+            }
+
             return null;
         }
 

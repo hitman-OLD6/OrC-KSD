@@ -36,6 +36,10 @@ public sealed record PendingCandidate(
 /// 动作类别（R8 的 <c>pending.action</c>；取值 <see cref="Orc.Game.Targeting.SelectorActions"/>）。
 /// 缺省 <c>"unknown"</c>——发布时无法确定类别就如实标注，不猜。
 /// </param>
+/// <param name="Prompt">
+/// 呈现给裁决者的提示文案（R38 Q7；<c>null</c>＝无文案）。目前只有 <c>choice</c> 会填，
+/// <c>ask</c> 的 <c>prompt</c> 仍被丢弃（既有缺口，Q7 范围外）。
+/// </param>
 public sealed record PendingSelection(
     string SessionId,
     string SelectorName,
@@ -45,7 +49,8 @@ public sealed record PendingSelection(
     IReadOnlyList<PendingCandidate> Candidates,
     IReadOnlyList<string> Identifiers,
     int? Seat = null,
-    string Action = Orc.Game.Targeting.SelectorActions.Unknown);
+    string Action = Orc.Game.Targeting.SelectorActions.Unknown,
+    string? Prompt = null);
 
 /// <summary>
 /// 目标选择桥接适配器（<see cref="ITargeterBridge"/> 实现）。
@@ -73,6 +78,7 @@ public sealed class TargeterBridgeAdapter : ITargeterBridge
     private TaskCompletionSource<bool> _change = NewSignal();
     private TaskCompletionSource<SelectorEvent>? _submit;
     private IReadOnlyList<Ref<Entity>> _currentCandidates = Array.Empty<Ref<Entity>>();
+    private IReadOnlyList<string> _currentIdentifiers = Array.Empty<string>();
     private readonly Dictionary<string, string> _claimants = new(StringComparer.Ordinal);
     private bool _sessionCompleted;
     private bool _timedOut;
@@ -208,6 +214,7 @@ public sealed class TargeterBridgeAdapter : ITargeterBridge
             _pending = null;
             _submit = null;
             _currentCandidates = Array.Empty<Ref<Entity>>();
+            _currentIdentifiers = Array.Empty<string>();
             _claimants.Clear();
             _sessionCompleted = false;
             _timedOut = false;
@@ -300,12 +307,19 @@ public sealed class TargeterBridgeAdapter : ITargeterBridge
 
     /// <summary>
     /// 应答当前待决请求（由 <c>target.submit</c> / <c>target.cancel</c> 调用）。
+    /// <para>
+    /// <paramref name="picks"/> 恒为「**待选项的 1 起序号**」，引用类与标识类同一口径（R38 Q6）：
+    /// 引用类按 <see cref="PendingSelection.Candidates"/> 解引用；标识集选择器（`candidates` 空、
+    /// `identifiers` 非空，如 <c>choice</c> 的选项）按 <see cref="PendingSelection.Identifiers"/> 解标识。
+    /// 协议零变更——前端不必区分两种选择器。
+    /// </para>
     /// </summary>
     /// <returns>受理＝true；无待决请求或会话不符＝false。</returns>
     public bool Submit(string sessionId, IReadOnlyList<int> picks, bool cancel, string? claimant = null)
     {
         TaskCompletionSource<SelectorEvent>? tcs;
         IReadOnlyList<Ref<Entity>> candidates;
+        IReadOnlyList<string> identifiers;
 
         lock (_sync)
         {
@@ -324,6 +338,7 @@ public sealed class TargeterBridgeAdapter : ITargeterBridge
 
             tcs = _submit;
             candidates = _currentCandidates;
+            identifiers = _currentIdentifiers;
             _submit = null;
         }
 
@@ -331,6 +346,24 @@ public sealed class TargeterBridgeAdapter : ITargeterBridge
         if (cancel)
         {
             evt = new CancelEvent();
+        }
+        else if (candidates.Count == 0 && identifiers.Count > 0)
+        {
+            // 标识集选择器：`picks` 是 `identifiers` 的 1 起序号（R38 Q6）。
+            // 不补这条，标识集选择器的任何 `picks` 都越界 ⇒ 空 PickEvent ⇒ InvalidSelection ⇒ 重试到上限。
+            var picked = new List<string>(picks.Count);
+            foreach (var index in picks)
+            {
+                if (index < 1 || index > identifiers.Count)
+                {
+                    // 序号越界：交回引擎判定（InvalidSelection 三态），不在此处静默丢弃。
+                    return tcs.TrySetResult(new PickEvent());
+                }
+
+                picked.Add(identifiers[index - 1]);
+            }
+
+            evt = new PickEvent(identifiers: picked);
         }
         else
         {
@@ -371,6 +404,8 @@ public sealed class TargeterBridgeAdapter : ITargeterBridge
                 lock (_sync)
                 {
                     _currentCandidates = presentation.Candidates;
+                    // R38 Q6：标识集候选同样快照进会话态——否则 `picks` 无从按序号解标识。
+                    _currentIdentifiers = presentation.Identifiers ?? Array.Empty<string>();
                     _pending = pending;
                     _submit = submitTcs;
 
@@ -470,7 +505,8 @@ public sealed class TargeterBridgeAdapter : ITargeterBridge
             candidates,
             presentation.Identifiers ?? Array.Empty<string>(),
             seat,
-            presentation.Action);
+            presentation.Action,
+            presentation.Prompt);
     }
 
     /// <summary>候选类别归类（呈现用；不影响引擎判定）。</summary>

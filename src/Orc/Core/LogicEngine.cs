@@ -114,6 +114,16 @@ public sealed class LogicEngine
     /// </summary>
     public List<RandomSelectionRecord> RandomSelections { get; } = new();
 
+    /// <summary>
+    /// 本对局**已成功裁决**的选择节点记录（R38 Q5；引擎级、每局一份，与 <see cref="RandomSelections"/> 同级同址）。
+    /// <para>
+    /// 只记成功裁决：取消／失败已中断效果、异常可见，不落可空记录（Q5：不留 <c>null</c> 的序号）。
+    /// 审查导出（<c>choiceSelectors</c> 段）读这一份，用来回答「当时呈现了哪些选项、选了第几项」——
+    /// Q8 把「AI 恒选首项」记为已知限制，靠的就是这条记录可见。
+    /// </para>
+    /// </summary>
+    public List<ChoiceSelectionRecord> ChoiceSelections { get; } = new();
+
     // ---------- ⑨审查链导出（S-C4） ----------
 
     /// <summary>导出全域审查链 JSON（结构化真源；节点＝触发器种类，含实例清单与声明的下游边）。</summary>
@@ -692,3 +702,19 @@ public sealed class LogicEngine
 /// <param name="Viewer">发起取样的卡牌名（诊断定位用）。</param>
 /// <param name="Selector">选择器描述（sel/side/zone/type/keyword/count 的可读拼接）。</param>
 public sealed record RandomSelectionRecord(string Viewer, string Selector);
+
+/// <summary>
+/// 一次 <c>choice</c> 抉择的成功裁决（R38 Q5／D35 审查面）：呈现了什么、被选了第几项。
+/// <para>
+/// <b>基数</b>：<see cref="Picked"/> 是 <b>1 起</b>的提交序，与 <c>target.submit</c> 的 <c>picks</c> **同口径**
+/// （协议里唯一对外暴露过的序号语义），取值恒在 <c>1..Labels.Count</c>；生成码里 <c>switch</c> 的 0 起是
+/// 生成器内部编码，不进任何对外面（两套基数并存会让每次复盘都要换算）。
+/// </para>
+/// </summary>
+/// <param name="Viewer">发起本次抉择的卡牌名（与 <see cref="RandomSelectionRecord.Viewer"/> 同口径：卡名，非座位号）。</param>
+/// <param name="Prompt">呈现给裁决者的提示文案。</param>
+/// <param name="Labels">呈现过的全部选项文案（按呈现序；只留 <see cref="Label"/> 会丢掉「另外几个选项是什么」）。</param>
+/// <param name="Picked">被选项的 1 起序号（恒在 <c>1..Labels.Count</c>；成功才记录，无空／哨兵值）。</param>
+/// <param name="Label">被选项文案（冗余一列：让基数歧义在阅读层消失，与 <see cref="Labels"/> 同一次写入、不漂移）。</param>
+public sealed record ChoiceSelectionRecord(
+    string Viewer, string Prompt, IReadOnlyList<string> Labels, int Picked, string Label);

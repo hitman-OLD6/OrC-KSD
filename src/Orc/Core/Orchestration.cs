@@ -16,12 +16,19 @@ namespace Orc.Core;
 /// </summary>
 public sealed class OrchestrationManager
 {
-    /// <summary>审查链载荷 schema 版本（S-C10；快照/导出演进的兼容锚点）。</summary>
+    /// <summary>
+    /// 审查链载荷 schema 版本（S-C10；快照/导出演进的兼容锚点）。
+    /// <para>
+    /// **判据（D38／R38）：对外面被替换才升，纯增量不升。** 段落增删、字段增补这类「纯增量」不升版本——
+    /// 老读者忽略新段照样读得懂，升版本只会逼所有消费方跟着改一遍。
+    /// </para>
     /// <remarks>
     /// 批次 3（S10／A-4）升到 2：订阅读面（<c>hooks</c> 段）由**实体—成员—挂载边图**
     /// （<c>entities</c>／<c>members</c>／<c>edges</c>／<c>wraps</c>）等价替代；
     /// <c>nodes</c>（成员图）保留，能力不退化。批次 7（§27）节点改由边表投影——字段不变。
+    /// R38（S25）新增 <c>choiceSelectors</c> 段——**纯增量，不升版本**，保持 2。
     /// </remarks>
+    /// </summary>
     public const int SchemaVersion = 2;
 
     private readonly LogicEngine _engine;
@@ -39,7 +46,8 @@ public sealed class OrchestrationManager
     {
         var graph = _engine.BuildAuditGraph();
         return new AuditChain(
-            SchemaVersion, BuildNodes(graph), graph, _engine.LoadGate.Records, _engine.RandomSelections.ToArray());
+            SchemaVersion, BuildNodes(graph), graph, _engine.LoadGate.Records, _engine.RandomSelections.ToArray(),
+            _engine.ChoiceSelections.ToArray());
     }
 
     /// <summary>
@@ -56,7 +64,8 @@ public sealed class OrchestrationManager
         {
             // 起点未登记＝空链
             return new AuditChain(
-                SchemaVersion, nodes, graph, _engine.LoadGate.Records, _engine.RandomSelections.ToArray());
+                SchemaVersion, nodes, graph, _engine.LoadGate.Records, _engine.RandomSelections.ToArray(),
+                _engine.ChoiceSelections.ToArray());
         }
 
         var visited = new HashSet<TriggerId> { root };
@@ -80,7 +89,8 @@ public sealed class OrchestrationManager
         }
 
         return new AuditChain(
-            SchemaVersion, nodes, graph, _engine.LoadGate.Records, _engine.RandomSelections.ToArray());
+            SchemaVersion, nodes, graph, _engine.LoadGate.Records, _engine.RandomSelections.ToArray(),
+            _engine.ChoiceSelections.ToArray());
     }
 
     // ---------- 内部 ----------
@@ -166,13 +176,15 @@ public sealed class AuditChain
         IReadOnlyList<TriggerNode> nodes,
         Orc.Core.Model.AuditGraph graph,
         IReadOnlyList<PackLoadRecord> packages,
-        IReadOnlyList<RandomSelectionRecord> randomSelectors)
+        IReadOnlyList<RandomSelectionRecord> randomSelectors,
+        IReadOnlyList<ChoiceSelectionRecord> choiceSelectors)
     {
         SchemaVersion = schemaVersion;
         Nodes = nodes;
         Graph = graph;
         Packages = packages;
         RandomSelectors = randomSelectors;
+        ChoiceSelectors = choiceSelectors;
     }
 
     /// <summary>schema 版本（演进兼容锚点）。</summary>
@@ -199,6 +211,16 @@ public sealed class AuditChain
     /// 它回答"这局哪里用了随机"，也是复盘"结果为何不可复现"的入口。
     /// </summary>
     public IReadOnlyList<RandomSelectionRecord> RandomSelectors { get; }
+
+    /// <summary>
+    /// 本对局**已成功裁决**的 <c>choice</c> 抉择（R38 Q5／D35）：<c>{ viewer, prompt, labels, picked, label }</c>。
+    /// <para>
+    /// 独立段（不混入 <see cref="RandomSelectors"/>）：随机是「系统替玩家拿了主意」，抉择是「裁决者拿了主意」，
+    /// 复盘要分开看。只记成功裁决——取消／失败已中断效果、异常可见，不落可空序号。
+    /// </para>
+    /// <para><see cref="ChoiceSelectionRecord.Picked"/> 为 **1 起**，与 <c>target.submit</c> 的 <c>picks</c> 同口径。</para>
+    /// </summary>
+    public IReadOnlyList<ChoiceSelectionRecord> ChoiceSelectors { get; }
 }
 
 /// <summary>审查链节点：一个成员及其实例（外来边）、步骤与声明的下游。</summary>

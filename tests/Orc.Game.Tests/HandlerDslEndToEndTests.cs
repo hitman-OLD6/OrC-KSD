@@ -16,6 +16,183 @@ namespace Orc.Game.Tests;
 public class HandlerDslEndToEndTests
 {
     /// <summary>
+    /// R38 Q3／D33 的**可观测断言**：`choice` 选第 k 项就走第 k 条分支。
+    /// 两个分支都落在「抽牌张数」上（1 vs 2），因此分支选错会直接体现在手牌数上。
+    /// </summary>
+    [Theory]
+    [InlineData("抽 1 张", 1)]
+    [InlineData("抽 2 张", 2)]
+    public async Task choice真打出_选第k项走第k条分支(string picked, int drawn)
+    {
+        using var pack = TempDslPack.WithDsl(ChoiceThenDrawDsl);
+        var bridge = ChoiceBridge(picked);
+
+        var match = await pack.CreateMatchAsync(bridge);
+        var playerA = match.Players[0];
+
+        var command = await DiyExampleKit.PrepareCommandAsync(match, playerA, TempDslPack.CardId);
+        var before = playerA.Hand.Count;
+
+        var result = await match.PlayManager.PlayOrderAsync(command);
+
+        Assert.Equal(PlayResultStatus.Success, result.Status);
+        Assert.Equal(before - 1 + drawn, playerA.Hand.Count); // 打出 −1，抽 +drawn
+
+        // R38 Q5／D34：成功裁决落在 `host.Engine`（与 RandomSelections 同址），picked 为 **1 起**。
+        var record = Assert.Single(match.Engine.ChoiceSelections);
+        Assert.Equal(picked, record.Label);
+        Assert.Equal(drawn, record.Picked);
+        Assert.Equal(new[] { "抽 1 张", "抽 2 张" }, record.Labels);
+        Assert.Equal("选一项", record.Prompt);
+        Assert.Equal("火力支援", record.Viewer);
+    }
+
+    /// <summary>
+    /// R38 Q3／D33：**取消 = 整张牌打出被中断**——断言可观测后果（牌仍在手、未扣费、`choice` 之后的节点零副作用），
+    /// 不只断言「抛了异常」（新旧实现都会抛，只断言抛异常区分不出打出是否被中断）。
+    /// </summary>
+    [Fact]
+    public async Task choice被取消_牌仍在手且未扣费且后续节点零副作用()
+    {
+        using var pack = TempDslPack.WithDsl(ChoiceThenDrawDsl);
+        var bridge = new MockTargeterBridge
+        {
+            InteractionScript = (description, responder) => responder.Cancel(description.RequestId),
+        };
+
+        var match = await pack.CreateMatchAsync(bridge);
+        var playerA = match.Players[0];
+
+        var command = await DiyExampleKit.PrepareCommandAsync(match, playerA, TempDslPack.CardId);
+        var handBefore = playerA.Hand.Count;
+        var pointsBefore = playerA.Points;
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => match.PlayManager.PlayOrderAsync(command));
+
+        // D36：类型只有一个，排障靠「前缀 ＋ reason ＋ 关键 detail」；cancelled 的消息必须**中性**。
+        Assert.StartsWith("choice-failed[cancelled]:", error.Message, StringComparison.Ordinal);
+        Assert.Contains("可能来自玩家取消或对局收束", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("玩家取消了选择", error.Message, StringComparison.Ordinal);
+
+        // D33：order.finalize 未执行 ⇒ 牌仍在手、未扣费；分支内抽牌同样没发生（＝choice 之后零副作用）。
+        Assert.Contains(command, playerA.Hand);
+        Assert.Equal(handBefore, playerA.Hand.Count);
+        Assert.Equal(pointsBefore, playerA.Points);
+        Assert.Empty(match.Engine.ChoiceSelections); // 只记成功裁决（Q5）
+    }
+
+    /// <summary>R38：无交互通道 ⇒ 明确失败（`bridge-not-assembled`），不返回哨兵、不选首项。</summary>
+    [Fact]
+    public async Task choice无桥_明确失败且不选首项()
+    {
+        using var pack = TempDslPack.WithDsl(ChoiceThenDrawDsl);
+
+        var match = await pack.CreateMatchAsync(withoutBridge: true);
+        var playerA = match.Players[0];
+
+        var command = await DiyExampleKit.PrepareCommandAsync(match, playerA, TempDslPack.CardId);
+        var handBefore = playerA.Hand.Count;
+        var pointsBefore = playerA.Points;
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => match.PlayManager.PlayOrderAsync(command));
+
+        Assert.StartsWith("choice-failed[bridge-not-assembled]:", error.Message, StringComparison.Ordinal);
+        Assert.Contains("选项数=2", error.Message, StringComparison.Ordinal);
+
+        // 「不选首项」的可观测证据：分支的抽牌没有发生（否则手牌会 −1+1 而看不出差别，故两分支张数不同）。
+        Assert.Equal(handBefore, playerA.Hand.Count);
+        Assert.Contains(command, playerA.Hand);
+        Assert.Equal(pointsBefore, playerA.Points);
+        Assert.Empty(match.Engine.ChoiceSelections);
+    }
+
+    /// <summary>
+    /// R38：同一效果内 `ask` → `choice` 的**呈现顺序＝调用顺序**（共用 TargeterManager 的全局 FIFO）。
+    /// </summary>
+    [Fact]
+    public async Task ask与choice_按调用顺序呈现()
+    {
+        using var pack = TempDslPack.WithDsl(
+            """
+            {
+              "schemaVersion": 1,
+              "actions": [
+                { "op": "ask", "kind": "unit", "side": "enemy", "prompt": "选一个敌方单位", "bind": "targets" },
+                { "op": "choice", "prompt": "选一项", "options": [
+                    { "label": "抽 1 张", "actions": [ { "op": "draw", "count": { "lit": 1 } } ] },
+                    { "label": "抽 2 张", "actions": [ { "op": "draw", "count": { "lit": 2 } } ] }
+                ] }
+              ]
+            }
+            """);
+
+        var presented = new List<string>();
+        var bridge = new MockTargeterBridge();
+        bridge.InteractionScript = (description, responder) =>
+        {
+            var slot = TargeterTestKit.PrimarySlot(description);
+            lock (presented)
+            {
+                presented.Add(slot);
+            }
+
+            if (slot == Orc.Game.Targeting.SelectorNames.Option)
+            {
+                responder.Complete(description.RequestId, TargeterTestKit.IdentifierSelection(slot, "抽 2 张"));
+            }
+            else
+            {
+                responder.Complete(
+                    description.RequestId,
+                    TargeterTestKit.Selection(slot, description.AllowedTargets[0]));
+            }
+        };
+
+        var match = await pack.CreateMatchAsync(bridge);
+        var playerB = match.Players[1];
+        await CommandTestKit.PrepareOnFrontAsync(match, playerB, CommandTestKit.InfantryId, 0);
+
+        var playerA = match.Players[0];
+        var command = await DiyExampleKit.PrepareCommandAsync(match, playerA, TempDslPack.CardId);
+        var before = playerA.Hand.Count;
+
+        var result = await match.PlayManager.PlayOrderAsync(command);
+
+        Assert.Equal(PlayResultStatus.Success, result.Status);
+        Assert.Equal(
+            new[] { Orc.Game.Targeting.SelectorNames.FieldUnit, Orc.Game.Targeting.SelectorNames.Option },
+            presented);
+        Assert.Equal(before - 1 + 2, playerA.Hand.Count);
+    }
+
+    /// <summary>两个分支都落在抽牌张数上，分支选错会直接体现在手牌数上（选首项的实现会被这条抓住）。</summary>
+    private const string ChoiceThenDrawDsl =
+        """
+        {
+          "schemaVersion": 1,
+          "actions": [
+            { "op": "choice", "prompt": "选一项", "options": [
+                { "label": "抽 1 张", "actions": [ { "op": "draw", "count": { "lit": 1 } } ] },
+                { "label": "抽 2 张", "actions": [ { "op": "draw", "count": { "lit": 2 } } ] }
+            ] }
+          ]
+        }
+        """;
+
+    /// <summary>按文案应答的桥（`choice` 走的是标识集：`picks` 按 1 起序号解标识）。</summary>
+    private static MockTargeterBridge ChoiceBridge(string label)
+    {
+        var bridge = new MockTargeterBridge();
+        bridge.InteractionScript = (description, responder) =>
+            responder.Complete(
+                description.RequestId,
+                TargeterTestKit.IdentifierSelection(TargeterTestKit.PrimarySlot(description), label));
+        return bridge;
+    }
+
+    /// <summary>
     /// 指令「按图打 3 伤」：<c>ask</c> 选一个敌方单位 → <c>iterate</c> 遍历 →
     /// <c>damage</c> 扣 3 点防御。等价于手写 csx 的 <c>SelectAsync + foreach DamageAsync</c>。
     /// </summary>
@@ -316,10 +493,12 @@ public class HandlerDslEndToEndTests
         /// <summary>包根（摊平器需要它）。</summary>
         public string Root => _root;
 
-        public async Task<Orc.Game.Match> CreateMatchAsync()
+        public async Task<Orc.Game.Match> CreateMatchAsync(
+            MockTargeterBridge? bridge = null, bool withoutBridge = false)
         {
             var pack = DiyExampleKit.LoadPack(CardsDirectory);
-            return await DiyExampleKit.CreateMatchAsync(pack, EffectsDirectory);
+            return await DiyExampleKit.CreateMatchAsync(
+                pack, EffectsDirectory, targeterBridge: bridge, withoutTargeterBridge: withoutBridge);
         }
 
         public void Dispose()

@@ -356,6 +356,47 @@ public class ReaderStructureTests
         Fixtures.Single(empty.Errors, HandlerDslErrorCodes.ExprArity, "actions[0].count.args");
     }
 
+    /// <summary>
+    /// R38 Q1／Q2：`choice.options[].label` 必须**非空且唯一**，在读取期拒绝（复用 `pin-unknown`，不新增码）。
+    /// 「空」按 `IsNullOrWhiteSpace` 判——与运行期 `IdentifierSetParameter` 的守卫同口径；
+    /// 只拒 `""` 会把纯空白留在同一条「画得出来、跑起来炸」的路径上。
+    /// </summary>
+    [Fact]
+    public void choice选项文案_空或重复一律拒绝()
+    {
+        static string WithSecondLabel(string label) => Fixtures.Doc(
+            "{\"op\":\"choice\",\"prompt\":\"选一个\",\"options\":["
+            + "{\"label\":\"甲\",\"actions\":[]},"
+            + $"{{\"label\":{System.Text.Json.JsonSerializer.Serialize(label)},\"actions\":[]}}]}}");
+
+        Fixtures.Single(
+            Fixtures.Read(WithSecondLabel(string.Empty)).Errors,
+            HandlerDslErrorCodes.PinUnknown,
+            "actions[0].options[1].label");
+
+        Fixtures.Single(
+            Fixtures.Read(WithSecondLabel("   ")).Errors,
+            HandlerDslErrorCodes.PinUnknown,
+            "actions[0].options[1].label");
+
+        // 重复：码复用 pin-unknown，但消息必须指出**与哪个选项**重复（否则作者只知道「重了」不知道改哪条）。
+        var duplicated = Fixtures.Single(
+            Fixtures.Read(WithSecondLabel("甲")).Errors,
+            HandlerDslErrorCodes.PinUnknown,
+            "actions[0].options[1].label");
+        Assert.Contains("actions[0].options[0].label", duplicated.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>R38 Q1：`options` 数组**本身为空**仍是 `pin-missing`（沿用既有判定，不变）。</summary>
+    [Fact]
+    public void choice选项数组为空_仍是pin_missing()
+    {
+        Fixtures.Single(
+            Fixtures.Read(Fixtures.Doc("{\"op\":\"choice\",\"prompt\":\"选一个\",\"options\":[]}")).Errors,
+            HandlerDslErrorCodes.PinMissing,
+            "actions[0].options");
+    }
+
     private static string NestedSequences(int depth)
     {
         var inner = "{\"op\":\"sequence\",\"actions\":[]}";

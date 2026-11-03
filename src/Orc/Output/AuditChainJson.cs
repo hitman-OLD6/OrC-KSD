@@ -46,6 +46,7 @@ public static class AuditChainJson
         WriteGraph(writer, chain.Graph);
         WritePackages(writer, chain.Packages);
         WriteRandomSelectors(writer, chain.RandomSelectors);
+        WriteChoiceSelectors(writer, chain.ChoiceSelectors);
 
         writer.WriteStartArray("nodes");
         foreach (var node in chain.Nodes)
@@ -102,6 +103,42 @@ public static class AuditChainJson
             writer.WriteStartObject();
             writer.WriteString("viewer", record.Viewer);
             writer.WriteString("selector", record.Selector);
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+    }
+
+    /// <summary>
+    /// <c>choice</c> 抉择记录（R38 Q5／D35）：<c>choiceSelectors[] = { viewer, prompt, labels[], picked, label }</c>。
+    /// <para>
+    /// <b><c>picked</c> 是 1 起提交序</b>——与 <c>target.submit</c> 的 <c>picks</c> **同口径**，
+    /// 取值恒在 <c>1..labels.Length</c>（成功才记录，无 0、无哨兵值）。
+    /// 生成码里 <c>switch</c> 的 0 起是生成器内部编码，不进任何对外面：审查导出出现两套基数，
+    /// 等于把这条记录的可读性交给读者去猜，而换算错一格恰好会把「AI 恒选首项」读反。
+    /// </para>
+    /// <para>
+    /// <c>label</c> 是 <c>labels[picked-1]</c> 的冗余列（同一次写入、不漂移）：<c>labels[]</c> 回答「呈现了哪些选项」，
+    /// <c>label</c> 让单行读数不必自按下标取值。
+    /// </para>
+    /// </summary>
+    private static void WriteChoiceSelectors(Utf8JsonWriter writer, IReadOnlyList<Orc.Core.ChoiceSelectionRecord> records)
+    {
+        writer.WriteStartArray("choiceSelectors");
+        foreach (var record in records)
+        {
+            writer.WriteStartObject();
+            writer.WriteString("viewer", record.Viewer);
+            writer.WriteString("prompt", record.Prompt);
+            writer.WriteStartArray("labels");
+            foreach (var label in record.Labels)
+            {
+                writer.WriteStringValue(label);
+            }
+
+            writer.WriteEndArray();
+            writer.WriteNumber("picked", record.Picked);
+            writer.WriteString("label", record.Label);
             writer.WriteEndObject();
         }
 

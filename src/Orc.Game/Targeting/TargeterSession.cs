@@ -121,6 +121,8 @@ internal sealed class TargeterFlow : ITargeterFlow
         instance.Presentation.OwnerSeat = parameter.Owner?.Index;
         // R8：动作类别与归属座位同点写入（缺省＝unknown，不伪造类别）。
         instance.Presentation.Action = parameter.Action ?? SelectorActions.Unknown;
+        // R38 Q7：提示文案同点单点注入（不侵入各 CreateInstance 重载）；缺省 null＝不呈现文案。
+        instance.Presentation.Prompt = parameter.Prompt;
         _current = instance;
         _session.Enqueue(instance);
         return instance.Completion;

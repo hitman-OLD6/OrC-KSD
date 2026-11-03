@@ -23,6 +23,9 @@
 ## 规则
 
 - 候选**由引擎给定**：`index` 是会话内序号（1 起），只能用序号提交；`ref` 仅供观察/对账。
+- **标识集选择器**（`selector=option`：`candidates` 空、`identifiers` 非空，如 `choice` 的选项）同样用 `picks` 提交，
+  按 `identifiers` 的 **1 起序号**解释；审查导出的 `choiceSelectors.picked` 与此同源（两处都是 1 起，不必换算）。
+  这类请求的 `pending` 还会带 `prompt`（呈现给裁决者的提示文案）——引用类请求不带该键。
 - 非法选取（如越界、数量不符）返回 `invalid-selection`，**对局不中断**，可重试（引擎侧重试上限 16）。
 - 取消（含超时）按成功结果处理：`ok: true` + `code: "cancelled"`（引擎三态里的 Cancelled）。
 - 等待应答有超时（默认 10 分钟，服务层可配）；超时按取消处理，工具返回会带 `timedOut` 标记。

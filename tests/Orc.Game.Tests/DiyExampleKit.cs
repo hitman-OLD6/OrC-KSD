@@ -47,8 +47,19 @@ internal static class DiyExampleKit
     }
 
     /// <summary>声明效果 → 装载 v4 组件资产 → 建局初始化（注册先于卡加载）。</summary>
+    /// <param name="pack">装好的卡数据。</param>
+    /// <param name="componentsDirectory">组件资产目录。</param>
+    /// <param name="deckForPlayerA">A 方卡组（缺省＝步兵 x10）。</param>
+    /// <param name="allowRandomTargeting">是否允许随机选靶（R2c；缺省关）。</param>
+    /// <param name="targeterBridge">交互桥接（缺省＝自动选首个；传实例＝脚本化应答，R38 的 choice 用例用）。</param>
+    /// <param name="withoutTargeterBridge">显式**不装配**桥接（验「无通道＝明确失败」；与缺省语义相反，故单列）。</param>
     internal static async Task<Match> CreateMatchAsync(
-        PackData pack, string componentsDirectory, CardList? deckForPlayerA = null, bool allowRandomTargeting = false)
+        PackData pack,
+        string componentsDirectory,
+        CardList? deckForPlayerA = null,
+        bool allowRandomTargeting = false,
+        MockTargeterBridge? targeterBridge = null,
+        bool withoutTargeterBridge = false)
     {
         var registry = new CardEffectRegistry();
         foreach (var (cardId, prefabIds) in pack.Declarations)
@@ -64,7 +75,7 @@ internal static class DiyExampleKit
             // S9／R2：sel=one 属"外部裁定"——用例扮演前端（自动选首个）；random 需显式开启（R2c）。
             options: new MatchOptions { SkipMulligan = true, AllowRandomTargeting = allowRandomTargeting },
             effectRegistry: registry,
-            targeterBridge: CommandTestKit.AutoPickBridge(),
+            targeterBridge: withoutTargeterBridge ? null : targeterBridge ?? CommandTestKit.AutoPickBridge(),
             packageActivator: TestHost.Activator);
 
         // v4-only：效果资产的唯一装载面是组件资产目录（AssetPackLoader 走"全量校验 → 统一注册"）。

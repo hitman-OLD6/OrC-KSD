@@ -50,6 +50,15 @@ public sealed class SelectorPresentation
     /// </summary>
     public string Action { get; internal set; } = SelectorActions.Unknown;
 
+    /// <summary>
+    /// 呈现给裁决者的提示文案（R38 Q7；缺省 <c>null</c>＝无文案）。由 <see cref="SelectorParameter.Prompt"/> 注入。
+    /// <para>
+    /// 不复用 <see cref="Parameter"/>：那是引用类路径里装 viewer／选项载荷的位置，语义与生命周期都不同
+    /// （<c>tag</c> 是业务数据、<c>prompt</c> 是给人读的一句话）。
+    /// </para>
+    /// </summary>
+    public string? Prompt { get; internal set; }
+
     /// <summary>选择器类型名（专门选择器的稳定标识；前端据以选择视觉实现）。</summary>
     public string SelectorName { get; }
 

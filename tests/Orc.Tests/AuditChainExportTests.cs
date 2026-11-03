@@ -139,4 +139,59 @@ public class AuditChainExportTests
 
         Assert.Equal(0, doc.RootElement.GetProperty("nodes").GetArrayLength());
     }
+
+    /// <summary>
+    /// R38 Q5／D35：<c>choiceSelectors</c> 是**独立段**（不混入 <c>randomSelectors</c>），
+    /// 每条含 <c>{ viewer, prompt, labels[], picked, label }</c>，且 <c>picked</c> 为 **1 起**。
+    /// </summary>
+    [Fact]
+    public void JSON_choiceSelectors段_含五个字段且picked为一基()
+    {
+        var engine = new LogicEngine();
+        engine.ChoiceSelections.Add(
+            new ChoiceSelectionRecord("火力支援", "选一项", new[] { "抽 1 张", "抽 2 张" }, Picked: 2, Label: "抽 2 张"));
+
+        using var doc = JsonDocument.Parse(engine.ExportAuditChainJson());
+        var entry = Assert.Single(doc.RootElement.GetProperty("choiceSelectors").EnumerateArray().ToArray());
+
+        Assert.Equal("火力支援", entry.GetProperty("viewer").GetString());
+        Assert.Equal("选一项", entry.GetProperty("prompt").GetString());
+        Assert.Equal(
+            new[] { "抽 1 张", "抽 2 张" },
+            entry.GetProperty("labels").EnumerateArray().Select(l => l.GetString()).ToArray());
+        Assert.Equal(2, entry.GetProperty("picked").GetInt32()); // 1 起：第 2 个选项 ⇒ 2，不是 1
+        Assert.Equal("抽 2 张", entry.GetProperty("label").GetString());
+
+        // 独立段：randomSelectors 不受影响（生产对局仍恒空）。
+        Assert.Equal(0, doc.RootElement.GetProperty("randomSelectors").GetArrayLength());
+
+        // 纯增量不升版本（D38）。
+        Assert.Equal(2, doc.RootElement.GetProperty("schemaVersion").GetInt32());
+    }
+
+    /// <summary>R38 D35：文本面一行一条，<c>picked=&lt;n&gt;/&lt;total&gt;</c> ＋ <c>labels=[a|b]</c>（`|` 分隔，文案可能含逗号）。</summary>
+    [Fact]
+    public void 文本视图_choiceSelectors一行一条()
+    {
+        var engine = new LogicEngine();
+        engine.ChoiceSelections.Add(
+            new ChoiceSelectionRecord("火力支援", "选一项，含逗号", new[] { "抽 1 张", "抽 2 张" }, Picked: 1, Label: "抽 1 张"));
+
+        var text = engine.ExportAuditChainText();
+
+        Assert.Contains("choiceSelectors(1):", text);
+        Assert.Contains("  火力支援 picked=1/2 label=抽 1 张 labels=[抽 1 张|抽 2 张] prompt=选一项，含逗号", text);
+    }
+
+    /// <summary>空链也要有该段（计数行 0）——否则读者分不清「没有抉择」与「这个版本没有该段」。</summary>
+    [Fact]
+    public void 空链_仍有choiceSelectors计数行()
+    {
+        var engine = new LogicEngine();
+
+        using var doc = JsonDocument.Parse(engine.ExportAuditChainJson());
+
+        Assert.Equal(0, doc.RootElement.GetProperty("choiceSelectors").GetArrayLength());
+        Assert.Contains("choiceSelectors(0):", engine.ExportAuditChainText());
+    }
 }

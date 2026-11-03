@@ -23,6 +23,16 @@ public abstract class SelectorParameter
     /// </para>
     /// </summary>
     public string? Action { get; init; }
+
+    /// <summary>
+    /// 呈现给裁决者的提示文案（R38 Q7；可空）。
+    /// <para>
+    /// 由**构造方**声明，经 <see cref="SelectorPresentation.Prompt"/> 单点注入、一路到
+    /// <c>PendingSelection.Prompt</c>。目前只有 <c>choice</c> 填它——<c>ask</c> 的 <c>prompt</c> 仍被丢弃
+    /// 是既有缺口（Q7 明确不在该条范围），故缺省 <c>null</c> 不会让 <c>ask</c> 的对外输出多出字段。
+    /// </para>
+    /// </summary>
+    public string? Prompt { get; init; }
 }
 
 /// <summary>

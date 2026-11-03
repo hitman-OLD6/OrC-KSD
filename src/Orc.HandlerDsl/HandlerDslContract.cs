@@ -36,16 +36,16 @@ public static class HandlerDslContract
     /// 表在这里＝唯一能同时被目录导出与前端消费的位置。
     /// </para>
     /// <para>
-    /// 语义与节点分区一致：**只影响排序与提示，不裁剪**——`choice` 照样出现在内建 op 清单里。
-    /// 接通能力后删掉对应条目即可（守护测试会先变红）。
+    /// 语义与节点分区一致：**只影响排序与提示，不裁剪**——条目照样出现在内建 op 清单里。
+    /// </para>
+    /// <para>
+    /// **当前为空表**：R38 接通了 `choice` 的交互通道（有桥走 `<c>target.submit</c>`、无桥明确失败），
+    /// 最后一个 preview 条目按其自身约定删除。表保留（机制不拆）：将来出现「语法合法但跑不起来」的 op 时，
+    /// 登记在这里即可——登记必须由**行为测试背书**（引擎补上能力后测试先红，逼人回来删）。
     /// </para>
     /// </summary>
     public static IReadOnlyDictionary<string, string> PreviewOps { get; } =
-        new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["choice"] = "选项呈现需前端桥接（S10）尚未接入：编译能过，运行期一律抛 NotSupportedException。"
-                + "接通交互通道后删掉本条。",
-        };
+        new Dictionary<string, string>(StringComparer.Ordinal);
 
     /// <summary>根节点路径（一切定位的起点，SPEC §14.2）。</summary>
     public const string RootPath = "$";
@@ -74,7 +74,10 @@ public static class HandlerDslErrorCodes
     /// <summary>op 缺失、非字符串、或不在「10 内建 ∪ 目录节点名」。</summary>
     public const string NodeUnknown = "node-unknown";
 
-    /// <summary>表外字段／未声明引脚／视图字段未声明／read.path 越界／表达式不是五种变体之一／引脚类型名越界。</summary>
+    /// <summary>
+    /// 表外字段／未声明引脚／视图字段未声明／read.path 越界／表达式不是五种变体之一／引脚类型名越界／
+    /// <c>choice.options[].label</c> 为空（含纯空白）或重复。
+    /// </summary>
     public const string PinUnknown = "pin-unknown";
 
     /// <summary>必填字段／必填引脚缺失。</summary>

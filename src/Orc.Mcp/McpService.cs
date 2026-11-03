@@ -327,7 +327,14 @@ public sealed partial class McpService
         }
     }
 
-    /// <summary>待决请求 → JSON（工具返回与结果细节共用）。</summary>
+    /// <summary>
+    /// 待决请求 → JSON（工具返回与结果细节共用；<c>notify/target.request</c>／<c>target.expired</c>
+    /// 推送也走这一处——**唯一序列化面**，前端协议不必另开通道）。
+    /// <para>
+    /// 键集：<c>sessionId／selector／mode／min／max／seat／action／candidates／identifiers</c>，
+    /// 外加 <c>prompt</c>——**仅当该请求带文案时出现**（R38 Q7：目前只有 <c>choice</c> 带）。
+    /// </para>
+    /// </summary>
     public static JsonNode? PendingJson(PendingSelection? pending)
     {
         if (pending is null)
@@ -354,7 +361,7 @@ public sealed partial class McpService
             identifiers.Add(identifier);
         }
 
-        return new JsonObject
+        var pendingJson = new JsonObject
         {
             ["sessionId"] = pending.SessionId,
             ["selector"] = pending.SelectorName,
@@ -366,5 +373,15 @@ public sealed partial class McpService
             ["candidates"] = candidates,
             ["identifiers"] = identifiers,
         };
+
+        // R38 Q7：`prompt` 段**只在有文案时出现**（目前只有 `choice` 填它）。
+        // 不无条件写 `"prompt": null`：`ask` 的 prompt 仍被丢弃是该条范围外的既有缺口，
+        // 无条件写会让 ask 的输出平白多一个键——「ask 的输出逐条不变」是同一轮的验收项。
+        if (pending.Prompt is not null)
+        {
+            pendingJson["prompt"] = pending.Prompt;
+        }
+
+        return pendingJson;
     }
 }

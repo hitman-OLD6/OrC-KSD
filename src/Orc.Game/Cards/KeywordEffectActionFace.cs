@@ -1,6 +1,8 @@
 using Orc.Cards;
+using Orc.Core;
 using Orc.Game.Effects;
 using Orc.Game.Effects.HandlerDsl;
+using Orc.Game.Targeting;
 
 namespace Orc.Game.Cards;
 
@@ -100,33 +102,181 @@ public static class KeywordEffectActionFace
     }
 
     /// <summary>
-    /// <c>choice</c> 的运行时实现：呈现选项并返回被选项的序号（0 起）。
+    /// <c>choice</c> 的运行时实现：呈现选项并返回被选项的序号（**0 起**，供生成码的 <c>switch</c> 用）。
     /// <para>
-    /// **v1 抛 <see cref="NotSupportedException"/>**：选项呈现面属前端桥接（S10/R24 的交互面），尚未接入。
-    /// 这里**不能**返回 −1 之类的「无选择」哨兵——那会让 <c>switch</c> 走 default 或越界，
-    /// 变成「生效到错误分支上」，比「不生效」更糟（Constraints：不得留「装上了但不生效」的静默路径）。
-    /// **宁可炸，不可错**：需要 <c>choice</c> 的图在接通前端桥接前一律当场失败。
+    /// **走既有 targeter 提交通道**（R38／Q3／Q6／Q7）：复用 `option` 选择器
+    /// （<see cref="SelectorTemplates.Option"/>，标识集＝选项文案），不新建子系统、不新增选择器类型。
+    /// 有桥＝呈现 prompt ＋ N 个选项按钮，点选后返回该选项的 0 起下标；与 <c>ask</c> 共用
+    /// <see cref="TargeterManager"/> 的全局 FIFO，同一效果内按调用顺序排队，不串序。
+    /// </para>
+    /// <para>
+    /// **失败＝整条效果中断**（D33）：无桥／玩家取消／非法选择／对局已结束／超时…一律抛
+    /// <see cref="InvalidOperationException"/>，消息以 <c>choice-failed[&lt;reason&gt;]:</c> 开头（D36）。
+    /// <b>不返回哨兵、不选首项、不静默跳过</b>——<c>switch</c> 没有 default 兜底，错误下标＝生效到错误分支上
+    /// （「宁可炸，不可错」）。因为没有 fallback（Q4），这里的失败**不降级**：<c>choice</c> 抛错 ⇒ 当前
+    /// <c>order.cast</c> 中断 ⇒ <c>order.finalize</c> 不执行 ⇒ **这张牌仍在手牌区、未扣费**；同一次
+    /// <c>card.played</c> 广播里排在其后的其它卡的边也被跳过（连坐，属信号广播 fail-fast 的既有性质，
+    /// 非本条引入、本条也不消除）。本方法**不吞异常**（与 <c>AskAsync</c> 的 catch 形态刻意不同：
+    /// 那是为了走 fallback，这里没有 fallback 可走）。
+    /// </para>
+    /// <para>
+    /// **<paramref name="ct"/> 取消＝<see cref="OperationCanceledException"/> 原样穿透**，绝不折成
+    /// <see cref="InvalidOperationException"/>——「玩家取消选择」与「对局取消」是两回事（Q3）。
+    /// 已知边界：<c>ct</c> 不传给 <c>RunAsync</c>（后者无 <c>ct</c> 形参），故等待中取消**不会提前中断**，
+    /// 最长到桥超时（MCP 桥默认 10 分钟）才以取消收场；但**进入通道前**会先
+    /// <see cref="CancellationToken.ThrowIfCancellationRequested"/>——已取消的对局不呈现选项。
     /// </para>
     /// </summary>
-    /// <param name="host">宿主卡。</param>
-    /// <param name="prompt">提示文案。</param>
-    /// <param name="labels">选项文案（按顺序）。</param>
-    /// <param name="ct">取消令牌。</param>
+    /// <param name="host">宿主卡（通道由其归属玩家的 targeter 管理器提供）。</param>
+    /// <param name="prompt">提示文案（R38 Q7：经 <see cref="SelectorParameter.Prompt"/> 呈现给裁决者）。</param>
+    /// <param name="labels">选项文案（按顺序；非空且唯一由校验期保证，R38 Q1）。</param>
+    /// <param name="ct">取消令牌（对局取消＝原样上抛 <see cref="OperationCanceledException"/>）。</param>
+    /// <returns>被选项的 0 起下标（生成码 <c>switch</c> 的分支号）。</returns>
     /// <exception cref="ArgumentNullException">host 或 labels 为 null。</exception>
-    /// <exception cref="NotSupportedException">总是抛出：选项呈现需前端桥接（S10）。</exception>
+    /// <exception cref="InvalidOperationException">未取得裁决（无通道／取消／非法选择／失败／终局）——整条效果中断。</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="ct"/> 已取消。</exception>
     /// <remarks>
     /// **本方法在排除清单里**（只由生成码调用、不进目录），所以「choice 是预览态」不能标在这里——
-    /// 扫描器根本扫不到它。该事实登记在 <c>HandlerDslContract.PreviewOps</c>（R36）。
+    /// 扫描器根本扫不到它。该事实登记在 <c>HandlerDslContract.PreviewOps</c>（R36；R38 已撤销该条）。
     /// </remarks>
-    public static Task<int> ChooseAsync(Card host, string prompt, string[] labels, CancellationToken ct = default)
+    public static async Task<int> ChooseAsync(
+        Card host, string prompt, string[] labels, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(labels);
-        _ = prompt;
-        _ = ct;
-        throw new NotSupportedException(
-            "choice 节点的选项呈现需前端桥接（S10）：本机没有交互通道时不做替代选择。");
+
+        // 已取消的对局不该再向玩家呈现选项（否则会弹一个点了也没用的面板，且要等桥超时才收场）。
+        // 这是唯一一处主动检查 ct——它只挡「进来时就已经取消」，不改变「等待中被取消」的形态。
+        ct.ThrowIfCancellationRequested();
+
+        var owner = OwnerOf(host);
+        var targeterManager = owner?.TargeterManager;
+        if (targeterManager?.Bridge is null)
+        {
+            // 与 ask 的无通道口径一致：明确失败（引擎绝不代选）。不 catch、不兜底。
+            throw ChoiceFailed(
+                ReasonName(TargeterFailureReason.BridgeNotAssembled), detail: null, prompt, labels.Length);
+        }
+
+        string? picked = null;
+        var result = await targeterManager.RunAsync(async flow =>
+        {
+            var step = await flow.Step(
+                SelectorTemplates.Option,
+                new IdentifierSetParameter(labels, 1, 1)
+                {
+                    Owner = owner,
+                    // 与卡效果选靶同类别（这是一次由卡效果发起的交互，不是指挥动作）。
+                    Action = SelectorActions.Effect,
+                    Prompt = prompt,
+                }).ConfigureAwait(false);
+
+            if (step.IsCancelled)
+            {
+                return TargeterResult.Cancelled();
+            }
+
+            if (step.IsFailed)
+            {
+                // 不重试（D34）：`InvalidSelection` 直接映射为失败，不静默取首项。
+                return TargeterResult.FromSelectorFailure(step.Failure);
+            }
+
+            picked = step.Value;
+            return TargeterResult.Ok();
+        }).ConfigureAwait(false);
+
+        // D36：对局取消必须原样穿透，且判定在**因子映射之前**——
+        // `TargeterManager.RunLoopAsync` 的 catch(Exception) 会把 ct 取消折成 Failed(Other)，
+        // 不前置判断就会把「对局取消」伪装成「效果故障」，与 Q3 刻意区分两者的理由正好相反。
+        if (ct.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(ct);
+        }
+
+        if (result.IsOk && picked is not null)
+        {
+            var index = Array.IndexOf(labels, picked);
+            if (index < 0)
+            {
+                // 选择器回传了不在候选文案集内的标识：属**异常路径**（抛），不得记一条 picked=0。
+                throw new InvalidOperationException(
+                    $"choice-failed[{ReasonName(TargeterFailureReason.Fault)}]: "
+                    + $"选择器回传的标识 '{picked}' 不在本次选项文案集内，无法定位分支"
+                    + $"（prompt=\"{prompt}\"，选项数={labels.Length}）；效果中断。");
+            }
+
+            // R38 Q5／D35：只记成功裁决；picked 为 **1 起**（与 target.submit 的 picks 同口径）。
+            // 落账在 `host.Engine`（与 RandomSelections 同址）——动作面类不该知道运行时内部持有谁（D34）。
+            host.Engine.ChoiceSelections.Add(
+                new ChoiceSelectionRecord(host.Name, prompt, labels.ToArray(), index + 1, picked));
+
+            return index;
+        }
+
+        if (result.IsCancelled)
+        {
+            // D36⑤：FailAll（房间轮换／终局）与玩家取消在此不可区分——接受同形，但**消息必须中性**。
+            throw ChoiceFailed("cancelled", "可能来自玩家取消或对局收束（要分辨来源请查 TargetingTrace）",
+                prompt, labels.Length);
+        }
+
+        throw ChoiceFailed(
+            ReasonName(result.Reason ?? TargeterFailureReason.Other), result.Detail, prompt, labels.Length);
     }
+
+    /// <summary>
+    /// `choice` 失败的统一落点（D36）：**类型只有 <see cref="InvalidOperationException"/> 一种**，排障靠消息。
+    /// <para>
+    /// 对外只有一种语义——「这个节点没拿到裁决、效果必须中断」；类型分化会逼每个调用方维护一张 catch 表，
+    /// 而它们对每种因子的处理动作完全相同。
+    /// </para>
+    /// </summary>
+    private static InvalidOperationException ChoiceFailed(
+        string reason, string? detail, string prompt, int labelCount)
+    {
+        var message = $"choice-failed[{reason}]: 未取得裁决，整条效果中断"
+            + $"（prompt=\"{prompt}\"，选项数={labelCount}）";
+
+        if (!string.IsNullOrWhiteSpace(detail))
+        {
+            message += $"，detail={detail}";
+        }
+
+        return new InvalidOperationException(message);
+    }
+
+    /// <summary>
+    /// 失败因子 → 消息里的稳定词（D36②：`<reason>`＝枚举名小写连字符形态）。
+    /// <para>
+    /// **七个因子全部显式列支**（含本路径当前不可达的 <see cref="TargeterFailureReason.RetryLimitExceeded"/>／
+    /// <see cref="TargeterFailureReason.NoAvailableCandidates"/>）：「不可达」是实现判断、不是
+    /// <see cref="TargeterFailureReason"/> 的契约——显式列支保证 targeter 语义将来变化时至少有一行要改，
+    /// 而不是静默落进兜底。`_ =>` 兜底保留，但归入 <c>other</c> 并附枚举原值。
+    /// </para>
+    /// </summary>
+    private static string ReasonName(TargeterFailureReason reason) => reason switch
+    {
+        TargeterFailureReason.InvalidSelection => "invalid-selection",
+        TargeterFailureReason.RetryLimitExceeded => "retry-limit-exceeded",
+        TargeterFailureReason.NoAvailableCandidates => "no-available-candidates",
+        TargeterFailureReason.BridgeNotAssembled => "bridge-not-assembled",
+        TargeterFailureReason.GameEnded => "game-ended",
+        TargeterFailureReason.Fault => "fault",
+        TargeterFailureReason.Other => "other",
+        _ => $"other({reason})",
+    };
+
+    /// <summary>
+    /// 卡 → 归属玩家（本类自带一份 5 行 switch；**不复用** <see cref="EffectRuntime"/> 的私有同名面——
+    /// 跨类取用要么提升可见性〔＝动冻结面〕，要么绕道，两条都不划算，D34）。
+    /// </summary>
+    private static Orc.Game.Players.Player? OwnerOf(Card card) => card switch
+    {
+        Orc.Game.Players.Hq hq => hq.Owner,
+        CardBase cardBase => cardBase.Owner,
+        _ => null,
+    };
 
     /// <summary>
     /// <c>unitsOf</c> 节点的运行时实现：列出某阵营在某区域的单位。

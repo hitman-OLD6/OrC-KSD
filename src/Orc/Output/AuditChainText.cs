@@ -6,8 +6,9 @@ namespace Orc.Output;
 /// <summary>
 /// 审查链文本视图（S-C4；由 JSON 真源同源派生）：把 <see cref="AuditChain"/> 渲染为人类可读的缩进文本。
 /// 行结构（确定性、LF 换行）：
-/// 首行 = 审查链 + schema 版本；随后实体／成员／挂载边／包装四段（S10 的实体—成员—挂载边图）
-/// 与 nodes 段（每种触发器种类一行头部 + 事件行 + 下游边行 + 实例行）。空链＝仅首行与计数行。
+/// 首行 = 审查链 + schema 版本；随后实体／成员／挂载边／包装四段（S10 的实体—成员—挂载边图）、
+/// 包装载记录、随机选择器与 <c>choice</c> 抉择记录（R38），与 nodes 段（每种触发器种类一行头部 + 事件行 + 下游边行 + 实例行）。
+/// 空链＝仅首行与计数行。
 /// </summary>
 public static class AuditChainText
 {
@@ -23,6 +24,7 @@ public static class AuditChainText
         WriteGraph(sb, chain.Graph);
         WritePackages(sb, chain.Packages);
         WriteRandomSelectors(sb, chain.RandomSelectors);
+        WriteChoiceSelectors(sb, chain.ChoiceSelectors);
 
         sb.Append("nodes(").Append(chain.Nodes.Count).Append("):").Append('\n');
         foreach (var node in chain.Nodes)
@@ -55,6 +57,28 @@ public static class AuditChainText
             }
 
             sb.Append('\n');
+        }
+    }
+
+    /// <summary>
+    /// <c>choice</c> 抉择记录（R38 Q5／D35）：一行一条
+    /// <c>  &lt;viewer&gt; picked=&lt;n&gt;/&lt;total&gt; label=&lt;文案&gt; labels=[a|b] prompt=&lt;文案&gt;</c>。
+    /// <para>
+    /// <c>picked</c> 为 **1 起**、与 <c>target.submit</c> 的 <c>picks</c> 同口径；<c>/&lt;total&gt;</c> 让序号不必配合
+    /// <c>labels[]</c> 长度就能读；<c>|</c> 分隔是因为选项文案本身可能含逗号。
+    /// </para>
+    /// </summary>
+    private static void WriteChoiceSelectors(StringBuilder sb, IReadOnlyList<ChoiceSelectionRecord> records)
+    {
+        sb.Append("choiceSelectors(").Append(records.Count).Append("):").Append('\n');
+        foreach (var record in records)
+        {
+            sb.Append("  ").Append(record.Viewer)
+                .Append(" picked=").Append(record.Picked).Append('/').Append(record.Labels.Count)
+                .Append(" label=").Append(record.Label)
+                .Append(" labels=[").Append(string.Join("|", record.Labels)).Append(']')
+                .Append(" prompt=").Append(record.Prompt)
+                .Append('\n');
         }
     }
 
