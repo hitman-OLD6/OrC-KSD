@@ -12,8 +12,19 @@
     "activeWhen": "placed",
     "oneShot": false,
     "disposalSignal": "card.destroyed",
-    "authorizesModing": true,
     "isTemplate": false,
+    "slots": [
+      {
+        "name": "onDeployed",
+        "type": "handler",
+        "scope": "member",
+        "sealed": false,
+        "filled": true,
+        "runtimeEffect": true,
+        "enumValues": null
+      }
+    ],
+    "origin": null,
     "label": null,
     "description": null
   },
@@ -57,7 +68,13 @@
       ],
       "handlerSource": "dsl",
       "handlerId": "test.child.draft#onDeployed",
-      "mountedTo": [],
+      "mountedTo": [
+        {
+          "target": "engine#unit.deployed",
+          "member": "onDeployed",
+          "declaredBy": "test.parent"
+        }
+      ],
       "wrappedAt": [],
       "requiresImplementation": false,
       "label": null
@@ -846,6 +863,38 @@
         {
           "name": "Unit",
           "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Source",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        }
+      ]
+    },
+    {
+      "address": "engine#unit.attacked",
+      "member": "unit.attacked",
+      "timing": "any",
+      "owner": "engine.game",
+      "viewFields": [
+        {
+          "name": "Unit",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "Target",
+          "type": "entity",
+          "writable": false,
+          "required": false
+        },
+        {
+          "name": "ByEffect",
+          "type": "boolean",
           "writable": false,
           "required": false
         },
@@ -1767,6 +1816,17 @@
       "writableFields": []
     },
     {
+      "address": "engine#unit.attacked",
+      "member": "unit.attacked",
+      "supportedPhases": [
+        "before",
+        "after",
+        "replace"
+      ],
+      "seamNames": [],
+      "writableFields": []
+    },
+    {
       "address": "engine#unit.combat.survived",
       "member": "unit.combat.survived",
       "supportedPhases": [
@@ -1901,5 +1961,6 @@
       ]
     }
   ],
-  "diagnostics": []
+  "diagnostics": [],
+  "stage": 2
 }

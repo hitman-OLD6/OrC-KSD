@@ -320,9 +320,56 @@ record PrefabDescription(
 | `SeamNames` | handler 内部的具名缝（包装可挂点） |
 | `ViewFields` | 视图字段：名／类型／**可写**／必填 |
 | `HandlerSource` / `HandlerId` | 当前 handler 来源（`script`／`dsl`／`assembly-key`） |
-| `MountedTo` / `WrappedAt` | 已有挂载与包装 |
+| `MountedTo` / `WrappedAt` | 已有挂载与包装；**元素带声明者归属**（见 §5.2.1，破坏性变更） |
 
 **`ViewFields[].Writable` 是 `write` 节点可写字段的唯一依据。** 不要从别处推断。
+
+#### 5.2.1 挂载／包装的**声明者归属**（BREAKING，R40.8）
+
+同一份展开结果现在要能回答「**这条挂载是谁声明的**」——否则作者严格照着查询结果回写草案时，
+会把父已有的挂载再声明一遍，摊平期必然以 `structure` 失败，而错误里说的「父资产」在 DTO 里根本读不到。
+
+```csharp
+// 新：一条展开后的挂载引用（三个位置参数，无默认值）
+record PrefabMountReference(string Target, string Member, string DeclaredBy);
+
+// 变的两个字段（名字不变，元素形状变）
+IReadOnlyList<PrefabMountReference> MountedTo;   // 原：IReadOnlyList<string>
+PrefabWrapSummary WrappedAt;                     // 元素多一个位置参数 DeclaredBy
+
+// 共用的包装摘要（草案表的 Wraps 也是它）
+record PrefabWrapSummary(string Target, string Phase, string? Seam, string DeclaredBy);
+```
+
+**旧 → 新对照表**（字段名与 C# DTO 逐字一致，含大小写；线上 JSON 走 camelCase，故 `DeclaredBy` → `declaredBy`）：
+
+| 字段 | 旧 | 新 | 说明 |
+| --- | --- | --- | --- |
+| `PrefabMemberDescription.MountedTo` | `IReadOnlyList<string>`（目标地址） | `IReadOnlyList<PrefabMountReference>`：`{ Target, Member, DeclaredBy }` | 元素变富；数组本身仍表示「本成员被挂到哪些目标」 |
+| `PrefabMemberDescription.WrappedAt` | `PrefabWrapSummary[]`：`{ Target, Phase, Seam }` | `PrefabWrapSummary[]`：`{ Target, Phase, Seam, DeclaredBy }` | 多一个参数 |
+| `PrefabDraftSummary.Wraps` | `PrefabWrapSummary[]`：`{ Target, Phase, Seam }` | 同上（多 `DeclaredBy`） | 草案自有表里该值**恒等于草案 id** |
+| `PrefabDraftSummary.Mounts` | `PrefabDeclarationSummary[]`：`{ Target, Member }` | **无变化** | 草案表只含本层，`DeclaredBy` 是噪音，不加 |
+
+> **这是破坏性变更（BREAKING）**，不是纯增量：`MountedTo` 从字符串数组变成了对象数组。
+> 不设双出口（不保留旧的纯字符串列表、不另开平行列表、不加 `isInherited` 布尔）——
+> 同一事实只留一处出口，两个出口必然漂移。
+
+**前端最小改法**（两行）：
+
+1. 把 `MountedTo` 当**对象数组**读：`mountedTo.map(m => m.target)` 才是原来的字符串数组。
+2. 判断「父是否已经声明过某条挂载」：`declaredBy !== 本资产 id`（`PrefabDescription.PrefabAssetId` / 草案的 `DraftAssetId`）。
+   **不要**再找一个 `isInherited` 布尔——它不存在，也不会加。
+
+`declaredBy` 的语义与边界：
+
+| 场景 | 值 |
+| --- | --- |
+| 草案自有的条目（`Draft.Wraps`、草案重载成员时本层写的挂载） | 草案 id |
+| 继承而来的条目（含三层链 `T ← A ← 草案`） | **真正写下它的那个资产 id**（上例＝`T`，不是「直接父层」`A`） |
+| `named`／`inline` 实例化的产物 | 产物 id（`inline`＝内部缓存键） |
+
+**纪律（必须遵守）**：**展开表只读展示，草案表增量追加；把展开表原样回写草案＝`structure` 失败，属预期行为**。
+展开表是「父的现状 ＋ 草案的增量」的合并视图，把它整份抄进草案等于把父的每条挂载再声明一遍。
 
 > 完整结构别靠文档想象：契约包里有一份**真实输出**
 > （`prefab-description.sample.json`，含 2 个成员、39 个可挂载目标、75 个可包装成员），
