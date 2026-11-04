@@ -36,6 +36,25 @@ public sealed class MatchOptions
     /// </summary>
     public bool AllowFirstTurnDraw { get; init; }
 
+    // ---------- 宿主装配面（csx 求值器） ----------
+
+    /// <summary>
+    /// 宿主提供的脚本求值器（缺省 <c>null</c>＝由 <c>Match</c> 构造器装引擎默认实现
+    /// <c>Orc.Script.CSharpScriptEvaluator</c>）。
+    /// <para>
+    /// **为什么需要这个入口**：<c>Match</c> 构造器在建局期就要用求值器**预编译内建词条效果组件**
+    /// （<c>KeywordComponentLibrary.LoadInto</c>，见 <c>Match</c> 构造器末段）——那一刻宿主还没有拿到
+    /// <see cref="LogicEngine"/> 引用，无法事后赋值 <c>Engine.ScriptEvaluator</c>。宿主若运行在
+    /// **按字节加载程序集**的运行时里（Godot／Unity 等），引擎默认求值器取不到 <c>Assembly.Location</c>，
+    /// 引用集为空 → 全部词条 csx 编译失败 → 对局开不起来。此入口让宿主在建局前就把自己的求值器交进来。
+    /// </para>
+    /// <para>
+    /// 语义：只作为 <c>Engine.ScriptEvaluator</c> 的**初值**（<c>??=</c> 链首），引擎不读它的其它字段、
+    /// 不做任何校验；传 <c>null</c> 与不传完全等价（既有宿主零行为变化）。
+    /// </para>
+    /// </summary>
+    public Orc.Core.IScriptEvaluator? ScriptEvaluator { get; init; }
+
     // ---------- 沙盒调试原语（授权事实） ----------
 
     /// <summary>

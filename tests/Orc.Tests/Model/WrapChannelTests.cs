@@ -216,8 +216,9 @@ public class WrapChannelTests
         Assert.Equal(WrapTarget.ForMember(address).Key, outerWrap.Target.Key);
 
         // 包装器不携带"成员＋来源"的二级地址：只有目标＋相位＋资产（＋缝名这一维度）。
+        // `DeclaredBy` 是 R40.8／D52 的**内存态归属**（不参与序列化），不是地址维度——它不改变本条的结论。
         Assert.Equal(
-            new[] { "HandlerId", "Phase", "Seam", "Target" },
+            new[] { "DeclaredBy", "HandlerId", "Phase", "Seam", "Target" },
             typeof(WrapDeclaration).GetProperties().Select(static p => p.Name).OrderBy(static n => n, StringComparer.Ordinal).ToArray());
     }
 

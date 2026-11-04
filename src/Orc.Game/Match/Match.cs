@@ -185,6 +185,11 @@ public sealed class Match
         // 批次 4（S14）：**提前到构造期**——装载门要求 csx 在装载期全量预编译（S5 第 9 条），
         // 而效果库目录的装载发生在 Initialize 之前（卡加载链解析效果引用所必需）。
         // 内核零依赖口径不变（接口倒置），实现由 satellite（Orc.Script）提供；宿主已装配＝不覆盖。
+        // 宿主装配面（v4-host-script-evaluator-20261028.patch）：宿主可经 MatchOptions.ScriptEvaluator 在建局前
+        // 交入自己的求值器——本构造器末段的内建词条组件预编译发生在宿主拿到 Engine 引用之前，按字节加载程序集的
+        // 宿主（Godot／Unity）若拿不到这个入口，就只能用引擎默认求值器，而后者取不到 Assembly.Location
+        // ＝引用集为空＝词条 csx 全部编译失败。
+        Engine.ScriptEvaluator ??= resolvedOptions.ScriptEvaluator;
         Engine.ScriptEvaluator ??= new Orc.Script.CSharpScriptEvaluator();
 
         // handler DSL（S8／R28）：把「编译器 ＋ 目录」装到引擎上——含 DSL 成员的草案在装载期现场生成 csx。

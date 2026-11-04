@@ -214,7 +214,8 @@ internal static class PrefabDescriber
             handlerId,
             type.Mounts
                 .Where(mount => string.Equals(mount.Member, member.Name, StringComparison.Ordinal))
-                .Select(static mount => mount.Target)
+                .Select(static mount => new PrefabMountReference(
+                    mount.Target, mount.Member, mount.DeclaredBy!))
                 .ToArray(),
             type.Wraps
                 .Where(wrap => wrap.Target.IsMember
@@ -222,7 +223,8 @@ internal static class PrefabDescriber
                 .Select(static wrap => new PrefabWrapSummary(
                     wrap.Target.Address.ToString(),
                     PhaseName(wrap.Phase),
-                    wrap.Seam))
+                    wrap.Seam,
+                    wrap.DeclaredBy!))
                 .ToArray(),
             requiresImplementation,
             label);
@@ -250,7 +252,7 @@ internal static class PrefabDescriber
                 .ToArray(),
             SourceNameOf(declared.Handler),
             declared.Handler?.Id,
-            Array.Empty<string>(),
+            Array.Empty<PrefabMountReference>(),
             Array.Empty<PrefabWrapSummary>(),
             // 草案新增的成员：实现与否由草案自己决定（新增成员不是模板抽象位）。
             RequiresImplementation: false,
@@ -447,10 +449,12 @@ internal static class PrefabDescriber
                 .Select(static m => new PrefabDeclarationSummary(m.Target, m.Member))
                 .ToArray(),
             asset.Wraps
-                .Select(static w => new PrefabWrapSummary(
+                .Select(w => new PrefabWrapSummary(
                     w.Target.IsMember ? w.Target.Address.ToString() : "judicator:" + w.Target.Judicator,
                     PhaseName(w.Phase),
-                    w.Seam))
+                    w.Seam,
+                    // 草案自有表：声明者恒等于草案 id（D53 明定的唯一「填常量」处）。
+                    w.DeclaredBy ?? asset.Id))
                 .ToArray());
     }
 
@@ -670,15 +674,18 @@ internal static class PrefabDescriber
                     .ToArray(),
                 SourceNameOf(member.Handler),
                 member.Handler?.Id,
-                type.Mounts
+                // 挂载／包装取**产物**（record.Asset）：其归属已由展开核改写为产物 id（D52），
+                // 与 Save 之后从文件重新展开得到的值相同（S37 的「Save 前后一致」验收）。
+                record.Asset.Mounts
                     .Where(mount => string.Equals(mount.Member, member.Name, StringComparison.Ordinal))
-                    .Select(static mount => mount.Target)
+                    .Select(static mount => new PrefabMountReference(
+                        mount.Target, mount.Member, mount.DeclaredBy!))
                     .ToArray(),
-                type.Wraps
+                record.Asset.Wraps
                     .Where(wrap => wrap.Target.IsMember
                                    && string.Equals(wrap.Target.Address.Member, member.Name, StringComparison.Ordinal))
                     .Select(static wrap => new PrefabWrapSummary(
-                        wrap.Target.Address.ToString(), PhaseName(wrap.Phase), wrap.Seam))
+                        wrap.Target.Address.ToString(), PhaseName(wrap.Phase), wrap.Seam, wrap.DeclaredBy!))
                     .ToArray(),
                 RequiresImplementation: member.IsUnfilledSlot,
                 member.Label));

@@ -111,8 +111,8 @@ public sealed record PrefabSlotDescription(
 /// <param name="DeclaredParentId">草案声明的父 id（与查询的父不一致＝诊断）。</param>
 /// <param name="OverriddenMembers">被重载的成员名（草案声明且父里已存在）。</param>
 /// <param name="AddedMembers">新增的成员名（草案声明且父里没有）。</param>
-/// <param name="Mounts">草案声明的挂载（<c>作用域#成员名</c> → 成员名）。</param>
-/// <param name="Wraps">草案声明的包装（目标地址＋相位）。</param>
+/// <param name="Mounts">草案声明的挂载（<c>作用域#成员名</c> → 成员名）。**字段集不变**（R40.8：草案表只含本层，`declaredBy` 恒等于草案 id，属噪音）。</param>
+/// <param name="Wraps">草案声明的包装（目标地址＋相位＋声明者，`declaredBy` 恒等于草案 id）。</param>
 public sealed record PrefabDraftSummary(
     string Path,
     string DraftAssetId,
@@ -127,11 +127,31 @@ public sealed record PrefabDraftSummary(
 /// <param name="Member">被挂载／被包装的成员名。</param>
 public sealed record PrefabDeclarationSummary(string Target, string Member);
 
+/// <summary>
+/// 展开后的一条**挂载引用**（R40.8／D53）：目标地址 ＋ 被挂载成员 ＋ **声明者资产 id**。
+/// <para>
+/// 声明者粒度＝真正写下这条声明的资产（三层链 <c>T ← A ← 草案</c> 上报 <c>T</c>，不是「直接父层」）；
+/// 草案自有条目＝草案 id；实例化产物＝产物 id（<c>inline</c>＝缓存键）。
+/// </para>
+/// <para>
+/// **不提供** <c>isInherited</c> 一类布尔：同一事实只留一处出口，「本层没写过」＝
+/// <see cref="DeclaredBy"/> != 本资产 id 单条判据（粗化成布尔会造出第二套口径，两套必然漂移）。
+/// </para>
+/// </summary>
+/// <param name="Target">目标地址（<c>作用域#成员名</c>；原文，不做作用域归一化）。</param>
+/// <param name="Member">被挂载的成员名。</param>
+/// <param name="DeclaredBy">声明该挂载的资产 id（恒非 null）。</param>
+public sealed record PrefabMountReference(string Target, string Member, string DeclaredBy);
+
 /// <summary>一条包装声明摘要。</summary>
 /// <param name="Target">目标地址（<c>作用域#成员名</c>）。</param>
 /// <param name="Phase">相位（<c>before</c>／<c>after</c>／<c>replace</c>）。</param>
 /// <param name="Seam">具名缝（null＝成员外围）。</param>
-public sealed record PrefabWrapSummary(string Target, string Phase, string? Seam);
+/// <param name="DeclaredBy">
+/// 声明者资产 id（R40.8／D53；恒非 null）：展开表里＝真正写它的资产，草案自有表里＝草案 id。
+/// **位置参数**（不是可缺省的 <c>init</c> 属性）：漏填必须编译失败，否则会出现「某些条目没声明者」的三态。
+/// </param>
+public sealed record PrefabWrapSummary(string Target, string Phase, string? Seam, string DeclaredBy);
 
 /// <summary>
 /// 展开后的一个成员（R24 第 1 条）。**继承／本层标注**由 <see cref="Inherited"/>／<see cref="Overridden"/>／
@@ -159,8 +179,8 @@ public sealed record PrefabWrapSummary(string Target, string Phase, string? Seam
 /// <param name="ViewFields">视图字段（名／类型／可写／必填）。</param>
 /// <param name="HandlerSource">handler 来源（<c>script</c>／<c>dsl</c>／<c>assembly-key</c>；无 handler＝null）。</param>
 /// <param name="HandlerId">handler 资产 id（无 handler＝null）。</param>
-/// <param name="MountedTo">本成员被挂到哪些目标地址（已有挂载）。</param>
-/// <param name="WrappedAt">本成员被哪些包装声明指向（目标地址＋相位）。</param>
+/// <param name="MountedTo">本成员被挂到哪些目标（展开后；每条带声明者资产 id，R40.8）。</param>
+/// <param name="WrappedAt">本成员被哪些包装声明指向（目标地址＋相位＋声明者，R40.8）。</param>
 /// <param name="Label">展示名（R35；null＝未声明，前端回退显示 <see cref="Name"/>）。</param>
 public sealed record PrefabMemberDescription(
     string Name,
@@ -178,7 +198,7 @@ public sealed record PrefabMemberDescription(
     IReadOnlyList<PrefabViewFieldDescription> ViewFields,
     string? HandlerSource,
     string? HandlerId,
-    IReadOnlyList<string> MountedTo,
+    IReadOnlyList<PrefabMountReference> MountedTo,
     IReadOnlyList<PrefabWrapSummary> WrappedAt,
     bool RequiresImplementation = false,
     string? Label = null);

@@ -262,16 +262,20 @@ public static class PrefabExpander
             errors);
 
         // ⑦ 组装产物资产（R8 第 4 条：不含 extends；产物不自动获得「可被 moding」的授权）。
+        //    归属改写（R40.8／D52 的第 2 处填值）：产物没有 extends ⇒ 条目的声明者恒为**产物 id**
+        //    （inline＝缓存键）。`WithDeclarer` 返回**副本**、产物列表是**新 List**——`type` 是
+        //    `PrefabCatalog._resolved` 缓存的同一个实例，就地改写会让同模板的两次 named 实例化互相污染。
+        var resultId = request.ResultId ?? leaf.Id;
         var product = new ComponentAsset(
-            request.ResultId ?? leaf.Id,
+            resultId,
             parent?.RequiresHost ?? type.RequiresHost,
             parent?.ActiveWhen ?? type.ActiveWhen,
             parent?.OneShot ?? type.OneShot,
             parent?.DisposalSignal ?? type.DisposalSignal,
             privateFields,
             output,
-            type.Mounts,
-            type.Wraps,
+            type.Mounts.Select(mount => mount.WithDeclarer(resultId)).ToArray(),
+            type.Wraps.Select(wrap => wrap.WithDeclarer(resultId)).ToArray(),
             CollectJudgeWraps(type.Chain, request.Declarations),
             extends: null,
             label: null,

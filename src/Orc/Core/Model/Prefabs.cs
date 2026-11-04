@@ -206,6 +206,13 @@ public sealed class PrefabType
         RequiresHost = requiresHost;
         Members = members;
         PrivateFields = privateFields;
+
+        // 归属不变量（R40.8／D52）：**进目录即必须非 null**。填值只有两处——`Build`（本资产 id）与产物组装
+        // （产物 id）；这里兜底，让任何绕过合并核的构造立刻炸，而不是把 null 漏到 DTO（DTO 侧无判空分支）。
+        // 用真实抛出而不是 `Debug.Assert`：Release 下断言不生效，兜底面就等于不存在。
+        EnsureDeclared(mounts, "挂载", leaf.Id);
+        EnsureDeclared(wraps, "包装", leaf.Id);
+
         Mounts = mounts;
         Wraps = wraps;
         Components = components;
@@ -352,6 +359,40 @@ public sealed class PrefabType
 
     /// <summary>成员名清单（声明序）。</summary>
     public IReadOnlyList<string> MemberNames => Members.Select(static m => m.Name).ToArray();
+
+    /// <summary>
+    /// 归属不变量（R40.8／D52）：挂载／包装条目必须带声明者。
+    /// </summary>
+    /// <exception cref="InvalidOperationException">有条目缺声明者（有构造路径绕过了合并核）。</exception>
+    private static void EnsureDeclared(
+        IReadOnlyList<MountDeclaration> mounts, string kind, string ownerId)
+    {
+        foreach (var mount in mounts)
+        {
+            if (mount.DeclaredBy is null)
+            {
+                throw new InvalidOperationException(
+                    $"预制体 '{ownerId}' 的{kind}声明 '{mount.Target}' → '{mount.Member}' 缺少声明者归属（DeclaredBy）："
+                    + "归属只能在 PrefabCatalog.Build 与产物组装两处填写，出现 null ＝有构造路径绕过了合并核（R40.8／D52）。");
+            }
+        }
+    }
+
+    /// <inheritdoc cref="EnsureDeclared(IReadOnlyList{MountDeclaration}, string, string)" />
+    /// <exception cref="InvalidOperationException">有条目缺声明者。</exception>
+    private static void EnsureDeclared(
+        IReadOnlyList<WrapDeclaration> wraps, string kind, string ownerId)
+    {
+        foreach (var wrap in wraps)
+        {
+            if (wrap.DeclaredBy is null)
+            {
+                throw new InvalidOperationException(
+                    $"预制体 '{ownerId}' 的{kind}声明 '{wrap.Target.Key}' 缺少声明者归属（DeclaredBy）："
+                    + "归属只能在 PrefabCatalog.Build 与产物组装两处填写，出现 null ＝有构造路径绕过了合并核（R40.8／D52）。");
+            }
+        }
+    }
 }
 
 /// <summary>
@@ -539,15 +580,57 @@ public sealed class PrefabCatalog
             privateFields.Add(field);
         }
 
+        // 挂载／包装的**唯一性**（R40.1／R40.2／R40.5）：判定点＝合并核（摊平／资产装载／inline／named 实例化
+        // 三条路径唯一的交汇处），末端（MountPlanner／AssetPackLoader）不另加判据。
+        // 范围＝整条继承链 ＋ 本层内部；父列表在自己的那层已校验过（Build 递归），故只需比 own×parent 与 own×own。
+        // 判定键：mounts＝(target, member) 原文 Ordinal（target 不做作用域归一化——host#x 与 engine#x 是两条边）；
+        //        wraps＝Target.Key（已含 @seam）＋Phase＋HandlerId（等价 R40.2 的「目标, phase, handler, seam」四元组）。
+        // 不设 override 通道（R40.3）：两条相同声明之间没有任何可表达的差异，显式 override 与删掉子那条结果等价，
+        // 加字段等于给重复发许可证。
         var mounts = parent is null
             ? new List<MountDeclaration>()
             : new List<MountDeclaration>(parent.Mounts);
-        mounts.AddRange(definition.Mounts);
+        foreach (var mount in definition.Mounts)
+        {
+            // 归属（R40.8／D52）：未设置 → 本资产 id（另一处填值是产物组装）。
+            var declared = mount.DeclaredBy is null ? mount.WithDeclarer(definition.Id) : mount;
+            var existing = mounts.FirstOrDefault(
+                m => string.Equals(m.Target, declared.Target, StringComparison.Ordinal)
+                     && string.Equals(m.Member, declared.Member, StringComparison.Ordinal));
+            if (existing is not null)
+            {
+                throw new PrefabLoadException(
+                    PrefabErrorCategories.Structure,
+                    $"预制体 '{definition.Id}' 重复声明挂载 '{declared.Target}' → '{declared.Member}'："
+                    + $"已由资产 '{existing.DeclaredBy}' 声明，资产 '{declared.DeclaredBy}' 又声明了一次"
+                    + "（同一 (target, member) 在整条继承链上至多一条；挂载没有可改的参数，故不提供 override 通道，R40.1／R40.3）。");
+            }
+
+            mounts.Add(declared);
+        }
 
         var wraps = parent is null
             ? new List<WrapDeclaration>()
             : new List<WrapDeclaration>(parent.Wraps);
-        wraps.AddRange(definition.Wraps);
+        foreach (var wrap in definition.Wraps)
+        {
+            var declared = wrap.DeclaredBy is null ? wrap.WithDeclarer(definition.Id) : wrap;
+            var existing = wraps.FirstOrDefault(
+                w => string.Equals(w.Target.Key, declared.Target.Key, StringComparison.Ordinal)
+                     && w.Phase == declared.Phase
+                     && string.Equals(w.HandlerId, declared.HandlerId, StringComparison.Ordinal));
+            if (existing is not null)
+            {
+                throw new PrefabLoadException(
+                    PrefabErrorCategories.Structure,
+                    $"预制体 '{definition.Id}' 重复声明包装 '{declared.Target.Key}'（phase={declared.Phase}，"
+                    + $"handler='{declared.HandlerId}'）：已由资产 '{existing.DeclaredBy}' 声明，"
+                    + $"资产 '{declared.DeclaredBy}' 又声明了一次"
+                    + "（同一 (目标, phase, handler, seam) 在整条继承链上至多一条；包装没有可改的参数，故不提供 override 通道，R40.2／R40.3）。");
+            }
+
+            wraps.Add(declared);
+        }
 
         var components = parent is null
             ? new List<string>()

@@ -318,7 +318,7 @@ public class PrefabDescriptionTests : IDisposable
             "members": [
               {
                 "name": "onDeployed",
-                "visibility": [ "callable", "hostable" ],
+                "visibility": [ "callable", "hostable", "mountable" ],
                 "view": {
                   "fields": [
                     { "name": "Defense", "type": "number", "writable": true, "required": false },
@@ -333,7 +333,8 @@ public class PrefabDescriptionTests : IDisposable
                 }
               }
             ],
-            "mounts": [],
+            // R40.8：契约样本**必须**至少含一条挂载，否则空数组看不出 `declaredBy`（BREAKING 变更在样本里不可见）。
+            "mounts": [ { "target": "engine#unit.deployed", "member": "onDeployed" } ],
             "wraps": []
           }
         }

@@ -16,6 +16,11 @@ public sealed class MountDeclaration
     /// <param name="source">边来源（默认作者显式声明）。</param>
     /// <exception cref="ArgumentException">target／member 为空或纯空白。</exception>
     public MountDeclaration(string target, string member, string? phase = null, EdgeSource source = EdgeSource.Explicit)
+        : this(target, member, phase, source, declaredBy: null)
+    {
+    }
+
+    private MountDeclaration(string target, string member, string? phase, EdgeSource source, string? declaredBy)
     {
         if (string.IsNullOrWhiteSpace(target))
         {
@@ -31,6 +36,7 @@ public sealed class MountDeclaration
         Member = member;
         Phase = phase;
         Source = source;
+        DeclaredBy = declaredBy;
     }
 
     /// <summary>目标地址原文（<c>作用域#成员名</c>）。</summary>
@@ -44,6 +50,27 @@ public sealed class MountDeclaration
 
     /// <summary>边来源。</summary>
     public EdgeSource Source { get; }
+
+    /// <summary>
+    /// **声明者归属**（R40.8／D52）：写明这条挂载的**资产 id**（草案自有＝草案 id，继承而来＝真正写它的那个资产 id，
+    /// 产物组装＝产物 id，<c>inline</c>＝缓存键）。
+    /// <para>
+    /// **内存态元数据**：不参与相等／哈希／序列化，落盘即丢（`AssetSchema.Write` 逐字段列举，不写本属性）。
+    /// **可空**只允许出现在「尚未进目录的声明对象」上——`PrefabType` 内的条目由
+    /// <see cref="PrefabCatalog.Build"/> 与产物组装两处填值，恒非 null。
+    /// </para>
+    /// </summary>
+    public string? DeclaredBy { get; }
+
+    /// <summary>
+    /// 带声明者的**副本**（不改原对象）：归属只有一个落点，故只提供副本式写入（R40 的缓存不污染硬要求）。
+    /// </summary>
+    /// <exception cref="ArgumentException">id 为空或纯空白。</exception>
+    public MountDeclaration WithDeclarer(string id)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        return new MountDeclaration(Target, Member, Phase, Source, id);
+    }
 }
 
 /// <summary>
@@ -163,6 +190,12 @@ public sealed class WrapDeclaration
     /// handlerId 为空或纯空白；seam 为纯空白；seam 配判定器目标；seam 配 after／replace 相位。
     /// </exception>
     public WrapDeclaration(WrapTarget target, WrapperPhase phase, string handlerId, string? seam = null)
+        : this(target, phase, handlerId, seam, declaredBy: null)
+    {
+    }
+
+    private WrapDeclaration(
+        WrapTarget target, WrapperPhase phase, string handlerId, string? seam, string? declaredBy)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(handlerId);
 
@@ -194,6 +227,7 @@ public sealed class WrapDeclaration
         Phase = phase;
         HandlerId = handlerId;
         Seam = effective;
+        DeclaredBy = declaredBy;
     }
 
     /// <summary>包装目标（seam 非 null 时已带缝名，见 <see cref="WrapTarget.Seam"/>）。</summary>
@@ -210,6 +244,20 @@ public sealed class WrapDeclaration
     /// <para>非 null 时包装只在 handler 内的 <c>ctx.SeamAsync(缝名)</c> 处执行（LIFO）。</para>
     /// </summary>
     public string? Seam { get; }
+
+    /// <summary>
+    /// **声明者归属**（R40.8／D52）：与 <see cref="MountDeclaration.DeclaredBy"/> 同一口径——
+    /// 写明这条包装的资产 id，内存态元数据、不参与相等／哈希／序列化、落盘即丢。
+    /// </summary>
+    public string? DeclaredBy { get; }
+
+    /// <summary>带声明者的**副本**（不改原对象；归属只有一个落点，故只提供副本式写入）。</summary>
+    /// <exception cref="ArgumentException">id 为空或纯空白。</exception>
+    public WrapDeclaration WithDeclarer(string id)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        return new WrapDeclaration(Target, Phase, HandlerId, Seam, id);
+    }
 
     /// <summary>便捷构造：包装成员。</summary>
     public static WrapDeclaration ForMember(string memberAddress, WrapperPhase phase, string handlerId)
