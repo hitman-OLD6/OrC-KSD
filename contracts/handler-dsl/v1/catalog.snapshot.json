@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "catalogRevision": 223446220,
+  "catalogRevision": 1662329392,
   "scannedFaces": [
     "Orc.Game.Cards.KeywordEffectActionFace",
     "Orc.Game.Effects.EffectRuntime"
@@ -131,6 +131,65 @@
         {
           "name": "result",
           "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "attackByEffect",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "AttackByEffectAsync",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "attacker",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "attackCandidates",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "AttackCandidates",
+        "faceType": "Orc.Game.Effects.EffectRuntime"
+      },
+      "hasAwait": false,
+      "hasSideEffect": false,
+      "inputs": [
+        {
+          "name": "attacker",
+          "type": "entity",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "list\u003Centity\u003E",
           "required": true
         }
       ]
@@ -357,6 +416,35 @@
           "required": true
         }
       ]
+    },
+    {
+      "name": "exchange",
+      "source": {
+        "face": "EffectRuntime",
+        "method": "ExchangeAsync",
+        "faceType": "Orc.Game.Effects.EffectRuntime",
+        "tokenParameter": "ct"
+      },
+      "hasAwait": true,
+      "hasSideEffect": true,
+      "inputs": [
+        {
+          "name": "first",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "second",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": true
+        }
+      ],
+      "outputs": []
     },
     {
       "name": "fetchFromDeck",

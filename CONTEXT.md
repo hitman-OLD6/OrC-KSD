@@ -380,8 +380,8 @@ _Avoid_: 无损往返、格式化保真
 _Avoid_: 校验脚本、linter
 
 **csx 动态效果（能力）**：
-csx 创作者经 `EffectRuntime` 受控门面在局中动态挂载/卸载/生成效果的受控能力（`AttachPrefabAsync`／`AttachSnapshotAsync`／`CompileAttachAsync`／`DetachEffectAsync`；统一 9 类状态结果与不透明挂载凭据）；机制沿用统一装载链（失败完整回滚、托管随卡销毁撤销）；弱沙箱前提（同进程、非安全边界）。
-_Avoid_: 运行时脚本注入、热插拔
+csx 创作者经 `EffectRuntime` 受控门面在局中动态挂载/卸载/生成效果的受控能力（`AttachPrefabAsync`／`AttachSnapshotAsync`／`CompileAttachAsync`／`DetachEffectAsync`）；三条挂载入口返回**挂载凭据** `GrantHandle`（撤销只认凭据、重复撤销幂等），失败抛 `InvalidOperationException`（不静默挂空壳、不另立结果体系）；机制沿用统一装载链（失败完整回滚、期限 `UntilDestroyed` 随宿主销毁撤销）；弱沙箱前提（同进程、非安全边界）。
+_Avoid_: 运行时脚本注入、热插拔、9 类状态结果（该设计已随效果链删除，勿再引用）
 
 **沙盒模式**：
 服务层的**运行模式**（不是引擎的运行态）：该模式下对外暴露调试类工具（资产/定义层 + 对局塑造），并允许创建沙盒对局；非沙盒模式（player）的工具清单中**不存在**这些能力。引擎侧不新增沙盒标志或硬门。

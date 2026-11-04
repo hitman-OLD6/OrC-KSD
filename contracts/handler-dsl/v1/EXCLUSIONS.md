@@ -54,6 +54,14 @@
 | `ChooseAsync` | 内建 `choice` 节点的**运行时实现**（选项呈现），不是给作者连线的原语 | 用 `choice` 节点：本方法只由生成码调用（**注意**：见下方「运行时能力现状」） |
 | `ReadValue` | `read` 变体的**运行时读取入口**（`read.path` → 实时值），不是给作者连线的原语 | 用 `read` 变体：本方法只由生成码调用 |
 | `OwnerUnits` | **查询**而非动作：首参 `host` 是「查谁的」这个数据参数，不是执行宿主；却因名字落在隐式宿主白名单（`host`／`viewer`／`self`）里被当成服务宿主，生成的 `host: orcSelf` 还附加 `Card`→`CardBase` 的向下转换失败 | 用 `read`（属性读取）或脚本节点；若要「遍历某人拥有的单位」，应由新增的只读 path／目录节点承担，而不是伪装成动作节点 |
+| `OpponentOf` | 形参/返回值含 `Player`，非引脚类型（封闭集 `entity`/`number`/`string`/`boolean`/`list<T>`，实体子类型只到 `unit`/`hq`/`card`）；图形化节点需要新增 `player` 引脚类型，属独立需求 | 只能脚本节点 |
+| `PickHandCardsForAsync` | 形参/返回值含 `Player`，非引脚类型（封闭集 `entity`/`number`/`string`/`boolean`/`list<T>`，实体子类型只到 `unit`/`hq`/`card`）；图形化节点需要新增 `player` 引脚类型，属独立需求 | 只能脚本节点 |
+| `ShuffleIntoDeckAsync` | 形参/返回值含 `Player`，非引脚类型（封闭集 `entity`/`number`/`string`/`boolean`/`list<T>`，实体子类型只到 `unit`/`hq`/`card`）；图形化节点需要新增 `player` 引脚类型，属独立需求 | 只能脚本节点 |
+| `TutorFromDeckAsync` | **两个重载都表达不了**：①兵种数组版的 `unitTypes` 是 `list<string>` 引脚——v1 表达式（`lit`／`var`／`view`／`read`／`ask`／聚合算子）**没有任何形态能产出一个字符串列表**，图形化无法填值；②谓词版含 `Func<Card,bool>`，封闭集表达不了委托，`[HandlerDslPin]` 只能覆盖单个参数类型 | 只能脚本节点；图形化侧无等价动作（要让它进目录需先扩契约：为字符串列表提供产出形态） |
+| `AttachPrefabAsync` | 返回 `GrantHandle`（挂载凭据——封口类型，不在引脚封闭集内）；默认规则与标注都表达不了，且凭据必须被调用方持有（没有它就无法撤销） | 只能脚本节点；图形化侧不提供授予节点（授予与撤销是一对，缺凭据的一侧不成立） |
+| `AttachSnapshotAsync` | 形参 `EffectSnapshot`（引擎对象）与返回值 `GrantHandle` 都不在引脚封闭集内；图形化没有「内联快照」这一承载形态 | 只能脚本节点 |
+| `CompileAttachAsync` | 返回 `GrantHandle` 不在引脚封闭集内；且「DSL 文本 → 快照」是编译期动作，图上节点本身就是 DSL，再嵌一层文本等于在 DSL 里开第二套 DSL | 只能脚本节点 |
+| `DetachEffectAsync` | 入参 `GrantHandle`（挂载凭据）不在引脚封闭集内，图形化也无法持有凭据；改成「按效果 id 反查撤销」在同卡同效果多实例时无法仲裁——那是错误的撤销语义 | 只能脚本节点（凭据由 `attach` 一侧的脚本节点持有） |
 
 ## B. 延后（可拆，本轮未拆；补标注即可进目录）
 
