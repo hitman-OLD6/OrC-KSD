@@ -145,12 +145,22 @@ public static class AssetSchema
                 + $"（kind='{ModingKind}'）；卡牌/引擎由类型预制体声明（R3g／R6b）。");
         }
 
+        RejectAbolishedFields(element, id, source);
+
         var extends = OptionalString(element, "extends");
-        // 无缺省值：null＝**未声明**，与显式 false 区分（D29 的二分——抽象资产未声明＝推导 true、显式 false＝拒绝）。
-        var authorizesModing = OptionalBool(element, "authorize-moding");
-        var isAbstract = OptionalBool(element, "abstract") ?? false;
         var label = OptionalString(element, "label");
         var description = OptionalString(element, "description");
+        var slots = ReadSlots(element, source);
+        var origin = ReadOrigin(element, source);
+        var save = OptionalString(element, "save");
+        try
+        {
+            save = SavePolicy.Normalize(save);
+        }
+        catch (ArgumentException ex)
+        {
+            throw Error(PrefabErrorCategories.Structure, source, ex.Message);
+        }
 
         var requiresHost = ParseHostKind(OptionalString(element, "requires-host") ?? "any", source);
         var activeWhen = ParseActiveWhen(OptionalString(element, "active-when"));
@@ -277,13 +287,192 @@ public static class AssetSchema
         {
             return new ComponentAsset(
                 id, requiresHost, activeWhen, oneShot, disposalSignal, privateFields, members, mounts, wraps, judgeWraps,
-                extends, authorizesModing, isAbstract, label, description);
+                extends, label, description, slots, origin, save);
         }
         catch (ArgumentException ex)
         {
             throw Error(PrefabErrorCategories.Structure, source, ex.Message);
         }
     }
+
+    /// <summary>
+    /// 读取可选的**出身记录** <c>origin</c>（R39 裁决 10／S30／S31）。
+    /// <para>
+    /// **纯元数据**：不解析 <c>templateId</c>／<c>draftId</c>、不要求它们存在、不影响任何字段——
+    /// 读档不重新展开（origin 不是依赖）。字段全空＝null（与手写资产同形）。
+    /// </para>
+    /// </summary>
+    private static AssetOrigin? ReadOrigin(JsonElement element, string source)
+    {
+        if (!element.TryGetProperty("origin", out var origin) || origin.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (origin.ValueKind != JsonValueKind.Object)
+        {
+            throw Error(PrefabErrorCategories.Structure, source, "origin 必须是对象。");
+        }
+
+        var templateId = OptionalString(origin, "templateId");
+        var draftId = OptionalString(origin, "draftId");
+        var argsHash = OptionalString(origin, "argsHash");
+        var args = origin.TryGetProperty("args", out var argsElement)
+            ? AssetOrigin.ReadArgs(argsElement, source)
+            : null;
+
+        return templateId is null && draftId is null && argsHash is null
+            ? null
+            : new AssetOrigin(templateId, draftId, argsHash, args);
+    }
+
+    /// <summary>
+    /// 读取**资产级空位** <c>slots[]</c>（R39 裁决 8；缺省＝空数组＝无空位）。
+    /// <para>
+    /// 封闭校验：类型必须是前五种（<c>handler</c> 属成员级，放错层＝拒绝）；
+    /// <c>enum</c> 必须带非空且唯一的 <c>values</c>；其余类型不得带 <c>values</c>；
+    /// <c>value</c> 必须与类型相符且（enum）落在取值集内——**装载期**校验，不推迟到运行期。
+    /// </para>
+    /// </summary>
+    private static IReadOnlyList<AssetSlotDeclaration> ReadSlots(JsonElement element, string source)
+    {
+        if (!element.TryGetProperty("slots", out var slotsElement))
+        {
+            return System.Array.Empty<AssetSlotDeclaration>();
+        }
+
+        var slots = new List<AssetSlotDeclaration>();
+        foreach (var slot in Array(slotsElement, "slots", source))
+        {
+            var name = RequiredString(slot, "name", source);
+            var typeText = RequiredString(slot, "type", source);
+            if (!SlotTypes.TryParse(typeText, out var type))
+            {
+                throw Error(
+                    PrefabErrorCategories.Structure,
+                    source,
+                    $"空位 '{name}' 的 type='{typeText}' 未定义：空位类型只有六种"
+                    + $"（{string.Join("／", SlotTypes.All)}），出现第七种＝拒绝（R39 裁决 3）。");
+            }
+
+            if (!SlotTypes.IsAssetLevel(type))
+            {
+                throw Error(
+                    PrefabErrorCategories.Structure,
+                    source,
+                    $"资产级空位 '{name}' 的类型是 handler：handler 只能挂在成员级（members[].slot），"
+                    + $"资产级只接受 {string.Join("／", SlotTypes.AssetLevel)}（R39 裁决 8）。");
+            }
+
+            var enumValues = ReadSlotEnumValues(slot, name, type, source);
+            var isSealed = OptionalBool(slot, "sealed") ?? false;
+            var value = ReadSlotValue(slot, name, type, source);
+
+            try
+            {
+                slots.Add(new AssetSlotDeclaration(name, type, value, isSealed, enumValues));
+            }
+            catch (ArgumentException ex)
+            {
+                throw Error(PrefabErrorCategories.Structure, source, ex.Message);
+            }
+        }
+
+        return slots;
+    }
+
+    private static IReadOnlyList<string>? ReadSlotEnumValues(
+        JsonElement slot, string name, SlotType type, string source)
+    {
+        if (!slot.TryGetProperty("values", out var valuesElement))
+        {
+            return null;
+        }
+
+        if (type != SlotType.Enum)
+        {
+            throw Error(
+                PrefabErrorCategories.Structure,
+                source,
+                $"空位 '{name}' 的类型是 {SlotTypes.Format(type)}，不能声明取值集 values（只有 enum 可以）。");
+        }
+
+        if (valuesElement.ValueKind != JsonValueKind.Array)
+        {
+            throw Error(PrefabErrorCategories.Structure, source, $"空位 '{name}' 的 values 必须是字符串数组。");
+        }
+
+        var values = new List<string>();
+        foreach (var item in valuesElement.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(item.GetString()))
+            {
+                throw Error(
+                    PrefabErrorCategories.Structure, source, $"空位 '{name}' 的 values 每一项必须是非空字符串。");
+            }
+
+            values.Add(item.GetString()!);
+        }
+
+        return values;
+    }
+
+    private static object? ReadSlotValue(JsonElement slot, string name, SlotType type, string source)
+    {
+        if (!slot.TryGetProperty("value", out var valueElement) || valueElement.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        switch (type)
+        {
+            case SlotType.Number when valueElement.TryGetDecimal(out var number):
+                return number;
+            case SlotType.String or SlotType.Enum or SlotType.AssetRef when valueElement.ValueKind == JsonValueKind.String:
+                return valueElement.GetString();
+            case SlotType.Bool when valueElement.ValueKind is JsonValueKind.True or JsonValueKind.False:
+                return valueElement.GetBoolean();
+            default:
+                throw Error(
+                    PrefabErrorCategories.Structure,
+                    source,
+                    $"空位 '{name}' 的 value 与声明类型 {SlotTypes.Format(type)} 不符。");
+        }
+    }
+
+    /// <summary>读取成员级空位 <c>slot</c>（R39 裁决 8；缺省＝本成员不是空位）。</summary>
+    private static MemberSlotDeclaration? ReadMemberSlot(JsonElement member, string memberName, string source)
+    {
+        if (!member.TryGetProperty("slot", out var slotElement))
+        {
+            return null;
+        }
+
+        if (slotElement.ValueKind != JsonValueKind.Object)
+        {
+            throw Error(PrefabErrorCategories.Structure, source, $"成员 '{memberName}' 的 slot 必须是对象（形态 {{ type: \"handler\" }}）。");
+        }
+
+        var typeText = RequiredString(slotElement, "type", source);
+        if (!SlotTypes.TryParse(typeText, out var type))
+        {
+            throw Error(
+                PrefabErrorCategories.Structure,
+                source,
+                $"成员 '{memberName}' 的空位 type='{typeText}' 未定义：空位类型只有六种"
+                + $"（{string.Join("／", SlotTypes.All)}），出现第七种＝拒绝（R39 裁决 3）。");
+        }
+
+        try
+        {
+            return new MemberSlotDeclaration(type);
+        }
+        catch (ArgumentException ex)
+        {
+            throw Error(PrefabErrorCategories.Structure, source, ex.Message);
+        }
+    }
+
 
     /// <summary>
     /// 读取**来源标记** <c>generated</c>（R28／S11）：`{ generator, catalogRevision, source, dslHash, textHash, nodeMap }`。
@@ -442,9 +631,16 @@ public static class AssetSchema
         var seams = ReadSeams(member, source, $"成员 '{name}' 的 seams");
         var sealedMember = OptionalBool(member, "sealed") ?? false;
 
-        // 成员级抽象（R30／R31）：只给模板用。**产物的拒绝不在这里**——同一读取器既要读模板也要读产物，
-        // 「产物中出现该字段＝手工篡改」由产物装载链（AssetPackLoader）按结构非法字段拒绝（D28）。
-        var abstractMember = OptionalBool(member, "abstract") ?? false;
+        // 成员级 `abstract` 已废止（R39 裁决 4／5）：状态由 `slot` ∧ `handler` 的存在性表达。
+        // 读到即拒绝（不静默忽略——静默会让「写了 abstract 却发现不影响装配」变成无解释的失效）。
+        if (member.TryGetProperty("abstract", out _))
+        {
+            throw Error(
+                PrefabErrorCategories.Structure,
+                source,
+                $"成员 '{name}' 声明了已废止的字段 'abstract'：抽象性改由「空位是否填满」推导"
+                + "（members[].slot 有声明 ∧ handler 缺失 ⇒ 未填），请改用 slot（R39 裁决 4／5）。");
+        }
 
         // 守卫档（R32）：未知取值＝结构错误（不允许静默退化成「不守卫」——那是静默失效）。
         var guardText = OptionalString(member, "guard");
@@ -460,9 +656,10 @@ public static class AssetSchema
         }
 
         var label = OptionalString(member, "label");
+        var slot = ReadMemberSlot(member, name, source);
 
         return new ComponentMemberAsset(
-            name, visibility, view, handler, band, bands, seams, sealedMember, abstractMember, guard, label);
+            name, visibility, view, handler, band, bands, seams, sealedMember, guard, label, slot);
     }
 
     /// <summary>
@@ -584,17 +781,35 @@ public static class AssetSchema
                 writer.WriteString("extends", extends);
             }
 
-            // 抽象资产的授权是**缺省推导**出来的（D29），不写成显式声明——模板文件里不出现该字段，
-            // 读回时仍推导为 true（「写了 true」与「没写」在这里语义相同，少一个字段少一处可漂移的副本）。
-            if (asset.AuthorizesModing && !asset.Abstract)
+            // 出身记录（R39 裁决 10／S30／S31）：可选元数据，**不参与解析**（不是 extends、不是依赖）。
+            if (asset.Origin is { HasAny: true } origin)
             {
-                writer.WriteBoolean("authorize-moding", true);
+                writer.WriteStartObject("origin");
+                if (origin.TemplateId is { } templateId)
+                {
+                    writer.WriteString("templateId", templateId);
+                }
+
+                if (origin.DraftId is { } draftId)
+                {
+                    writer.WriteString("draftId", draftId);
+                }
+
+                if (origin.ArgsHash is { } argsHash)
+                {
+                    writer.WriteString("argsHash", argsHash);
+                }
+
+                origin.WriteArgs(writer);
+                writer.WriteEndObject();
             }
 
-            // 资产级抽象（R30）：只在真时写——普通资产不引入噪声字段（存量零改动，R35 第 1 条同口径）。
-            if (asset.Abstract)
+            // `authorize-moding`／`abstract` 已废止（R39 裁决 4／5）：写出侧不再产出这两个键。
+
+            // 存档门户（本会话 S1）：可选字段，未声明不写入（存量资产零噪声）。
+            if (asset.Save is { } save)
             {
-                writer.WriteBoolean("abstract", true);
+                writer.WriteString("save", save);
             }
 
             // 展示文案（R35）：未声明不写入（回退显示 id／成员名的判断留给前端与 DTO）。
@@ -606,6 +821,39 @@ public static class AssetSchema
             if (asset.Description is { } description)
             {
                 writer.WriteString("description", description);
+            }
+
+            // 资产级空位（R39 裁决 8）：只在声明了空位时写出——存量资产（无空位）不引入噪声字段。
+            if (asset.Slots.Count > 0)
+            {
+                writer.WriteStartArray("slots");
+                foreach (var slot in asset.Slots)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("name", slot.Name);
+                    writer.WriteString("type", SlotTypes.Format(slot.Type));
+                    if (slot.EnumValues is { Count: > 0 } values)
+                    {
+                        writer.WriteStartArray("values");
+                        foreach (var value in values)
+                        {
+                            writer.WriteStringValue(value);
+                        }
+
+                        writer.WriteEndArray();
+                    }
+
+                    if (slot.IsSealed)
+                    {
+                        writer.WriteBoolean("sealed", true);
+                    }
+
+                    // 声明期已填的值＝「已填但可再填」（D46）；未填则不写该键（判定只看「有没有」）。
+                    WriteSlotValue(writer, slot);
+                    writer.WriteEndObject();
+                }
+
+                writer.WriteEndArray();
             }
 
             writer.WriteString("requires-host", FormatHostKind(asset.RequiresHost));
@@ -694,16 +942,18 @@ public static class AssetSchema
                     writer.WriteBoolean("sealed", true);
                 }
 
-                // 成员级抽象与守卫档（R30／R32）：只有**模板资产**会写；摊平产物两者皆无
-                // （抽象已在摊平期强制、守卫已烘进 csx——产物若保留 guard，再次摊平会重复加守卫）。
-                if (member.Abstract)
-                {
-                    writer.WriteBoolean("abstract", true);
-                }
-
+                // 守卫档（R32）：只有模板会写；摊平产物不写（守卫已烘进 csx，保留会重复加守卫）。
                 if (member.Guard is { } guard)
                 {
                     writer.WriteString("guard", HandlerGuardNames.Format(guard));
+                }
+
+                // 成员级空位（R39 裁决 8）：与 handler **并列**的两个可选字段（D40 的四行判定表直接对应存在性组合）。
+                if (member.Slot is { } slot)
+                {
+                    writer.WriteStartObject("slot");
+                    writer.WriteString("type", SlotTypes.Format(slot.Type));
+                    writer.WriteEndObject();
                 }
 
                 if (member.Handler is { } handler)
@@ -828,6 +1078,23 @@ public static class AssetSchema
         }
 
         writer.WriteEndObject();
+    }
+
+    /// <summary>写出资产级空位的已填值（类型封闭；数字用 invariant culture 的规范形）。</summary>
+    private static void WriteSlotValue(Utf8JsonWriter writer, AssetSlotDeclaration slot)
+    {
+        switch (slot.Type)
+        {
+            case SlotType.Number when slot.Value is decimal number:
+                writer.WriteNumber("value", number);
+                break;
+            case SlotType.String or SlotType.Enum or SlotType.AssetRef when slot.Value is string text:
+                writer.WriteString("value", text);
+                break;
+            case SlotType.Bool when slot.Value is bool flag:
+                writer.WriteBoolean("value", flag);
+                break;
+        }
     }
 
     private static void WriteInitial(Utf8JsonWriter writer, PrivateFieldDefinition field)
@@ -964,6 +1231,35 @@ public static class AssetSchema
         }
 
         return string.Join("＋", names);
+    }
+
+    /// <summary>
+    /// 两个**已废止**的手写标志（R39 裁决 4／5／S28／S32）：`abstract` 与 `authorize-moding`。
+    /// <para>
+    /// 抽象性改由「存在未填空位」推导；覆写资格只由「链上声明了成员级 slot ∧ 未 sealed」决定。
+    /// 读到即**拒绝**（不静默忽略）——静默会让作者以为开关仍生效，与 R32 立过的口径相反。
+    /// 错误必须报出资产 id（S28 迁移口径）。
+    /// </para>
+    /// </summary>
+    private static void RejectAbolishedFields(JsonElement element, string assetId, string source)
+    {
+        foreach (var (name, replacement) in new[]
+                 {
+                     ("abstract", "抽象性由「存在未填空位」推导（资产级 slots[].value ／ 成员级 slot ∧ handler）"),
+                     ("authorize-moding", "覆写资格由「链上声明了成员级 slot（slot: { type: \"handler\" }）∧ 未 sealed」决定"),
+                 })
+        {
+            if (!element.TryGetProperty(name, out _))
+            {
+                continue;
+            }
+
+            throw Error(
+                PrefabErrorCategories.Structure,
+                source,
+                $"资产 '{assetId}' 声明了已废止的字段 '{name}'：R39 起该开关不再存在——{replacement}"
+                + "（本模型没有第三个状态位，也不静默忽略旧字段）。");
+        }
     }
 
     private static void RejectLegacyFields(JsonElement element, string source)    {

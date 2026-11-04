@@ -273,7 +273,98 @@ public sealed class AssetEditor
     {
         ArgumentNullException.ThrowIfNull(packRoot);
         ArgumentNullException.ThrowIfNull(prefabAssetId);
-        return PrefabDescriber.Describe(packRoot, prefabAssetId, draftPath, _options.TemplateRoot);
+
+        lock (_gate)
+        {
+            // 三态（R39 裁决 13／S33）：虚拟记录优先（只在会话内存里）→ 会话临时包＝Test → 其余＝Formal。
+            if (_session?.FindNamedInstance(prefabAssetId) is { } virtualRecord)
+            {
+                return PrefabDescriber.DescribeVirtual(virtualRecord);
+            }
+
+            var stage = _session is not null && _session.IsTemporaryRoot(packRoot)
+                ? PrefabStage.Test
+                : PrefabStage.Formal;
+            return PrefabDescriber.Describe(packRoot, prefabAssetId, draftPath, _options.TemplateRoot, stage);
+        }
+    }
+
+    /// <summary>
+    /// **创建 `named` 的虚拟 moding 记录**（R39 裁决 13／S30）：展开成功但**不落盘**；
+    /// 记录只在当前编辑会话可见，<see cref="PrefabCatalog"/> 正式解析面看不到它（卡数据引用＝明确报错）。
+    /// </summary>
+    /// <param name="packRoot">包根（声明表来源：本包组件资产 ＋ 编辑器配置的模板库只读层）。</param>
+    /// <param name="templateId">被实例化的模板 id。</param>
+    /// <param name="arguments">扁平 <c>args</c>（只填已声明空位，不能新增成员）。</param>
+    /// <param name="id">产物 id（调用方提供；合法资产名、不得以 <c>template.</c> 开头）。</param>
+    /// <param name="dsl">handler DSL 装配件（参数里出现 <c>dsl</c> 值时必需）。</param>
+    /// <exception cref="AssetEditorException">无会话／模板不存在／id 重名／展开失败。</exception>
+    public NamedInstanceRecord InstantiateNamed(
+        string packRoot,
+        string templateId,
+        IReadOnlyDictionary<string, object?> arguments,
+        string id,
+        Orc.Core.HandlerDslEnvironment? dsl = null)
+    {
+        ArgumentNullException.ThrowIfNull(packRoot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(templateId);
+        ArgumentNullException.ThrowIfNull(arguments);
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+
+        lock (_gate)
+        {
+            var session = RequireSession();
+            var declarations = PrefabDescriber.LoadDeclarations(packRoot, _options.TemplateRoot);
+            if (!declarations.TryGetValue(templateId, out var template))
+            {
+                throw new AssetEditorException(
+                    AssetEditorErrorCode.AssetNotFound,
+                    $"模板 '{templateId}' 不在包 '{packRoot}'（含模板库只读层）内：无法实例化。");
+            }
+
+            var root = Path.GetFullPath(packRoot);
+            return session.CreateNamedInstance(
+                id,
+                template,
+                arguments,
+                declarations,
+                dsl,
+                relative =>
+                {
+                    // 与摊平/装载一致：先试产物目录（effects-v4），再回退包根。
+                    var candidate = Path.Combine(
+                        root, ModingFlattener.ProductDirectory, relative.Replace('/', Path.DirectorySeparatorChar));
+                    if (!File.Exists(candidate))
+                    {
+                        candidate = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+                    }
+
+                    return File.Exists(candidate) ? candidate : null;
+                });
+        }
+    }
+
+    /// <summary>当前会话内的虚拟 `named` 记录（<c>Save</c> 后移出；无会话＝空）。</summary>
+    public IReadOnlyList<NamedInstanceRecord> ListNamedInstances()
+    {
+        lock (_gate)
+        {
+            return _session?.ListNamedInstances() ?? Array.Empty<NamedInstanceRecord>();
+        }
+    }
+
+    /// <summary>
+    /// **`Save` 虚拟记录**（R39 裁决 13）：产品落 <c>effects-v4/</c> ＋ 走既有声明链（sidecar／测试 lock），
+    /// 不碰正式 lock；转正仍走 <see cref="Promote"/>。
+    /// </summary>
+    /// <exception cref="AssetEditorException">无会话／记录不存在／声明失败。</exception>
+    public EditorCommitResult SaveNamedInstance(string id)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        lock (_gate)
+        {
+            return RequireSession().SaveNamedInstance(id);
+        }
     }
 
     /// <summary>

@@ -319,8 +319,13 @@ public static class MountPlanner
 /// <summary>
 /// 编排运行时（新模型的装配与执行门面）：持有预制体目录、handler 资产表、包装注册面与**对局级单例引擎实体**。
 /// <para>注册（运行期新增可寻址成员）与挂载（往已有成员上挂边）是两个动作、同一门面（R1h），不合并。</para>
+/// <para>
+/// 实现只读存档窄接口 <see cref="ISaveRuntime"/>（本会话 S3／D53，**显式实现**——不扩大公开面）：
+/// 存档导出器经 <see cref="SaveContext.Runtime"/> 拿到的是窄接口，拿不到本类型的写面
+/// （<c>CreateEntity</c>／<c>ConstructComponent</c>／<c>GrantComponent</c>／<c>DisposeComponents</c>）。
+/// </para>
 /// </summary>
-public sealed partial class OrchestrationRuntime
+public sealed partial class OrchestrationRuntime : ISaveRuntime
 {
     /// <summary>创建运行时（立即实例化引擎实体并登记其包装声明）。</summary>
     /// <param name="catalog">预制体目录（须含引擎预制体）。</param>
@@ -347,6 +352,12 @@ public sealed partial class OrchestrationRuntime
 
     /// <summary>预制体目录。</summary>
     public PrefabCatalog Catalog { get; }
+
+    /// <summary>
+    /// **`inline` 的对局级展开表**（R39 裁决 13／S30）：与本次运行时同寿命，
+    /// 随引擎实例丢弃、不跨对局复用（Constraint 3）。不进资产库／lock／sidecar。
+    /// </summary>
+    public InlinePrefabTable InlinePrefabs { get; } = new();
 
     /// <summary>handler 资产表（全局懒注册、全局一份）。</summary>
     public HandlerRegistry Handlers { get; }
@@ -377,7 +388,7 @@ public sealed partial class OrchestrationRuntime
         ArgumentNullException.ThrowIfNull(prefabId);
         ArgumentNullException.ThrowIfNull(name);
 
-        var type = Catalog.Resolve(prefabId);
+        var type = ResolveEntityType(prefabId);
         if (type.Kind == EntityKind.Engine)
         {
             // R6b 方案 A：引擎实体是对局级单例——第二个引擎实体会让 engine 根的寻址产生歧义。
@@ -392,8 +403,54 @@ public sealed partial class OrchestrationRuntime
         return entity;
     }
 
+    /// <summary>
+    /// 建实体时的类型解析（R39 裁决 17）：**先查对局级 `inline` 表，未命中再查目录**。
+    /// <para>
+    /// 命中 inline 时用该条目的**可执行类型**（含 handler 自有边）建实体；表条目**不写入**
+    /// <see cref="PrefabCatalog"/>／资产库——合法资产 id 与非本表键一律走既有目录解析，行为不变。
+    /// </para>
+    /// </summary>
+    /// <exception cref="KeyNotFoundException">目录未登记，或 inline 的 handler 未注册。</exception>
+    private PrefabType ResolveEntityType(string prefabId)
+    {
+        if (InlinePrefabs.TryGet(prefabId, out _))
+        {
+            return InlinePrefabs.GetOrCreateRuntimeType(prefabId, BuildInlineType);
+        }
+
+        return Catalog.Resolve(prefabId);
+    }
+
+    /// <summary>
+    /// 把 inline 产物转成**可执行**的 <see cref="PrefabType"/>：结构投影没有自有边，必须用本运行时的
+    /// handler 注册面重建一次（同一键只建一次，缓存在表里）。
+    /// </summary>
+    /// <exception cref="KeyNotFoundException">产物引用的 handler 尚未注册到本运行时。</exception>
+    private PrefabType BuildInlineType(InstantiatedPrefab instance)
+    {
+        try
+        {
+            var definition = instance.Expanded.Asset.ToPrefabDefinition(Handlers.Resolve);
+            return new PrefabCatalog().Add(definition).Resolve(definition.Id);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            throw new KeyNotFoundException(
+                $"inline 产物 '{instance.Id}' 的 handler 尚未注册到本运行时：{ex.Message}"
+                + "请先 HandlerRegistry.RegisterScript／Register 后再建实体（R39 裁决 17）。",
+                ex);
+        }
+    }
+
     /// <summary>实体销毁时从存活集合移除（由 <see cref="OrchestrationEntity.Destroy"/> 调用）。</summary>
     internal void Forget(OrchestrationEntity entity) => _entities.Remove(entity);
+
+    /// <summary>
+    /// <see cref="ISaveRuntime.Resolve"/> 的显式实现（S3）：存档只解析**源**预制体（目录解析）——
+    /// 窄接口不透 <see cref="Catalog"/> 本身（其公开面含 <c>Add</c> 注册写面）。
+    /// inline 键不在此入口的职责内：存档的 <c>extends</c> 恒为源预制体 id（D51，缓存键绝不进 extends）。
+    /// </summary>
+    PrefabType ISaveRuntime.Resolve(string prefabId) => Catalog.Resolve(prefabId);
 
     /// <summary>
     /// 装载期绑定：规划该实体的全部挂载声明并建边（声明序）；任一校验失败＝**拒绝装载**（抛出，不留半装配状态）。

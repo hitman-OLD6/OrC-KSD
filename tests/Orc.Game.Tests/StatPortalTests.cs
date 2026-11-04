@@ -341,6 +341,7 @@ public class StatPortalTests
             {
                 GameUpdates.UnitCombatSurvived, GameUpdates.UnitCombatSurvived,
                 GameUpdates.PointChanged, GameUpdates.UnitActed, // E1-33：攻击收尾＝行动后（伤害 0＝无 card.damaged）
+                GameUpdates.UnitAttacked, // R3：零伤害的攻击仍是一次「发生过的攻击」
             },
             recorder.Types);
         Assert.Equal(2, target.Modifiers.GetEffectiveValue(CardStatFields.Defense));

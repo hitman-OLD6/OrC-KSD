@@ -3,7 +3,7 @@ using Orc.Core.Model;
 namespace Orc.Game.Model;
 
 /// <summary>
-/// 游戏层信号声明（S3 第 7 条）：把 <see cref="GameUpdates"/> 的 35 个更新字符串声明为**引擎实体的成员触发器**，
+/// 游戏层信号声明（S3 第 7 条）：把 <see cref="GameUpdates"/> 的 36 个更新字符串声明为**引擎实体的成员触发器**，
 /// 由游戏层预制体 <c>engine.game</c>（<c>extends: engine</c>）追加到同一个 <c>engine</c> 根下。
 /// <para>
 /// 成员名＝更新字符串原样（零转换）：<c>hooks: ["unit.position.changed"]</c> → <c>engine#unit.position.changed</c>。
@@ -18,7 +18,7 @@ public static class GameSignals
     /// <summary>载荷键：原因（<c>card.leaving</c> / <c>counter.disarmed</c>；值＝string）。</summary>
     public const string PayloadReason = "Reason";
 
-    /// <summary>游戏层 35 个信号名（声明序＝<see cref="GameUpdates"/> 定义序；与预制体成员集合同源，守护测试锁漂移）。</summary>
+    /// <summary>游戏层 36 个信号名（声明序＝<see cref="GameUpdates"/> 定义序；与预制体成员集合同源，守护测试锁漂移）。</summary>
     public static IReadOnlyList<string> Names { get; } = new[]
     {
         GameUpdates.TurnStartBefore,
@@ -56,13 +56,14 @@ public static class GameSignals
         GameUpdates.PointGained,
         GameUpdates.PointLost,
         GameUpdates.PointChanged,
+        GameUpdates.UnitAttacked,
     };
 
-    /// <summary>游戏层 35 个信号成员（声明序，来源层＝游戏）。</summary>
+    /// <summary>游戏层 36 个信号成员（声明序，来源层＝游戏）。</summary>
     public static IReadOnlyList<MemberDefinition> Members { get; } = Build();
 
     /// <summary>
-    /// 游戏层 35 条信号的**中文名**（R35／D25：文案真源在信号定义处）。
+    /// 游戏层 36 条信号的**中文名**（R35／D25：文案真源在信号定义处）。
     /// <para>
     /// 覆盖率守护逐层各一条：<c>GameSignals.Names ≡ GameSignals.Labels.Keys</c>（与内核那条**互不合并**，D26）。
     /// 模板库的 <c>label</c> 由生成器从「信号中文名 ＋ guard 中文名」派生（如「部署时（本单位）」），人不手写。
@@ -105,6 +106,7 @@ public static class GameSignals
         [GameUpdates.PointGained] = "获得点数时",
         [GameUpdates.PointLost] = "失去点数时",
         [GameUpdates.PointChanged] = "点数变化时",
+        [GameUpdates.UnitAttacked] = "攻击后",
     };
 
     /// <summary>
@@ -120,6 +122,8 @@ public static class GameSignals
             "非死亡离场：单位被移除、回手或撤退回手时触发；**死亡不触发**——死亡走 card.dying／card.died，三者互斥不重叠。",
         [GameUpdates.CardDied] = "死亡完成（战斗数值链判定后）。要覆盖「被打死」的场景请用本档，不要用非死亡离场档。",
         [GameUpdates.CardDying] = "死亡已确认、效果卸载前的宿主结算阶段；载荷同 card.died。",
+        [GameUpdates.UnitAttacked] =
+            "攻击结算完成（指挥攻击与效果攻击都发）；被拦截/未结算不触发。攻击者当场阵亡、伏击改写（零伤害）同样发——本档是「发生过一次攻击」，不是「造成了伤害」。",
     };
 
     /// <summary>
@@ -150,6 +154,7 @@ public static class GameSignals
         [GameUpdates.UnitCombatSurvived] = GameUpdates.PayloadUnit,
         [GameUpdates.UnitTypesChanged] = GameUpdates.PayloadUnit,
         [GameUpdates.UnitDamageDealt] = GameUpdates.PayloadUnit,
+        [GameUpdates.UnitAttacked] = GameUpdates.PayloadUnit,
         [GameUpdates.CardDamaged] = GameUpdates.PayloadCard,
         [GameUpdates.CounterTriggered] = GameUpdates.PayloadCard,
         [GameUpdates.CounterDisarmed] = GameUpdates.PayloadCard,
@@ -233,6 +238,11 @@ public static class GameSignals
             Game(GameUpdates.UnitCombatSurvived, unit, source),
             Game(GameUpdates.UnitTypesChanged, unit, (GameUpdates.PayloadAddedType, ViewFieldType.String), source),
             Game(GameUpdates.UnitDamageDealt, unit, card, amount, source),
+            Game(GameUpdates.UnitAttacked,
+                unit,
+                (GameUpdates.PayloadTarget, ViewFieldType.Entity),
+                (GameUpdates.PayloadByEffect, ViewFieldType.Boolean),
+                source),
 
             // ---------- 伤害/反制 ----------
             Game(GameUpdates.CardDamaged, card, amount, source),

@@ -58,6 +58,7 @@ public sealed class Match
     private MulliganManager? _mulliganManager; // A1：换牌管理器（换牌相位承载——Initialize 内创建）
     private GameEnvironment? _environment; // W3-1 G4：游戏环境（对局装配期创建；多对局相互独立）
     private MatchCardService? _cardService; // S9：对局卡牌服务（服务面——卡牌工厂＋放置面；对局装配期创建）
+    private HandTransferService? _handTransferService; // 手牌转移服务（跨玩家手牌移动的动作族实现；对局装配期创建）
     private MatchHistoryService? _historyService; // S10：对局历史读取服务（最小历史读取面；对局装配期创建）
     private Sandbox.SandboxPrimitives? _sandbox; // 沙盒调试原语族（引擎保留触发器；授权时装配）
     private readonly bool _sandboxAuthorized; // 沙盒授权事实（装配方构造期决定；缺省未授权）
@@ -614,6 +615,17 @@ public sealed class Match
             player.ConfigureCardService(_cardService);
         }
 
+        // 手牌转移服务（跨玩家手牌移动：交换归属／洗入他人卡组）——随对局装配创建（卡牌服务之后：
+        // 定义反查复用 MatchCardService.TryResolveDefinitionId；洗切复用统一动作面 Match.ShuffleDeckAsync；
+        // 玩家清单与状态读取器以 lambda 延迟读取）。归属写面（CardBase.ReassignOwner）的唯一调用方即本服务。
+        var transferCardService = _cardService;
+        _handTransferService = new HandTransferService(
+            Engine,
+            card => transferCardService.TryResolveDefinitionId(card, out var definitionId) ? definitionId : null,
+            (player, ct) => ShuffleDeckAsync(player, ct),
+            () => _playerManager.Players,
+            () => _lifecycle.State);
+
         // S10「G14补」加性：对局历史读取服务（最小历史读取面——按条目类型〔信号〕筛取＋时序取用；
         // 读源＝事件流总流、窗口＝对局自创建以来全程）——随对局装配创建并注入各玩家（「卡 → 玩家 → 服务」
         // 读取路径的玩家环节；时序：先于卡加载，显式、可测试——无隐藏全局单例）。
@@ -650,6 +662,10 @@ public sealed class Match
 
         // 抑制资格判定器（默认：死亡 / 内建「无法被抑制」；词条经 judicatorWrappers 改写）。
         _judicators.Register(JudicatorNames.InhibitLegEligibility, new InhibitEligibilityJudicator());
+
+        // 本会话 S3／D50：内置完整复制存档导出器（framework.save.full-copy）——
+        // 归属 Orc.Game（纯内核构造路径没有内置 B，调用方自行注册＝已知限制 C2）；不做自动兜底（D50）。
+        _judicators.Register(Orc.Core.Model.SavePolicy.FullCopyServiceId, new Orc.Game.Save.FullCopySaveExporter());
 
         // 资产化 S12c：内置判定器**不再硬编码于装配中枢**——改由（可选）资产目录快照经激活器装配
         // （内置插件 `orc.builtin.core` 提供；`null`＝**空目录**＝无任何判定器——P8=i）。
@@ -700,7 +716,8 @@ public sealed class Match
             () => Engine,
             () => _lifecycle.IsActionAllowed,
             battlefield: () => _battlefieldManager.Battlefield,
-            allowRandom: () => _options.AllowRandomTargeting);
+            allowRandom: () => _options.AllowRandomTargeting,
+            handTransfer: () => _handTransferService);
         foreach (var player in _playerManager.Players)
         {
             player.ConfigureEffectRuntime(_effectRuntime);

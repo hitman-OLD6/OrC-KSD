@@ -24,10 +24,10 @@ public class SignalGuardTests
         Assert.All(KernelSignals.Labels.Values, v => Assert.False(string.IsNullOrWhiteSpace(v)));
         Assert.All(GameSignals.Labels.Values, v => Assert.False(string.IsNullOrWhiteSpace(v)));
 
-        // 两层合起来才是 39；单层的数字写死在测试里，任何一层漏写都会当场失败。
+        // 两层合起来才是 40；单层的数字写死在测试里，任何一层漏写都会当场失败。
         Assert.Equal(4, KernelSignals.Labels.Count);
-        Assert.Equal(35, GameSignals.Labels.Count);
-        Assert.Equal(39, SignalGuards.Labels.Count);
+        Assert.Equal(36, GameSignals.Labels.Count);
+        Assert.Equal(40, SignalGuards.Labels.Count);
     }
 
     [Fact]

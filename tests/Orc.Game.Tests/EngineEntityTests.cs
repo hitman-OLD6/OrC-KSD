@@ -9,7 +9,7 @@ namespace Orc.Game.Tests;
 
 /// <summary>
 /// S7（引擎实体）的游戏层验收：内核基础预制体 <c>engine</c> ＋游戏层 <c>extends engine.game</c> 在同一
-/// <c>engine</c> 根下跨层合并；39 个内建信号与 24 个引擎流程成员（9 个批次 2 成员 ＋ U1 的 13 个动作管道成员
+/// <c>engine</c> 根下跨层合并；40 个内建信号与 24 个引擎流程成员（9 个批次 2 成员 ＋ U1 的 13 个动作管道成员
 /// ＋ U3 的 2 个指令流程成员）可枚举；旧显示名映射与预制体成员同源；<c>host#targeting</c> 在卡与 HQ 上都解析；
 /// 对局内只有一个引擎实体。U4 起动作端点的自有边位次由 <see cref="EngineProcesses.ActionEndPositions"/> 统一标注。
 /// </summary>
@@ -19,15 +19,15 @@ public sealed class EngineEntityTests
 
     // ==================== ① 跨层合并（R1e 第 7 条） ====================
 
-    /// <summary>内核 4 个信号＋游戏层 35 个信号同处 engine 根，解析对来源层无差别，来源层可标出。</summary>
+    /// <summary>内核 4 个信号＋游戏层 36 个信号同处 engine 根，解析对来源层无差别，来源层可标出。</summary>
     [Fact]
     public void EnginePrefab_MergesKernelAndGameSignals_UnderOneRoot()
     {
         var runtime = GameEnginePrefabs.CreateRuntime();
 
-        Assert.Equal(39, runtime.Signals.Count);
+        Assert.Equal(40, runtime.Signals.Count);
         Assert.Equal(4, runtime.Signals.Count(static m => m.Layer == PrefabLayer.Kernel));
-        Assert.Equal(35, runtime.Signals.Count(static m => m.Layer == PrefabLayer.Game));
+        Assert.Equal(36, runtime.Signals.Count(static m => m.Layer == PrefabLayer.Game));
 
         // 分属两层的两个成员都从同一个 engine 根解析出来（跨层合并，解析无差别）。
         Assert.Equal(PrefabLayer.Kernel, runtime.RequireSignal(Updates.CardDestroyed).Layer);
@@ -44,7 +44,7 @@ public sealed class EngineEntityTests
     [Fact]
     public void EngineMemberConstants_MatchPrefabMembers()
     {
-        // 展开后的成员表（跨层合并：内核 4＋游戏层 35＋流程成员 24）。
+        // 展开后的成员表（跨层合并：内核 4＋游戏层 36＋流程成员 24）。
         var merged = GameEnginePrefabs.CreateCatalog().Resolve(GameEnginePrefabs.PrefabId);
         var runtime = GameEnginePrefabs.CreateRuntime();
 
@@ -58,9 +58,9 @@ public sealed class EngineEntityTests
         Assert.True(fromPrefab.SetEquals(fromConstants));
         Assert.Equal(fromPrefab.Count, runtime.Engine.Members.Count);
 
-        // 39 个信号＋25 个流程成员（9 个批次 2 成员 ＋ U1 的 13 个动作管道成员 ＋ U3 的 2 个指令流程成员
+        // 40 个信号＋25 个流程成员（9 个批次 2 成员 ＋ U1 的 13 个动作管道成员 ＋ U3 的 2 个指令流程成员
         // ＋ U4 拆出的死亡免死守卫 death.veto）。
-        Assert.Equal(39, runtime.Signals.Count);
+        Assert.Equal(40, runtime.Signals.Count);
         Assert.Equal(25, runtime.Engine.Members.Count(static m => !m.IsSignal));
     }
 
@@ -288,7 +288,7 @@ public sealed class EngineEntityTests
             seed: 42,
             options: new MatchOptions { SkipMulligan = true });
 
-        Assert.Equal(39, match.EngineRuntime.Signals.Count);
+        Assert.Equal(40, match.EngineRuntime.Signals.Count);
         Assert.Equal(EntityKind.Engine, match.EngineRuntime.Engine.EntityKind);
         Assert.True(match.EngineRuntime.IsSignal(GameUpdates.CardLoad));
         Assert.Throws<InvalidOperationException>(

@@ -132,10 +132,38 @@ public static class AssetPackLoader
                 $"同一包内重复声明资产 id '{duplicate.Key}'（{string.Join("、", duplicate.Select(static d => d.File))}）。"));
         }
 
+        // 资产引用空位的**存在性**在装载期查目录（R39 裁决 8）：值＝应用层 ID，
+        // 版本解析沿用既有 ID Bridge／lock 口径——**slot 层不另造版本语义**（这里只看 id 在不在）。
+        var knownAssetIds = new HashSet<string>(assets.Select(static a => a.Asset.Id), StringComparer.Ordinal);
+        foreach (var definition in runtime.Catalog.Definitions)
+        {
+            knownAssetIds.Add(definition.Id);
+        }
+
+        foreach (var (file, asset) in assets)
+        {
+            foreach (var slot in asset.Slots)
+            {
+                if (slot.Type != SlotType.AssetRef
+                    || slot.Value is not string reference
+                    || knownAssetIds.Contains(reference))
+                {
+                    continue;
+                }
+
+                errors.Add(new PrefabLoadError(
+                    PrefabErrorCategories.Structure,
+                    $"{file} / {asset.Id}#{slot.Name}",
+                    $"资产 '{asset.Id}' 的空位 '{slot.Name}' 引用的资产 '{reference}' 不在装载目录内："
+                    + "asset-ref 的指向存在性在装载期校验（版本解析沿用 ID Bridge／lock，slot 层不另造版本语义）。"));
+            }
+        }
+
         // 保留前缀与产物洁净（R30／R31／R34；两条都在**产物装载链**上，不是编辑期判定）：
         // ① `template.` 是资产 id 的保留命名空间（D30）——模板库只作编辑期只读层，不经本装载链注册；
-        // ② 产物里出现 `members[].abstract` ＝被手工篡改（摊平期已强制实现，产物不该带抽象位）。
-        //    这是**结构校验**，与「成员是否已实现」的语义判定无关（D28：装载链不认识成员级 abstract 语义）。
+        // ② 产物里出现**未填空位** ＝被手工篡改（摊平期已强制饱和，产物不该带空洞）。
+        //    这是**结构校验**，与「成员是否已实现」的语义判定无关：装载链只查字段的存在性，
+        //    不解释「谁该实现」，判据本身由核的 `HasUnfilledSlots` 统一给出（S28／S32）。
         foreach (var (file, asset) in assets)
         {
             if (AssetSchema.IsTemplateId(asset.Id))
@@ -147,17 +175,19 @@ public static class AssetPackLoader
                     + "该命名空间归模板库专用（模板只作编辑期只读依赖层，不参与对局装载，R33／D30）。"));
             }
 
-            foreach (var member in asset.Members)
+            // 产物洁净改口（R31 修订／S32）：从「出现 members[].abstract 即篡改」改为「出现**未填**空位即篡改」。
+            // **已填 slot 是合法字段**（判定表第 2 行）——产物保留 slot 正是「可再填」的载体。
+            if (asset.HasUnfilledSlots)
             {
-                if (member.Abstract)
-                {
-                    errors.Add(new PrefabLoadError(
-                        PrefabErrorCategories.Structure,
-                        $"{file} / {asset.Id}#{member.Name}",
-                        $"成员 '{member.Name}' 声明了结构非法字段 members[].abstract："
-                        + "摊平产物不含抽象位（抽象在摊平期强制、产物必须成员全实现，R31）——"
-                        + "出现该字段即为手工篡改，请回草案重新摊平。"));
-                }
+                var gaps = asset.Slots.Where(static slot => !slot.IsFilled).Select(static slot => "slots." + slot.Name)
+                    .Concat(asset.Members.Where(static m => m.IsUnfilledSlot).Select(static m => "members." + m.Name))
+                    .ToArray();
+                errors.Add(new PrefabLoadError(
+                    PrefabErrorCategories.Structure,
+                    $"{file} / {asset.Id}",
+                    $"产物 '{asset.Id}' 带未填空位（{string.Join("、", gaps)}）："
+                    + "产物必须饱和——未填的空位＝抽象资产，不可装配；出现该形态即为手工篡改，"
+                    + "请回草案重新摊平（R31 修订／S32）。"));
             }
         }
 

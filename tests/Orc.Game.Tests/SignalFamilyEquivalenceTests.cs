@@ -14,7 +14,7 @@ namespace Orc.Game.Tests;
 /// <item><b>同步语义</b>：<c>await Emit</c> 返回即全部执行完，每个订阅者恰一次（不双执行——A2 的最大风险）；</item>
 /// <item><b>审查面</b>：该信号上有对应订阅边（旧 <c>GetSubscribers</c> 的等价读面）。</item>
 /// </list>
-/// 族划分与 <c>GameSignals.Names</c> 的声明序一致（内核 4 ＋ 游戏层 35 = 39 个信号，全覆盖）。
+/// 族划分与 <c>GameSignals.Names</c> 的声明序一致（内核 4 ＋ 游戏层 36 = 40 个信号，全覆盖）。
 /// </summary>
 public class SignalFamilyEquivalenceTests
 {
@@ -68,6 +68,7 @@ public class SignalFamilyEquivalenceTests
                 GameUpdates.UnitJoined, GameUpdates.UnitDeployed, GameUpdates.UnitPositionChanged,
                 GameUpdates.UnitUpgraded, GameUpdates.UnitRevealed, GameUpdates.UnitActed,
                 GameUpdates.UnitCombatSurvived, GameUpdates.UnitTypesChanged, GameUpdates.UnitDamageDealt,
+                GameUpdates.UnitAttacked,
             },
         };
 

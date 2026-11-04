@@ -42,6 +42,7 @@ public class CommandUpdateTests
                 GameUpdates.UnitCombatSurvived, // E1-39：攻击者交战存活（观察序＝被攻击者在前、攻击者在后）
                 GameUpdates.PointChanged, // 收尾扣行动费（E1-25 后续：指挥走点数通用路径）
                 GameUpdates.UnitActed,    // E1-33：行动后（攻击收尾）
+                GameUpdates.UnitAttacked, // R3：攻击结算事件（收尾之后）
             },
             recorder.Types);
         var targetUpdate = recorder.Updates.Single(
@@ -122,6 +123,7 @@ public class CommandUpdateTests
                 GameUpdates.UnitCombatSurvived, // E1-39：攻击者交战存活（被攻击者已阵亡＝不发射）
                 GameUpdates.PointChanged, // 收尾扣行动费（E1-25 后续）
                 GameUpdates.UnitActed,    // E1-33：攻击者行动后（存活）
+                GameUpdates.UnitAttacked, // R3：攻击结算事件（收尾之后）
             },
             recorder.Types);
         Assert.DoesNotContain(GameUpdates.UnitPositionChanged, recorder.Types);

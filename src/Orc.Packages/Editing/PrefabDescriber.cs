@@ -47,7 +47,8 @@ internal static class PrefabDescriber
     /// （不是模糊的「父未注册」）。
     /// </param>
     public static PrefabDescription Describe(
-        string packRoot, string prefabAssetId, string? draftPath, string? templateRoot = null)
+        string packRoot, string prefabAssetId, string? draftPath, string? templateRoot = null,
+        PrefabStage stage = PrefabStage.Formal)
     {
         var diagnostics = new List<PrefabDescriptionDiagnostic>();
 
@@ -55,7 +56,7 @@ internal static class PrefabDescriber
         {
             diagnostics.Add(new PrefabDescriptionDiagnostic(
                 PrefabDescriptionDiagnostic.PackMissing, packRoot ?? string.Empty, $"包根不存在：'{packRoot}'。"));
-            return Empty(packRoot ?? string.Empty, prefabAssetId, draft: null, diagnostics);
+            return Empty(packRoot ?? string.Empty, prefabAssetId, draft: null, diagnostics, stage);
         }
 
         var root = Path.GetFullPath(packRoot);
@@ -81,14 +82,14 @@ internal static class PrefabDescriber
                     PrefabDescriptionDiagnostic.TemplateRootMissing,
                     prefabAssetId,
                     $"模板库根路径未配置：请在 AssetEditor 构造时传入模板库根路径（收到模板 id '{prefabAssetId}'）。"));
-                return Empty(root, prefabAssetId, ReadDraft(root, draftPath, parent: null, diagnostics: diagnostics), diagnostics);
+                return Empty(root, prefabAssetId, ReadDraft(root, draftPath, parent: null, diagnostics: diagnostics), diagnostics, stage);
             }
 
             diagnostics.Add(new PrefabDescriptionDiagnostic(
                 PrefabDescriptionDiagnostic.ParentMissing,
                 prefabAssetId,
                 $"父资产 '{prefabAssetId}' 未注册（包 '{root}' 内没有该 id 的组件资产）：请先补资产或改选父效果。"));
-            return Empty(root, prefabAssetId, ReadDraft(root, draftPath, parent: null, diagnostics: diagnostics), diagnostics);
+            return Empty(root, prefabAssetId, ReadDraft(root, draftPath, parent: null, diagnostics: diagnostics), diagnostics, stage);
         }
 
         PrefabType type;
@@ -103,7 +104,7 @@ internal static class PrefabDescriber
                 PrefabDescriptionDiagnostic.ParentInvalid,
                 prefabAssetId,
                 $"父资产 '{prefabAssetId}' 展开失败（[{category}]）：{ex.Message}"));
-            return Empty(root, prefabAssetId, ReadDraft(root, draftPath, parent: null, diagnostics: diagnostics), diagnostics);
+            return Empty(root, prefabAssetId, ReadDraft(root, draftPath, parent: null, diagnostics: diagnostics), diagnostics, stage);
         }
 
         var draft = ReadDraft(root, draftPath, type, diagnostics);
@@ -147,15 +148,17 @@ internal static class PrefabDescriber
             members.Add(DescribeDraftOnlyMember(declaredName, declaredMember, draft!.DraftAssetId));
         }
 
+        var origin = assets.TryGetValue(prefabAssetId, out var owner) ? owner.Origin : null;
         return new PrefabDescription(
             root,
             prefabAssetId,
-            Summarize(type),
+            Summarize(type, origin),
             draft,
             members,
             DescribeMountableTargets(catalog, diagnostics),
             DescribeWrappableMembers(type, catalog),
-            diagnostics);
+            diagnostics,
+            stage);
     }
 
     // ── 成员表 ──────────────────────────────────────────────────────────────
@@ -182,9 +185,9 @@ internal static class PrefabDescriber
         var handlerSource = overridden
             ? SourceNameOf(draftMember!.Handler)
             : HandlerOf(member, assets).Source;
-        // 必须实现＝父展开表里的抽象位（R34 第 2 条）：草案重载后（子覆写）该成员**不再**要求实现——
-        // 与摊平期的合并规则同源（R31 第 3 条：子覆写即不再抽象）。
-        var requiresImplementation = !overridden && member.Abstract;
+        // 必须实现＝父展开表里的**未填空位**（R39 裁决 5／S32）：唯一的 `slot ∧ ¬handler` 谓词。
+        // 草案重载后（子覆写）该成员**不再**要求实现——与摊平期的合并规则同源（R31 第 3 条）。
+        var requiresImplementation = !overridden && member.IsUnfilledSlot;
         var label = overridden ? draftMember!.Label : LabelOf(member, assets);
 
         return new PrefabMemberDescription(
@@ -198,9 +201,10 @@ internal static class PrefabDescriber
             member.IsSignal,
             member.IsSignal ? TimingName(member.SignalTiming!.Value) : null,
             sealedMember,
-            // 可重载性＝资产级开关 且 未封死（framework. 前缀恒 sealed）。R2 的两级判定在装载期执行，
-            // 这里给的是**同一判定**的投影值——前端据此灰掉入口，不重复实现规则。
-            type.AuthorizesModing && !(sealedMember || ComponentDisposalPolicy.IsReservedMember(member.Name)),
+            // 可重载性（R39 裁决 5／D39）＝本成员**声明了 slot** 且未封死（framework. 前缀恒 sealed）。
+            // 与装载期的授权门同一事实（Override 只查 slot ∧ ¬sealed），这里只是投影值，不重复实现规则。
+            (overridden ? draftMember!.Slot ?? member.Slot : member.Slot) is not null
+            && !(sealedMember || ComponentDisposalPolicy.IsReservedMember(member.Name)),
             seams,
             view.Fields
                 .Select(static field => new PrefabViewFieldDescription(
@@ -582,7 +586,8 @@ internal static class PrefabDescriber
         string packRoot,
         string prefabAssetId,
         PrefabDraftSummary? draft,
-        List<PrefabDescriptionDiagnostic> diagnostics)
+        List<PrefabDescriptionDiagnostic> diagnostics,
+        PrefabStage stage = PrefabStage.Formal)
         => new(
             packRoot,
             prefabAssetId,
@@ -591,9 +596,10 @@ internal static class PrefabDescriber
             Array.Empty<PrefabMemberDescription>(),
             Array.Empty<PrefabMountableTarget>(),
             Array.Empty<PrefabWrappableMember>(),
-            diagnostics);
+            diagnostics,
+            stage);
 
-    private static PrefabSummary Summarize(PrefabType type)
+    private static PrefabSummary Summarize(PrefabType type, AssetOrigin? origin)
         => new(
             type.Id,
             type.Kind.ToString().ToLowerInvariant(),
@@ -603,10 +609,110 @@ internal static class PrefabDescriber
             type.ActiveWhen == ActiveWhen.Loaded ? "loaded" : "placed",
             type.OneShot,
             type.DisposalSignal,
-            type.AuthorizesModing,
-            type.Abstract,
+            type.HasUnfilledSlots,
+            DescribeSlots(type),
+            origin,
             type.Label,
             type.Description);
+
+    /// <summary>
+    /// 空位 schema 的 DTO 投影（S33）：**从合并后的 <see cref="PrefabType"/> 读**——父链声明的资产级空位
+    /// 对表单可见（不再只看本资产的声明）。<c>asset-ref</c> 带 <c>runtimeEffect: false</c>（裁决 15）。
+    /// </summary>
+    private static IReadOnlyList<PrefabSlotDescription> DescribeSlots(PrefabType type)
+        => SlotSchema.SchemaOf(type)
+            .Select(static entry => new PrefabSlotDescription(
+                entry.Name,
+                SlotTypes.Format(entry.Type),
+                entry.Scope == SlotScope.Asset ? "asset" : "member",
+                entry.IsSealed,
+                entry.HasValue,
+                entry.RuntimeEffect,
+                entry.EnumValues))
+            .ToArray();
+
+    /// <summary>
+    /// **虚拟记录的投影**（R39 裁决 13／D47 NOTE 2）：会话内有记录、盘上没有——三态里唯一走内存的一条。
+    /// <para>
+    /// 形态与盘上产物**同源**（都来自 <see cref="PrefabExpander.Instantiate"/> 的展开结果），
+    /// 差别只在 <see cref="PrefabStage.Virtual"/> 与「不可被 <c>PrefabCatalog</c> 解析」。
+    /// </para>
+    /// </summary>
+    public static PrefabDescription DescribeVirtual(NamedInstanceRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+
+        var diagnostics = new List<PrefabDescriptionDiagnostic>();
+        var catalog = GameEnginePrefabs.CreateCatalog();
+        var type = record.Type;
+
+        var members = new List<PrefabMemberDescription>(record.Asset.Members.Count);
+        foreach (var member in record.Asset.Members)
+        {
+            var definition = type.FindMember(member.Name);
+            members.Add(new PrefabMemberDescription(
+                member.Name,
+                "self#" + member.Name,
+                Inherited: false,
+                Overridden: false,
+                Added: false,
+                DeclaredBy: record.Asset.Id,
+                VisibilityNames(member.Visibility),
+                definition?.IsSignal ?? false,
+                definition?.SignalTiming is { } timing ? TimingName(timing) : null,
+                member.Sealed,
+                member.Slot is not null
+                && !(member.Sealed || ComponentDisposalPolicy.IsReservedMember(member.Name)),
+                member.Seams ?? Array.Empty<string>(),
+                member.View.Fields
+                    .Select(static field => new PrefabViewFieldDescription(
+                        field.Name, ViewFieldTypes.Format(field.Type), field.Writable, field.Required))
+                    .ToArray(),
+                SourceNameOf(member.Handler),
+                member.Handler?.Id,
+                type.Mounts
+                    .Where(mount => string.Equals(mount.Member, member.Name, StringComparison.Ordinal))
+                    .Select(static mount => mount.Target)
+                    .ToArray(),
+                type.Wraps
+                    .Where(wrap => wrap.Target.IsMember
+                                   && string.Equals(wrap.Target.Address.Member, member.Name, StringComparison.Ordinal))
+                    .Select(static wrap => new PrefabWrapSummary(
+                        wrap.Target.Address.ToString(), PhaseName(wrap.Phase), wrap.Seam))
+                    .ToArray(),
+                RequiresImplementation: member.IsUnfilledSlot,
+                member.Label));
+        }
+
+        return new PrefabDescription(
+            PackRoot: string.Empty,
+            PrefabAssetId: record.Id,
+            Prefab: Summarize(type, record.Origin),
+            Draft: null,
+            members,
+            DescribeMountableTargets(catalog, diagnostics),
+            DescribeWrappableMembers(type, catalog),
+            diagnostics,
+            PrefabStage.Virtual);
+    }
+
+    /// <summary>
+    /// **声明表加载**（S30 的 named 实例化用）：包内组件资产 ＋ 模板库只读层（与
+    /// <see cref="Describe"/> 同一发现规则、同一 <c>TryAdd</c> 优先级）。
+    /// </summary>
+    internal static IReadOnlyDictionary<string, ComponentAsset> LoadDeclarations(
+        string packRoot, string? templateRoot)
+    {
+        ArgumentNullException.ThrowIfNull(packRoot);
+        var diagnostics = new List<PrefabDescriptionDiagnostic>();
+        var assets = LoadAssets(Path.GetFullPath(packRoot), diagnostics);
+        foreach (var pair in LoadTemplateAssets(templateRoot, diagnostics))
+        {
+            assets.TryAdd(pair.Key, pair.Value);
+        }
+
+        return assets;
+    }
 
     private static IReadOnlyList<string> VisibilityNames(MemberVisibility visibility)
     {

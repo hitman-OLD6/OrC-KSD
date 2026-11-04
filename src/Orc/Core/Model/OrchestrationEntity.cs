@@ -223,7 +223,31 @@ public sealed class OrchestrationEntity : Entity
     }
 
     /// <summary>写私有字段（owner 通道；类型与声明不符＝拒绝）。</summary>
-    public void SetPrivateField(string name, object? value)
+    public void SetPrivateField(string name, object? value) => SetValidated(name, value);
+
+    /// <summary>
+    /// **恢复专用批量写回**（本会话 S6／裁决 9；internal——公开面不新增）：一次写入多字段、
+    /// 无事件（写状态不产生数据面写回）、类型校验照做（与 <see cref="SetPrivateField"/> 同一校验路径）。
+    /// <para>
+    /// 为什么不逐个走公开面：写回是**恢复动作的内步**（<c>CreateEntity</c> 之后、<see cref="ComponentAttachment.Assemble"/>
+    /// 之前，D55），调用方是框架恢复流程本身；批内入口把「这批写回属于一次恢复」表达在签名上，
+    /// 也让公开 <see cref="SetPrivateField"/> 的语义保持逐字不变（S7 回归项锁住）。
+    /// </para>
+    /// </summary>
+    /// <exception cref="ArgumentNullException">values 为 null。</exception>
+    /// <exception cref="PermissionDeniedException">字段未声明。</exception>
+    /// <exception cref="InvalidCastException">值类型与声明不符。</exception>
+    internal void RestorePrivateFields(IReadOnlyDictionary<string, object?> values)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        foreach (var pair in values)
+        {
+            SetValidated(pair.Key, pair.Value);
+        }
+    }
+
+    /// <summary>写校验核（<see cref="SetPrivateField"/> 与 <see cref="RestorePrivateFields"/> 共用；逐字段、无事件）。</summary>
+    private void SetValidated(string name, object? value)
     {
         ArgumentNullException.ThrowIfNull(name);
 
@@ -582,6 +606,16 @@ public sealed class OrchestrationEntity : Entity
 
     /// <summary>登记一条包装句柄。</summary>
     internal void Track(WrapHandle handle) => _wrapHandles.Add(handle);
+
+    /// <summary>
+    /// 本实体当前登记的包装句柄条数（只读／无状态／不进公共面）。
+    /// <para>
+    /// 用途：<see cref="ComponentAttachment.Assemble"/> 的**幂等补登记判据**——构造期
+    /// <see cref="OrchestrationRuntime.RegisterWraps"/> 已登记过（首次装配）⇒ 不为零、跳过；
+    /// 装配失败回滚后 <see cref="RevokeAll"/> 已清空 ⇒ 为零、需重新登记（R1 裁决 3）。
+    /// </para>
+    /// </summary>
+    internal int WrapHandleCount => _wrapHandles.Count;
 
     /// <summary>撤销本实体创建的全部边与包装（幂等；句柄级精确撤销）。</summary>
     public void RevokeAll()

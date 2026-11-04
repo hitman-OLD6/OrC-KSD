@@ -141,6 +141,41 @@ public sealed class LogicEngine
         => Orc.Output.AuditChainJson.Serialize(Orchestration.QueryChain(root), indented);
 
     /// <summary>
+    /// **存档求值**（S3／S6 配套；独立入口）：一次性求值全部可存档根实体，返回条目（<c>name</c>＋moding）。
+    /// <para>
+    /// 这是 <c>OrchestrationRuntime.Restore</c> 的**对偶入口**：本轮存档只到快照段、没有存档文件格式
+    /// （也没有 JSON 读回器），故「导出 → 恢复」在同一进程内的接缝就是这两个方法——导出返回 DTO，
+    /// 恢复吃 DTO。序列化另走 <see cref="ExportSave"/>（它<b>复用</b>本方法，不重复求值）。
+    /// </para>
+    /// <para>失败语义与 <see cref="ExportSave"/> 逐字相同：失败即抛、不回退、不跳过（Q5／D50／D51）。</para>
+    /// </summary>
+    /// <exception cref="InvalidOperationException">本引擎未挂载编排运行时（Model == null），或任一实体求值失败。</exception>
+    public IReadOnlyList<SavedEntityRecord> EvaluateSave()
+    {
+        var runtime = Model
+            ?? throw new InvalidOperationException(
+                "存档失败：本引擎未挂载编排运行时（Model == null）——没有可存档的实体面。");
+
+        return SaveEvaluation.EvaluateRoots(runtime, Judicators);
+    }
+
+    /// <summary>
+    /// **存档导出**（本会话 S3／D56；独立入口）：一次性求值全部可存档根实体的 moding
+    /// （先收集完所有条目、再序列化），产出审查链 JSON ＋ <c>savedEntities</c> 可选段。
+    /// <para>
+    /// **不要放进高频路径**（例如每帧）：每次调用都重跑全部作者导出器（ExportSave 每次全量求值——已知限制 C6）。
+    /// **失败即抛、不回退、不跳过**：源不在目录／服务未注册／注册表未装配／导出器返回 null，
+    /// 任一命中即整次存档失败——不产出半份存档（Q5／D50／D51）。
+    /// 与 <see cref="ExportAuditChainJson"/>／<see cref="OrchestrationManager.QueryChain"/> 完全解耦：
+    /// 本方法失败时它们照常成功（既有导出不抛的契约逐字不变——D56）。
+    /// </para>
+    /// </summary>
+    /// <exception cref="InvalidOperationException">本引擎未挂载编排运行时（Model == null），或任一实体求值失败。</exception>
+    public string ExportSave(bool indented = false)
+        => Orc.Output.AuditChainJson.Serialize(
+            Orchestration.BuildSaveChain(EvaluateSave()), indented);
+
+    /// <summary>
     /// 新模型的编排运行时（S10／批次 3；可空）：对局装配期挂上后，审查图可同时导出实体—成员—挂载边。
     /// 未挂载（纯内核/独立构造场景）＝审查图只投影旧路径的边（能力不退化）。
     /// <para>

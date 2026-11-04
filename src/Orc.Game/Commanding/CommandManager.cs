@@ -1253,6 +1253,10 @@ public sealed class CommandManager
     {
         // 嵌套执行（复验＝攻击触发端验证承载——拒绝＝仅本次取消、零副作用＋留痕）。
         // S11：指挥入口只调**攻击动作**（触发端 → 处理端），不在入口内做结算。
+        // unit.attacked 的 Target 载荷用卡对象引用：目标可能随本次攻击阵亡/被替换，发射点不得解引用 Ref
+        // （Ref.Value 失效即抛——一次成功的攻击不该因为目标死了而炸掉信号），故此处先取引用。
+        var attackedTarget = targetRef.IsAlive ? targetRef.Value as Card : null;
+
         var action = await AttackAction.CommandAsync(unit, targetRef, triggerCard, ct).ConfigureAwait(false);
 
         var outcome = action.Targets[0];
@@ -1286,6 +1290,14 @@ public sealed class CommandManager
         await _operateFinalizer.FinalizeAsync(unit, profile, ct);
         box.Result = CommandResult.Success();
         await _operateFinalizer.EmitActedAsync(unit, profile, ct); // E1-33：已阵亡＝不为亡者发射
+
+        // unit.attacked：判据＝Applied 即发（不看伤害量、不看攻击者生死——事件语义，与 unit.acted 的行动经济语义不同），
+        // 时机＝收尾之后（扣费/清位/unit.acted 全部完成后＝"这次攻击彻底结束了"）。
+        // 将来若新增第三条攻击发起路径，必须在同一层补发射（本层是唯一两处发起路径的共同上游）。
+        if (attackedTarget is not null)
+        {
+            await GameUpdates.EmitUnitAttacked(_engine, unit, attackedTarget, byEffect: false, ct).ConfigureAwait(false);
+        }
     }
 
     // ---------- ⑥ 单位移动触发器默认链（执行段） ----------
@@ -1364,7 +1376,39 @@ public sealed class CommandManager
         if(_lifecycle?.IsActionAllowed==false||!unit.TryGetData<UnitStateData>(out var state)||state.IsDestroyed||state.Line is null)return false;
         await using var scope=_engine.BeginAction();
         var result=await AttackAction.EffectAsync(unit,target.Ref,bypassRange,triggerCard:unit,ct).ConfigureAwait(false);
-        return result.Targets[0].Outcome==ActionOutcomeKind.Applied;
+        var applied = result.Targets[0].Outcome==ActionOutcomeKind.Applied;
+
+        // unit.attacked（ByEffect＝true）：Applied 即发、恰一次；本路径不发 unit.acted（零行动经济面）。
+        // 将来若新增第三条攻击发起路径，必须在同一层补发射。
+        if (applied)
+        {
+            await GameUpdates.EmitUnitAttacked(_engine, unit, target, byEffect: true, ct).ConfigureAwait(false);
+        }
+
+        return applied;
+    }
+
+    /// <summary>
+    /// **合法攻击候选（只读转发入口）**：供效果运行期随机选靶（R4「候选枚举与指挥入口同源」）。
+    /// 遍历结构与顺序原样来自 <see cref="CollectAttackCandidates"/>（敌支援线 → 前线 → 敌 HQ），逐候选合法性
+    /// 仍由 <c>combat.target.legal</c> 判定器承担——本入口不复制、不另写第二套判定。
+    /// <para>不做交互面筛选（<c>_inputAllowed</c> 属"人类输入是否合法"，不是目标合法性）。</para>
+    /// </summary>
+    internal IReadOnlyList<Card> AttackCandidatesOf(UnitCard attacker)
+    {
+        ArgumentNullException.ThrowIfNull(attacker);
+        var candidates = CollectAttackCandidates(attacker);
+        var cards = new List<Card>(candidates.Count);
+        foreach (var candidate in candidates)
+        {
+            // 只产卡对象引用（不发信号、不解引用已失效引用——合法性判据已在收集时通过）。
+            if (candidate.IsAlive && candidate.Value is Card card)
+            {
+                cards.Add(card);
+            }
+        }
+
+        return cards;
     }
 
     /// <summary>

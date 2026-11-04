@@ -191,11 +191,11 @@ public class GameHooksTests
         var payloadKeys = constants.Where(c => c.Name.StartsWith("Payload", StringComparison.Ordinal))
             .Select(c => c.Value).ToList();
 
-        // 35 = 原 31 + card.dying（卸载前宿主结算）+ card.leaving（离场前）+ keyword.attack.finished（临时增益到期）
-        // + counter.disarmed（反制武装窗口到期自动解除——与 counter.triggered 成对，R1.3）。
-        Assert.Equal(35, signals.Count);
-        // 18 = 原 17 + Source（R9：事件引发者，恒写、可空）。
-        Assert.Equal(18, payloadKeys.Count);
+        // 36 = 原 31 + card.dying（卸载前宿主结算）+ card.leaving（离场前）+ keyword.attack.finished（临时增益到期）
+        // + counter.disarmed（反制武装窗口到期自动解除——与 counter.triggered 成对，R1.3）+ unit.attacked（攻击结算事件）。
+        Assert.Equal(36, signals.Count);
+        // 20 = 原 17 + Source（R9：事件引发者，恒写、可空）+ Target／ByEffect（unit.attacked 的载荷键）。
+        Assert.Equal(20, payloadKeys.Count);
         Assert.Equal(signals.OrderBy(v => v, StringComparer.Ordinal),
             GameHooks.Signals.OrderBy(v => v, StringComparer.Ordinal));
         Assert.Equal(payloadKeys.OrderBy(v => v, StringComparer.Ordinal),
@@ -239,6 +239,7 @@ public class GameHooksTests
             [GameHooks.UnitDamageDealt] = "EmitUnitDamageDealt",
             [GameHooks.CounterTriggered] = "EmitCounterTriggered",
             [GameHooks.CounterDisarmed] = "EmitCounterDisarmed",
+            [GameHooks.UnitAttacked] = "EmitUnitAttacked",
         };
         var turnSignals = new[]
         {
@@ -246,8 +247,8 @@ public class GameHooksTests
             GameHooks.TurnEndBefore, GameHooks.TurnEnd,
         };
 
-        // 30 = 原 27 + card.leaving + keyword.attack.finished + counter.disarmed。
-        Assert.Equal(30, helpers.Count);
+        // 31 = 原 27 + card.leaving + keyword.attack.finished + counter.disarmed + unit.attacked。
+        Assert.Equal(31, helpers.Count);
         foreach (var (signal, method) in helpers)
         {
             Assert.Contains(signal, GameHooks.Signals);

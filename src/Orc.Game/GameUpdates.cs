@@ -174,6 +174,29 @@ public static class GameUpdates
     public const string UnitActed = "unit.acted";
 
     /// <summary>
+    /// **攻击结算事件**（"unit.attacked"；合计第 36 条；载荷＝{ Unit, Target, ByEffect }——攻击方卡＋被攻击方卡〔单位或 HQ〕
+    /// ＋本次是否由效果发起）。
+    /// <para>
+    /// 语义＝「一次攻击**结算完成**」——**指挥攻击与效果攻击都发**（这正是它存在的理由：<see cref="UnitActed"/> 混装了
+    /// 「攻击」与「移动」，且效果攻击刻意不发它，导致「单位攻击了」这一时机此前无法被数据侧订阅）。
+    /// </para>
+    /// <para>
+    /// **判据＝<c>Applied</c> 即发**：不看伤害量、不看攻击者生死——本信号是**事件**语义（「一次攻击发生过」），
+    /// 与 <see cref="UnitActed"/> 的**行动经济**语义（占行动位/扣费，故不为亡者发射）是两类东西。
+    /// 伏击改写（零伤害）与「攻击者当场阵亡」都发；<c>Blocked</c>／<c>TargetInvalid</c>／<c>Skipped</c> 零发射。
+    /// </para>
+    /// <para>
+    /// <b>载荷 <see cref="PayloadTarget"/> 用卡对象引用承载、发射点**不解引用</b><c>Ref</c>：攻击目标经常在互伤中当场阵亡，
+    /// 解引用会抛 <c>StaleReferenceException</c>，让一次成功的攻击因为目标死了而炸掉信号。调用方自行判 <c>Life.IsAlive</c>。
+    /// </para>
+    /// <para>
+    /// **发射点＝两处攻击发起路径**（<c>CommandManager.DispatchAttackAsync</c>／<c>AttackByEffectAsync</c>），
+    /// 各恰一次、均在收尾之后；将来若新增第三条攻击发起路径，必须在同一层补发射。
+    /// </para>
+    /// </summary>
+    public const string UnitAttacked = "unit.attacked";
+
+    /// <summary>
     /// **造成伤害**（"unit.damage.dealt"；载荷＝{ Unit, Card, Amount }——**施动方单位**＋**受方**（单位或 HQ）＋实际伤害量）。
     /// 语义＝「某单位实际造成了伤害」（**来源侧**归属；与 <see cref="CardDamaged"/>「受方侧」互补）。
     /// 调用点＝①单位互伤（<c>CommandManager.HandleDefaultAttackDamageAsync</c> 双方各自）②HQ 简路（<c>HandleUnitAttackAsync</c>）
@@ -285,6 +308,12 @@ public static class GameUpdates
 
     /// <summary>载荷键：单位（值＝单位卡牌实例引用；unit.* 系列携带）。</summary>
     public const string PayloadUnit = "Unit";
+
+    /// <summary>载荷键：目标（值＝卡牌实例引用〔单位或 HQ〕；unit.attacked 携带——被攻击方）。</summary>
+    public const string PayloadTarget = "Target";
+
+    /// <summary>载荷键：是否由效果发起（值＝bool；unit.attacked 携带——<c>true</c>＝效果攻击、<c>false</c>＝指挥攻击）。</summary>
+    public const string PayloadByEffect = "ByEffect";
 
     /// <summary>载荷键：词条标识（值＝string；keyword.* 系列携带）。</summary>
     public const string PayloadKeyword = "Keyword";
@@ -698,6 +727,30 @@ public static class GameUpdates
             new Dictionary<string, object?>
             {
                 [PayloadUnit] = unit,
+                [PayloadSource] = source,
+            },
+            ct);
+    }
+
+    /// <summary>
+    /// 发射 unit.attacked（载荷＝{ Unit, Target, ByEffect }——攻击方卡＋被攻击方卡〔单位或 HQ〕＋是否效果发起）。
+    /// 调用点＝两处攻击发起路径（指挥攻击收尾之后／效果攻击 <c>Applied</c> 后立即）——各自恰一次。
+    /// <para><b>不要</b>传 <c>Ref.Value</c>：目标可能已在互伤中失效（解引用即抛）——调用方先取卡对象引用再传。</para>
+    /// </summary>
+    /// <exception cref="ArgumentNullException">engine / unit / target 为 null。</exception>
+    public static Task EmitUnitAttacked(
+        LogicEngine engine, Card unit, Card target, bool byEffect, CancellationToken ct = default, Card? source = null)
+    {
+        ArgumentNullException.ThrowIfNull(engine);
+        ArgumentNullException.ThrowIfNull(unit);
+        ArgumentNullException.ThrowIfNull(target);
+        return engine.Emit(
+            UnitAttacked,
+            new Dictionary<string, object?>
+            {
+                [PayloadUnit] = unit,
+                [PayloadTarget] = target,
+                [PayloadByEffect] = byEffect,
                 [PayloadSource] = source,
             },
             ct);

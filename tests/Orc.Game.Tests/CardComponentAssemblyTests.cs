@@ -1,6 +1,11 @@
 using Orc.Core;
 using Orc.Core.Model;
+using Orc.Game.Cards;
+using Orc.Game.Cards.Data;
+using Orc.Game.Cards.Data.Components;
+using Orc.Game.Collections;
 using Orc.Game.Model;
+using Orc.Game.Players;
 using Xunit;
 
 namespace Orc.Game.Tests;
@@ -96,7 +101,93 @@ public sealed class CardComponentAssemblyTests
         Assert.True(fieldComponent.IsAssembled);
     }
 
+    // ==================== ② 装配失败的隔离口径（真实 MountComponent 链路） ====================
+
+    /// <summary>
+    /// 坏组件经**真实装载链路**（<c>LoadAsync</c> → <c>LoadModelComponents</c> → 私有
+    /// <c>MountComponent</c> 的 catch）装配失败：日志说「隔离：该组件不生效」，行为必须与之一致——
+    /// 边通道与包装通道**都不生效**，且失败不产生任何业务事件（不经 <c>Dispose</c> ⇒ 无 <c>effect.removed</c>）。
+    /// <para>
+    /// 不 mock／不反射：失败只能在 <c>AddComponent</c> 抛出时被那条 catch 收下，日志存在即证明走的是该链路。
+    /// 「同一包装在装配成功时会改写数值」由内核重试用例对照证明，本用例不重复。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task BrokenComponent_IsIsolated_OnRealMountPath_AndLogMatchesBehaviour()
+    {
+        var log = new List<string>();
+        var handlers = new HandlerRegistry();
+        handlers.Register("h.broken.rewrite", (view, _, _) =>
+        {
+            log.Add("wrap");
+            ((ViewCarrier)view).Set("Amount", 0); // damage-apply 的可写字段
+            return Task.CompletedTask;
+        });
+
+        var catalog = GameEnginePrefabs.CreateCatalog()
+            .Add(new PrefabDefinition(
+                BrokenComponentId,
+                EntityKind.Component,
+                requiresHost: HostKind.Any,
+                members: new[] { Member("onTurnStart", log) },
+                mounts: new[] { new MountDeclaration($"engine#{GameUpdates.TurnStart}", "onTurnStart") },
+                wraps: new[]
+                {
+                    WrapDeclaration.ForMember(
+                        $"engine#{EngineProcesses.DamageApply}", WrapperPhase.Before, "h.broken.rewrite"),
+                },
+                disposalSignal: "no.such.signal"));
+
+        var runtime = new OrchestrationRuntime(catalog, handlers, GameEnginePrefabs.PrefabId);
+        var engine = new LogicEngine();
+        engine.Model = runtime; // 首次 Emit／挂载之前赋值（替换守卫不触发）
+        using var recorder = new UpdateRecorder(engine);
+
+        var card = new UnitCard(engine, BrokenCardDefinition());
+        await card.LoadAsync(new Player(0, new CardList(), engine)); // 失败被 MountComponent 就地 catch ⇒ 本行不抛
+
+        // ① 日志存在：证明走了 MountComponent 的 catch（同一组件 id、Error 级）。
+        var entry = Assert.Single(
+            engine.RootStream.Entries,
+            e => e.Message.Contains("装配失败（隔离：该组件不生效）", StringComparison.Ordinal));
+        Assert.Contains(BrokenComponentId, entry.Message, StringComparison.Ordinal);
+        Assert.Equal(LogLevel.Error, entry.Level);
+
+        // ② 边通道不生效（turn.start 上有边时 onTurnStart 会被执行）。
+        await runtime.EmitAsync(GameUpdates.TurnStart);
+        Assert.DoesNotContain("onTurnStart", log);
+
+        // ③ 包装通道不生效（未撤销时该 before 包装会改写 Amount 并留下 wrap 痕迹）。
+        await runtime.RunMemberAsync(
+            runtime.Engine,
+            EngineProcesses.DamageApply,
+            new Dictionary<string, object?> { ["Amount"] = 5 });
+        Assert.DoesNotContain("wrap", log);
+
+        // ④ 回滚不产生业务事件。
+        Assert.DoesNotContain(Updates.EffectRemoved, recorder.Types);
+
+        // ⑤ 口径固化（非验收项）：失败条目仍占用宿主的组件集合（L2 现状，由宿主 DisposeAll 收拾）。
+        Assert.NotNull(card.ModelEntity);
+        Assert.Contains(runtime.ComponentsOf(card.ModelEntity!), a => a.Type.Id == BrokenComponentId);
+    }
+
     // ==================== 场景构件 ====================
+
+    private const string BrokenComponentId = "comp.broken";
+
+    /// <summary>
+    /// 携带坏组件的卡定义：效果引用 <c>comp.broken</c> ＋ 单位卡必需的内置组件（国籍／稀有度）。
+    /// </summary>
+    private static CardDefinition BrokenCardDefinition()
+        => new(
+            "破组件卡",
+            new ICardDataComponentDefinition[]
+            {
+                new FactionCostDefinition(Faction.Germany, 1),
+                new TagDataDefinition(Rarity.Standard, Array.Empty<string>()),
+                new EffectsDefinition(new[] { BrokenComponentId }),
+            });
 
     /// <summary>游戏层引擎（真实 39 信号）＋两个组件预制体（贴在 card.damaged 上，测试用）。</summary>
     private static OrchestrationRuntime Runtime(List<string> log)

@@ -48,6 +48,13 @@ public static class AuditChainJson
         WriteRandomSelectors(writer, chain.RandomSelectors);
         WriteChoiceSelectors(writer, chain.ChoiceSelectors);
 
+        // 存档可选段（本会话 S5／D56）：**键缺席**＝没求值存档（默认审查导出——行为逐字不变）；
+        // `[]`＝求值了但无实体可存。两者必须可区分，故 null 不写键、空数组照写。
+        if (chain.SavedEntities is not null)
+        {
+            WriteSavedEntities(writer, chain.SavedEntities);
+        }
+
         writer.WriteStartArray("nodes");
         foreach (var node in chain.Nodes)
         {
@@ -56,6 +63,25 @@ public static class AuditChainJson
 
         writer.WriteEndArray();
         writer.WriteEndObject();
+    }
+
+    /// <summary>
+    /// <c>savedEntities</c> 段（本会话 S5）：条目＝<c>{ name, moding }</c>；
+    /// moding 形态由 <see cref="SaveModingJson.WriteModing"/> 承载（同一确定性纪律：固定段序＋表内 ordinal 排序）。
+    /// </summary>
+    private static void WriteSavedEntities(Utf8JsonWriter writer, IReadOnlyList<SavedEntityRecord> records)
+    {
+        writer.WriteStartArray("savedEntities");
+        foreach (var record in records)
+        {
+            writer.WriteStartObject();
+            writer.WriteString("name", record.Name);
+            writer.WritePropertyName("moding");
+            SaveModingJson.WriteModing(writer, record.Moding);
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
     }
 
     /// <summary>

@@ -56,15 +56,20 @@ public class EffectTemplateFlattenTests : IDisposable
         Assert.True(result.Success, result.Describe());
         var product = AssetSchema.Read(result.ProductJson!, "product");
 
-        // R31 第 2 条：产物无 abstract、成员均有 handler。
-        Assert.False(product.Abstract);
-        Assert.All(product.Members, m => Assert.False(m.Abstract));
+        // R31 第 2 条／S28：产物饱和（无未填空位）、成员均有 handler，且保留 slot 声明（可再填）。
+        Assert.False(product.HasUnfilledSlots);
+        Assert.All(product.Members, m => Assert.False(m.IsUnfilledSlot));
         Assert.All(product.Members, m => Assert.NotNull(m.Handler));
+        Assert.All(product.Members, m => Assert.NotNull(m.Slot));
 
         // 产物洁净（用户约束 #6）：既无 abstract 也无 guard（守卫已烘进 csx）。
         Assert.DoesNotContain("\"abstract\"", result.ProductJson!, StringComparison.Ordinal);
         Assert.DoesNotContain("\"guard\"", result.ProductJson!, StringComparison.Ordinal);
         Assert.DoesNotContain("\"label\"", result.ProductJson!, StringComparison.Ordinal);
+
+        // 产物保留 slot 但**不是模板**（判据是「未填」而不是「有无声明」，D39／D40 的直接推论）。
+        var productCatalog = new PrefabCatalog().Add(product.ToStructuralPrefabDefinition());
+        Assert.False(productCatalog.Resolve(product.Id).HasUnfilledSlots);
 
         // 挂载随模板继承：产物仍然挂在信号上（否则效果永不触发）。
         var mount = Assert.Single(product.Mounts);
@@ -103,18 +108,43 @@ public class EffectTemplateFlattenTests : IDisposable
         var error = Assert.Single(result.Errors);
         Assert.Contains("onHook", error.Message, StringComparison.Ordinal);
         Assert.Contains("template.unit.deployed.self", error.Message, StringComparison.Ordinal);
-        Assert.Contains("抽象成员", error.Message, StringComparison.Ordinal);
+        Assert.Contains("空位", error.Message, StringComparison.Ordinal);
+        Assert.Contains("尚未填充 handler", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void 草案重新声明abstract_仍视为未实现()
+    public void 草案重新声明slot但不填handler_仍视为未实现()
     {
-        WriteDraft("template.unit.deployed.self", "unit", abstractMember: true);
+        WriteDraft("template.unit.deployed.self", "unit", unfilledSlot: true);
 
         var result = ModingFlattener.Flatten(_pack, DraftPath, _dsl, _templateRoot);
 
         Assert.False(result.Success);
-        Assert.Contains(result.Errors, e => e.Message.Contains("重新声明为 abstract", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, e => e.Message.Contains("仍然没有实现体", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void 装载期与摊平期对同一夹具结论一致()
+    {
+        // S32「易错点」的守护：两个判定点必须读同一份事实（slot ∧ ¬handler）。
+        var templatePath = Path.Combine(_templateRoot, "effects-v4", "template.unit.deployed.self.component.json");
+        var template = AssetSchema.Read(File.ReadAllText(templatePath), "template");
+        Assert.True(template.HasUnfilledSlots);
+
+        // 未实现的草案 ⇒ 摊平拒绝（错误逐条列空位）。
+        WriteDraft("template.unit.deployed.self", "unit", includeMember: false);
+        var missing = ModingFlattener.Flatten(_pack, DraftPath, _dsl, _templateRoot);
+        Assert.False(missing.Success);
+        Assert.Contains(missing.Errors, e => e.Message.Contains("onHook", StringComparison.Ordinal));
+
+        // 实现了 ⇒ 摊平成功，产物与模板在**同一个谓词**下互为反面。
+        WriteDraft("template.unit.deployed.self", "unit");
+        var filled = ModingFlattener.Flatten(_pack, DraftPath, _dsl, _templateRoot);
+        Assert.True(filled.Success, filled.Describe());
+
+        var product = AssetSchema.Read(filled.ProductJson!, "product");
+        Assert.False(product.HasUnfilledSlots);
+        Assert.NotEqual(template.HasUnfilledSlots, product.HasUnfilledSlots);
     }
 
     [Fact]
@@ -164,7 +194,7 @@ public class EffectTemplateFlattenTests : IDisposable
         var result = ModingFlattener.Flatten(_pack, DraftPath, _dsl, _templateRoot);
 
         Assert.False(result.Success);
-        var missing = result.Errors.Where(e => e.Message.Contains("抽象成员", StringComparison.Ordinal)).ToArray();
+        var missing = result.Errors.Where(e => e.Message.Contains("空位", StringComparison.Ordinal)).ToArray();
         Assert.Equal(2, missing.Length);
         Assert.Contains(missing, e => e.Message.Contains("onDeploy", StringComparison.Ordinal));
         Assert.Contains(missing, e => e.Message.Contains("onDraw", StringComparison.Ordinal));
@@ -274,7 +304,7 @@ public class EffectTemplateFlattenTests : IDisposable
         string parentId,
         string requiresHost,
         bool includeMember = true,
-        bool abstractMember = false,
+        bool unfilledSlot = false,
         string memberName = "onHook",
         string[]? fields = null)
     {
@@ -283,6 +313,18 @@ public class EffectTemplateFlattenTests : IDisposable
             ",\n",
             viewFields.Select(static f =>
                 $$"""            { "name": "{{f}}", "type": "entity", "writable": false, "required": false }"""));
+        var handlerJson = unfilledSlot
+            ? $$"""
+                      "slot": { "type": "handler" }
+            """
+            : $$"""
+                      "handler": {
+                        "id": "demo.deployed.draft#{{memberName}}",
+                        "entry": "HandleAsync",
+                        "dsl": "{{DslPath}}",
+                        "dslHash": "{{HandlerContent.Hash(Dsl)}}"
+                      }
+            """;
         var memberJson = includeMember
             ? $$"""
                     {
@@ -291,13 +333,7 @@ public class EffectTemplateFlattenTests : IDisposable
                       "view": { "fields": [
             {{fieldsJson}}
                       ] },
-                      {{(abstractMember ? "\"abstract\": true," : string.Empty)}}
-                      "handler": {
-                        "id": "demo.deployed.draft#{{memberName}}",
-                        "entry": "HandleAsync",
-                        "dsl": "{{DslPath}}",
-                        "dslHash": "{{HandlerContent.Hash(Dsl)}}"
-                      }
+            {{handlerJson}}
                     }
             """
             : string.Empty;
@@ -336,7 +372,6 @@ public class EffectTemplateFlattenTests : IDisposable
               "asset": {
                 "kind": "component",
                 "id": "template.plain",
-                "authorize-moding": true,
                 "requires-host": "any",
                 "active-when": "loaded",
                 "one-shot": false,
@@ -360,7 +395,7 @@ public class EffectTemplateFlattenTests : IDisposable
                   "name": "{{m.Member}}",
                   "visibility": [ "mountable" ],
                   "view": { "fields": [] },
-                  "abstract": true,
+                  "slot": { "type": "handler" },
                   "guard": "{{m.Guard}}"
                 }
                 """));
@@ -377,7 +412,6 @@ public class EffectTemplateFlattenTests : IDisposable
               "asset": {
                 "kind": "component",
                 "id": "{{id}}",
-                "abstract": true,
                 "requires-host": "{{declaredHost}}",
                 "active-when": "loaded",
                 "one-shot": false,

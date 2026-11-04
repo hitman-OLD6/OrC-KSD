@@ -196,7 +196,6 @@ public class TemplateDescriptionTests : IDisposable
           "asset": {
             "kind": "component",
             "id": "demo.parent",
-            "authorize-moding": true,
             "label": "演示用组件",
             "description": "给前端看的一段说明",
             "requires-host": "unit",

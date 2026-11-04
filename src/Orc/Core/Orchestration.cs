@@ -93,6 +93,21 @@ public sealed class OrchestrationManager
             _engine.ChoiceSelections.ToArray());
     }
 
+    /// <summary>
+    /// 存档链（本会话 S5／D56）：既有审查链的只读数据 ＋ <paramref name="savedEntities"/> 可选段——
+    /// **独立入口**（<see cref="LogicEngine.ExportSave"/>）专用；默认 <see cref="BuildAuditChain"/> 不求值存档、
+    /// 行为逐字不变（「由内容触发的雷」不装进四处在用的诊断面）。
+    /// </summary>
+    /// <exception cref="ArgumentNullException">savedEntities 为 null（求值过就该有数组，空也是数组）。</exception>
+    public AuditChain BuildSaveChain(IReadOnlyList<SavedEntityRecord> savedEntities)
+    {
+        ArgumentNullException.ThrowIfNull(savedEntities);
+        var chain = BuildAuditChain();
+        return new AuditChain(
+            chain.SchemaVersion, chain.Nodes, chain.Graph, chain.Packages, chain.RandomSelectors,
+            chain.ChoiceSelectors, savedEntities);
+    }
+
     // ---------- 内部 ----------
 
     /// <summary>
@@ -177,7 +192,8 @@ public sealed class AuditChain
         Orc.Core.Model.AuditGraph graph,
         IReadOnlyList<PackLoadRecord> packages,
         IReadOnlyList<RandomSelectionRecord> randomSelectors,
-        IReadOnlyList<ChoiceSelectionRecord> choiceSelectors)
+        IReadOnlyList<ChoiceSelectionRecord> choiceSelectors,
+        IReadOnlyList<SavedEntityRecord>? savedEntities = null)
     {
         SchemaVersion = schemaVersion;
         Nodes = nodes;
@@ -185,6 +201,7 @@ public sealed class AuditChain
         Packages = packages;
         RandomSelectors = randomSelectors;
         ChoiceSelectors = choiceSelectors;
+        SavedEntities = savedEntities;
     }
 
     /// <summary>schema 版本（演进兼容锚点）。</summary>
@@ -221,6 +238,14 @@ public sealed class AuditChain
     /// <para><see cref="ChoiceSelectionRecord.Picked"/> 为 **1 起**，与 <c>target.submit</c> 的 <c>picks</c> 同口径。</para>
     /// </summary>
     public IReadOnlyList<ChoiceSelectionRecord> ChoiceSelectors { get; }
+
+    /// <summary>
+    /// **可存档实体**（本会话 S5／D56；可选段）：null＝这次导出**没求值**存档（默认审查导出——
+    /// 行为逐字不变）；空数组＝求值了但无实体可存。两者必须可区分（缺席≠空）。
+    /// <para>条目＝<see cref="SavedEntityRecord"/>（name＋moding）；只经 <see cref="OrchestrationManager.BuildSaveChain"/>
+    /// 进入，与审查图（<c>entities</c>＝"这局出现过哪些实体"的审计事实）分开——存档是"读档需要重建什么"的状态数据。</para>
+    /// </summary>
+    public IReadOnlyList<SavedEntityRecord>? SavedEntities { get; }
 }
 
 /// <summary>审查链节点：一个成员及其实例（外来边）、步骤与声明的下游。</summary>

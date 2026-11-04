@@ -11,18 +11,19 @@ public sealed class ComponentAsset
 {
     /// <summary>创建组件资产。</summary>
     /// <exception cref="ArgumentNullException">id／集合为 null。</exception>
-    /// <exception cref="ArgumentException">id 为空或纯空白；extends 自指；抽象资产显式关闭授权。</exception>
+    /// <exception cref="ArgumentException">id 为空或纯空白；extends 自指；空位重名／跨层重名。</exception>
     /// <param name="extends">父资产 id（null＝自包含）。</param>
-    /// <param name="authorizesModing">
-    /// 资产级可重载开关（R2；缺省关闭）。**null＝未声明**——与显式 <c>false</c> 区分：
-    /// 抽象资产（<paramref name="isAbstract"/>）未声明时**缺省推导为 true**，显式 <c>false</c> ＝装载期拒绝（D29）。
-    /// </param>
-    /// <param name="isAbstract">
-    /// **资产级抽象**（R30）：本资产是模板、不是可装配组件——被卡牌 <c>components</c> 引用＝装载期拒绝
-    /// （「模板不可实例化」）。资产级仍可注册、可被编辑期展开（否则草案的父无从解析，D28）。
-    /// </param>
     /// <param name="label">展示名（R35；null＝未声明，前端回退显示 id）。</param>
     /// <param name="description">展示描述（R35；null＝未声明）。模板的 description 取信号的 <c>Notes</c>。</param>
+    /// <param name="slots">
+    /// **资产级空位**（R39 裁决 8；null／空＝无空位）：绑定整个资产，五种标量／引用类型，
+    /// 多成员可引用同名。与成员级 <c>members[].slot</c> 共用一套类型与一个扁平 <c>args</c> 表；
+    /// **跨层不得重名**（空位名与成员名撞名＝拒绝）。
+    /// </param>
+    /// <param name="origin">
+    /// **出身记录**（R39 裁决 10／S30／S31；null＝手写资产没有）：只用于追溯与编辑器回填，
+    /// **不是依赖**、不参与解析、不派生 id；模板／草案被删不影响装载。
+    /// </param>
     public ComponentAsset(
         string id,
         HostKind requiresHost,
@@ -35,22 +36,14 @@ public sealed class ComponentAsset
         IReadOnlyList<WrapDeclaration> wraps,
         IReadOnlyList<ComponentJudgeWrapAsset> judgeWraps,
         string? extends = null,
-        bool? authorizesModing = null,
-        bool isAbstract = false,
         string? label = null,
-        string? description = null)
+        string? description = null,
+        IReadOnlyList<AssetSlotDeclaration>? slots = null,
+        AssetOrigin? origin = null,
+        string? save = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentNullException.ThrowIfNull(privateFields);
-
-        if (isAbstract && authorizesModing == false)
-        {
-            // D29 的二分：未声明＝推导 true（零诊断）；显式 false ＝矛盾，装载期拒绝（不宽容、不提示）。
-            throw new ArgumentException(
-                $"资产 '{id}' 声明了 abstract: true 却显式关闭 authorize-moding: false："
-                + "抽象资产必须可被覆写（模板不可被覆写就没有意义）——这是显式矛盾，不是可忽略的冗余声明。",
-                nameof(authorizesModing));
-        }
 
         Id = id;
         RequiresHost = requiresHost;
@@ -63,15 +56,55 @@ public sealed class ComponentAsset
         Wraps = wraps ?? throw new ArgumentNullException(nameof(wraps));
         JudgeWraps = judgeWraps ?? throw new ArgumentNullException(nameof(judgeWraps));
         Extends = string.IsNullOrWhiteSpace(extends) ? null : extends.Trim();
-        Abstract = isAbstract;
-        // 缺省推导（不是判定时隐式视作 true）：读入时就把值落定，下游无需再问「它是不是抽象」。
-        AuthorizesModing = isAbstract || (authorizesModing ?? false);
         Label = string.IsNullOrWhiteSpace(label) ? null : label.Trim();
         Description = string.IsNullOrWhiteSpace(description) ? null : description;
+        Slots = slots?.ToArray() ?? Array.Empty<AssetSlotDeclaration>();
+        Origin = origin;
+        Save = SavePolicy.Normalize(save);
 
         if (Extends is not null && string.Equals(Extends, Id, StringComparison.Ordinal))
         {
             throw new ArgumentException($"资产 '{Id}' 的 extends 指向自身（继承不得自指）。", nameof(extends));
+        }
+
+        ValidateSlots();
+    }
+
+    /// <summary>
+    /// **空位的两层校验**（R39 裁决 8）：只在这里做一次，读写与构造共用。
+    /// <list type="bullet">
+    ///   <item>资产级空位名在资产内唯一；</item>
+    ///   <item>**跨层不得重名**：资产级空位名不得与任何成员名相同（成员级空位的键就是成员名）；</item>
+    ///   <item>成员级空位只接受 <c>handler</c>（类型判定在 <see cref="MemberSlotDeclaration"/> 的构造期）。</item>
+    /// </list>
+    /// </summary>
+    /// <exception cref="ArgumentException">重名或放错层。</exception>
+    private void ValidateSlots()
+    {
+        if (Slots.Count == 0 && Members.All(static m => m.Slot is null))
+        {
+            return;
+        }
+
+        var slotNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var slot in Slots)
+        {
+            if (!slotNames.Add(slot.Name))
+            {
+                throw new ArgumentException(
+                    $"资产 '{Id}' 重复声明资产级空位 '{slot.Name}'（args 是扁平表，键必须唯一）。", "slots");
+            }
+        }
+
+        foreach (var member in Members)
+        {
+            if (slotNames.Contains(member.Name))
+            {
+                throw new ArgumentException(
+                    $"资产 '{Id}' 的资产级空位与成员名同为 '{member.Name}'："
+                    + "args 是一层扁平具名表，跨层不得重名（空位名与成员名必须分开，R39 裁决 8）。",
+                    "slots");
+            }
         }
     }
 
@@ -119,23 +152,46 @@ public sealed class ComponentAsset
     /// </summary>
     public string? Extends { get; }
 
-    /// <summary>
-    /// 资产级「本资产可被 moding」开关（R2；缺省关闭）。父未打开＝任何成员覆写都是装载期拒绝。
-    /// <para>抽象资产（<see cref="Abstract"/>）恒为 true（D29：未声明时缺省推导、显式 false 已拒绝）。</para>
-    /// </summary>
-    public bool AuthorizesModing { get; }
+    // 废止留痕（R39 裁决 4／5，S28／S32）：
+    //  - 资产级 `authorize-moding`（R2）不再存在：覆写资格只由「链上声明了成员级 slot ∧ 未 sealed」决定；
+    //  - 资产级 `abstract`（R30）不再存在：抽象性由「存在未填空位」推导（见 HasUnfilledSlots）。
+    // 两者的 JSON 字段在 AssetSchema.Read 里按「已废止字段」拒绝（不是静默忽略）。
 
     /// <summary>
-    /// **资产级抽象**（R30；D28）：本资产是模板——可注册、可被编辑期展开，但**不得被 <c>components</c> 引用**
-    /// 进对局（装载期拒绝「模板不可实例化」）。与成员级抽象是两件事，判定点不同。
+    /// **本资产是否饱和**（R39 裁决 4／8；S28 的唯一判定入口之一）。
+    /// <para>
+    /// 未填 ＝ 资产级 <c>slot ∧ ¬value</c> **∨** 成员级 <c>slot ∧ ¬handler</c>——两层取或，
+    /// **不是**「先查一层再查另一层」的两段式。装载期、摊平期、DTO 都只调这个谓词（或它在展开层的投影）。
+    /// </para>
     /// </summary>
-    public bool Abstract { get; }
+    public bool HasUnfilledSlots => Slots.Any(static slot => !slot.IsFilled) || Members.Any(static m => m.IsUnfilledSlot);
 
     /// <summary>展示名（R35；null＝未声明，前端回退显示 <see cref="Id"/>）。</summary>
     public string? Label { get; }
 
     /// <summary>展示描述（R35；null＝未声明）。模板的 description 直接取信号的 <c>Notes</c>。</summary>
     public string? Description { get; }
+
+    /// <summary>
+    /// **资产级空位**（R39 裁决 8；空数组＝无空位）：绑定整个资产，多成员可引用同名。
+    /// 状态只看条目有没有 <see cref="AssetSlotDeclaration.Value"/>，不另设标志位。
+    /// </summary>
+    public IReadOnlyList<AssetSlotDeclaration> Slots { get; }
+
+    /// <summary>
+    /// **出身记录**（R39 裁决 10／S30／S31；null＝手写资产）：摊平产物带 <c>draftId</c>，
+    /// <c>named</c> 实例带 <c>templateId</c>／<c>argsHash</c>／<c>args</c>。
+    /// <para>**不是依赖**：装载链不得因它缺失或解析不到而拒绝资产（R8／R10 同向）。</para>
+    /// </summary>
+    public AssetOrigin? Origin { get; }
+
+    /// <summary>
+    /// **存档门户**（本会话 S1／D50；null＝未声明＝不可存档）：存档导出器的服务 id。
+    /// **沿 <c>Extends</c> 链继承、子可覆盖**（合并在 <see cref="PrefabCatalog.Build"/>）；
+    /// 装载期只校验形态（<see cref="SavePolicy.Normalize"/>），不校验服务存在性。
+    /// <para>handler 的存在即开关的存档版：<c>save</c> 字段的**存在**本身就是可存档的开关，不另设布尔标志。</para>
+    /// </summary>
+    public string? Save { get; }
 
     /// <summary>
     /// 判定器包装的 handler 资产 id（判定器名 + 资产 id：同一判定器可被多个资产各包一层，
@@ -193,8 +249,9 @@ public sealed class ComponentAsset
                 bands: member.Bands,
                 seams: member.Seams,
                 sealedMember: member.Sealed,
-                abstractMember: member.Abstract,
-                guard: member.Guard));
+                guard: member.Guard,
+                slot: member.Slot,
+                hasHandler: member.Handler is not null));
         }
 
         var wraps = new List<WrapDeclaration>(Wraps.Count + JudgeWraps.Count);
@@ -220,10 +277,12 @@ public sealed class ComponentAsset
             activeWhen: ActiveWhen,
             oneShot: OneShot,
             disposalSignal: DisposalSignal,
-            authorizesModing: AuthorizesModing,
-            isAbstract: Abstract,
             label: Label,
-            description: Description);
+            description: Description,
+            slots: Slots,
+            // 出身记录与存档门户一并透传（D52：origin 投影到预制体层；save 门户进 Build 沿链合并）。
+            origin: Origin,
+            save: Save);
     }
 }
 
@@ -236,12 +295,13 @@ public sealed class ComponentAsset
 /// <param name="Bands">段序声明（有序段名；null＝单段方案）。</param>
 /// <param name="Seams">handler 内部的具名插入点（null／空＝不声明；R1i 修订 2026-10-29：seam 恢复）。</param>
 /// <param name="Sealed">成员级封死（R2；缺省 false＝可覆写；父用它逐个排除成员）。</param>
-/// <param name="Abstract">
-/// 成员级抽象（R30／R31；缺省 false＝已实现）：handler 是空洞、必须由子实现。
-/// **只在摊平期判**（D28）；摊平产物不得携带本字段。
-/// </param>
 /// <param name="Guard">守卫档（R32；null＝不守卫）。**摊平产物不得携带本字段**（守卫已烘进 csx）。</param>
 /// <param name="Label">展示名（R35；null＝未声明，前端回退显示成员名）。</param>
+/// <param name="Slot">
+/// **成员级空位**（R39 裁决 8；null＝本成员不是空位）：只接受 <c>handler</c>，绑定单个成员。
+/// 与 <paramref name="Handler"/> **正交**（D40）：本字段＝「这里有一个空位」，handler＝「现在填的是什么」。
+/// 四行判定表（未填／已填可再填／普通成员／纯编排成员）就是这两个字段的存在性组合，**没有第三个状态位**。
+/// </param>
 public sealed record ComponentMemberAsset(
     string Name,
     MemberVisibility Visibility,
@@ -251,9 +311,17 @@ public sealed record ComponentMemberAsset(
     IReadOnlyList<string>? Bands = null,
     IReadOnlyList<string>? Seams = null,
     bool Sealed = false,
-    bool Abstract = false,
     HandlerGuard? Guard = null,
-    string? Label = null);
+    string? Label = null,
+    MemberSlotDeclaration? Slot = null)
+{
+    /// <summary>
+    /// **未填空位**（D40 判定表第 1 行；S28／S32 的**唯一**成员层判据）：
+    /// 声明了 <c>slot</c> 却没有 <c>handler</c>。
+    /// <para>「已填」只看 handler 是否存在，与内容无关（D40）；没有第三态标志位。</para>
+    /// </summary>
+    public bool IsUnfilledSlot => Slot is not null && Handler is null;
+}
 
 /// <summary>handler 资产声明：id ＋ 入口名 ＋ （csx 源码 ／ 程序集键 ／ handler DSL 文档，三选一）。</summary>
 /// <param name="Id">资产 id（全局唯一；多份资产可引用同一 id）。</param>

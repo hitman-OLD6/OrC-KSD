@@ -26,6 +26,11 @@ namespace Orc.Packages.Editing;
 /// <param name="MountableTargets">可挂载目标（信号清单；每条带 <see cref="PrefabMountableTarget.Timing"/>）。</param>
 /// <param name="WrappableMembers">可包装成员与相位（含可写字段，与视图声明同源）。</param>
 /// <param name="Diagnostics">诊断（父未注册、草案缺失、草案父不一致等）。</param>
+/// <param name="Stage">
+/// **身份阶段**（R39 裁决 13／S33）：<see cref="PrefabStage.Virtual"/>＝编辑器会话里的未保存 names 记录；
+/// <see cref="PrefabStage.Test"/>＝已 <c>Save</c>（测试 lock）；<see cref="PrefabStage.Formal"/>＝已转正（正式 lock）。
+/// 前端据此显示「未保存」并禁用「被卡数据引用」相关入口。
+/// </param>
 public sealed record PrefabDescription(
     string PackRoot,
     string PrefabAssetId,
@@ -34,7 +39,21 @@ public sealed record PrefabDescription(
     IReadOnlyList<PrefabMemberDescription> Members,
     IReadOnlyList<PrefabMountableTarget> MountableTargets,
     IReadOnlyList<PrefabWrappableMember> WrappableMembers,
-    IReadOnlyList<PrefabDescriptionDiagnostic> Diagnostics);
+    IReadOnlyList<PrefabDescriptionDiagnostic> Diagnostics,
+    PrefabStage Stage = PrefabStage.Formal);
+
+/// <summary>预制体在资产体系里的**身份阶段**（R39 裁决 13）：三态只影响可见面与能否被引用，不影响形态。</summary>
+public enum PrefabStage
+{
+    /// <summary>虚拟记录：只在编辑器会话内可见，**不可被卡数据引用**（`PrefabCatalog` 正式解析面不认）。</summary>
+    Virtual,
+
+    /// <summary>已保存（测试段）：进资产库与测试 lock，测试段可引用。</summary>
+    Test,
+
+    /// <summary>已转正（正式段）：进正式 lock，可被正式卡数据引用。</summary>
+    Formal,
+}
 
 /// <summary>父资产摘要（展开后的预制体层信息；纯数据）。</summary>
 /// <param name="Id">预制体 id。</param>
@@ -45,13 +64,13 @@ public sealed record PrefabDescription(
 /// <param name="ActiveWhen">装配时点（<c>loaded</c>／<c>placed</c>）。</param>
 /// <param name="OneShot">是否一次性组件。</param>
 /// <param name="DisposalSignal">兜底信号。</param>
-/// <param name="AuthorizesModing">
-/// 资产级可重载开关（R2）：关闭时任何成员覆写都是装载期拒绝——前端据此把「重载成员」入口整体灰掉。
-/// </param>
 /// <param name="IsTemplate">
-/// 是否**模板**（R34 第 2 条；＝资产的 <c>abstract: true</c>）：前端据此显示「模板」标记、
-/// 允许「从模板新建」而不是「打开已有资产改名」。
+/// 是否**模板**（R39 裁决 4；＝存在未填空位，S28 的合并谓词）：前端据此显示「模板」标记、
+/// 允许「从模板新建」而不是「打开已有资产改名」。成员级的「可覆写」看
+/// <see cref="PrefabMemberDescription.Overridable"/>——**没有资产级开关字段**（R39 裁决 5 已废止）。
 /// </param>
+/// <param name="Slots">合并后的空位 schema（S33：父链声明的资产级空位对表单可见）。</param>
+/// <param name="Origin">出身记录（S31；null＝手写资产）：仅供追溯／编辑器回填，不是依赖。</param>
 /// <param name="Label">展示名（R35；null＝未声明，前端回退显示 <see cref="Id"/>）。</param>
 /// <param name="Description">展示描述（R35；null＝未声明）。</param>
 public sealed record PrefabSummary(
@@ -63,10 +82,28 @@ public sealed record PrefabSummary(
     string ActiveWhen,
     bool OneShot,
     string DisposalSignal,
-    bool AuthorizesModing,
     bool IsTemplate = false,
+    IReadOnlyList<PrefabSlotDescription>? Slots = null,
+    AssetOrigin? Origin = null,
     string? Label = null,
     string? Description = null);
+
+/// <summary>空位 schema 的一行（S33；纯数据，供编辑器／前端表单消费）。</summary>
+/// <param name="Name">键名（资产级＝空位名；成员级＝成员名）。</param>
+/// <param name="Type">类型（<c>number</c>／<c>string</c>／<c>bool</c>／<c>enum</c>／<c>asset-ref</c>／<c>handler</c>）。</param>
+/// <param name="Scope">作用域（<c>asset</c>／<c>member</c>；仅展示用，<c>args</c> 本身是扁平表）。</param>
+/// <param name="Sealed">是否禁止再填。</param>
+/// <param name="Filled">是否已填（声明期值／成员 handler）。</param>
+/// <param name="RuntimeEffect">是否影响运行期行为（<c>asset-ref</c>＝false，R39 裁决 15）。</param>
+/// <param name="EnumValues"><c>enum</c> 取值集。</param>
+public sealed record PrefabSlotDescription(
+    string Name,
+    string Type,
+    string Scope,
+    bool Sealed,
+    bool Filled,
+    bool RuntimeEffect,
+    IReadOnlyList<string>? EnumValues = null);
 
 /// <summary>草案摘要（有草案＝非 null；**只报增量**，展开表由查询现算，D13）。</summary>
 /// <param name="Path">草案相对包根的路径（<c>/</c> 分隔）。</param>
@@ -111,10 +148,13 @@ public sealed record PrefabWrapSummary(string Target, string Phase, string? Seam
 /// <param name="SignalTiming">信号时机（<c>any</c>／<c>load</c>／<c>placed</c>；非信号＝null）。</param>
 /// <param name="Sealed">成员级封死（R2）。</param>
 /// <param name="RequiresImplementation">
-/// 该成员**必须由子实现**（R34 第 2 条；＝成员级 <c>abstract: true</c>）：前端据此把未实现成员标红并拦住摊平。
+/// 该成员**必须由子实现**（R34 第 2 条／S32：＝ <c>slot ∧ ¬handler</c>）：前端据此把未实现成员标红并拦住摊平。
 /// <para>与 <see cref="Overridable"/> 是两件事：前者＝「父是抽象、必须填」，后者＝「允许覆写、可选改」。</para>
 /// </param>
-/// <param name="Overridable">本次是否允许被覆写（资产级开关打开 且 未封死）。</param>
+/// <param name="Overridable">
+/// 本次是否允许被覆写（R39 裁决 5／D39）：**本成员**在链上声明了 <c>slot</c> ∧ 未 <c>sealed</c>
+/// （<c>framework.</c> 前缀恒 sealed）。与「有没有 handler」无关——判定表第 1、2 行都为 true。
+/// </param>
 /// <param name="SeamNames">handler 内部的具名插入点。</param>
 /// <param name="ViewFields">视图字段（名／类型／可写／必填）。</param>
 /// <param name="HandlerSource">handler 来源（<c>script</c>／<c>dsl</c>／<c>assembly-key</c>；无 handler＝null）。</param>

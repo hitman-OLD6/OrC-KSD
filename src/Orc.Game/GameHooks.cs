@@ -93,7 +93,7 @@ public sealed record GameHookPendingTrigger(
 /// </summary>
 public static class GameHooks
 {
-    // ---------- 对外信号（35 条；转发引用 GameUpdates） ----------
+    // ---------- 对外信号（36 条；转发引用 GameUpdates） ----------
 
     /// <summary>回合开始前（<c>turn.start.before</c>）。</summary>
     public const string TurnStartBefore = GameUpdates.TurnStartBefore;
@@ -185,6 +185,9 @@ public static class GameHooks
     /// <summary>单位行动后（<c>unit.acted</c>；E1-33）。</summary>
     public const string UnitActed = GameUpdates.UnitActed;
 
+    /// <summary>攻击结算事件（<c>unit.attacked</c>；指挥攻击与效果攻击都发）。</summary>
+    public const string UnitAttacked = GameUpdates.UnitAttacked;
+
     /// <summary>交战并存活（<c>unit.combat.survived</c>；E1-39）。</summary>
     public const string UnitCombatSurvived = GameUpdates.UnitCombatSurvived;
 
@@ -200,7 +203,7 @@ public static class GameHooks
     /// <summary>词条临时增益到期相位（<c>keyword.attack.finished</c>）。</summary>
     public const string KeywordAttackFinished = GameUpdates.KeywordAttackFinished;
 
-    /// <summary>对外信号全量（35 条；稳定序＝定义序）。</summary>
+    /// <summary>对外信号全量（36 条；稳定序＝定义序）。</summary>
     public static IReadOnlyList<string> Signals { get; } = new[]
     {
         TurnStartBefore, TurnStart, TurnStartAfter, TurnEndBefore, TurnEnd,
@@ -212,9 +215,10 @@ public static class GameHooks
         PointGained, PointLost, PointChanged,
         CardDamaged, UnitActed, UnitCombatSurvived, UnitDamageDealt, CounterTriggered, CounterDisarmed,
         KeywordAttackFinished,
+        UnitAttacked,
     };
 
-    // ---------- 载荷键（17 条；转发引用 GameUpdates） ----------
+    // ---------- 载荷键（20 条；转发引用 GameUpdates） ----------
 
     /// <summary>载荷键：玩家。</summary>
     public const string PayloadPlayer = GameUpdates.PayloadPlayer;
@@ -227,6 +231,12 @@ public static class GameHooks
 
     /// <summary>载荷键：单位。</summary>
     public const string PayloadUnit = GameUpdates.PayloadUnit;
+
+    /// <summary>载荷键：目标（<c>unit.attacked</c>——被攻击方卡）。</summary>
+    public const string PayloadTarget = GameUpdates.PayloadTarget;
+
+    /// <summary>载荷键：是否由效果发起（<c>unit.attacked</c>）。</summary>
+    public const string PayloadByEffect = GameUpdates.PayloadByEffect;
 
     /// <summary>载荷键：词条标识。</summary>
     public const string PayloadKeyword = GameUpdates.PayloadKeyword;
@@ -270,7 +280,7 @@ public static class GameHooks
     /// <summary>载荷键：来源（R9——事件引发者，可空；恒写、缺省 null）。</summary>
     public const string PayloadSource = GameUpdates.PayloadSource;
 
-    /// <summary>载荷键全量（18 条；稳定序＝定义序；R9 追加 Source）。</summary>
+    /// <summary>载荷键全量（20 条；稳定序＝定义序；R9 追加 Source）。</summary>
     public static IReadOnlyList<string> PayloadKeys { get; } = new[]
     {
         PayloadPlayer, PayloadTurnNumber, PayloadCard, PayloadUnit, PayloadPosition,
@@ -278,6 +288,7 @@ public static class GameHooks
         PayloadOldPosition, PayloadNewPosition, PayloadChangedFields, PayloadDeck, PayloadAddedType,
         PayloadAmount, PayloadOldSlots, PayloadNewSlots, PayloadOldPoints, PayloadNewPoints,
         PayloadKiller, PayloadSource,
+        PayloadTarget, PayloadByEffect,
     };
 
     // ---------- 判定器名（22 条；转发引用 JudicatorNames） ----------

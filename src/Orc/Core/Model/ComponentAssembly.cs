@@ -62,67 +62,95 @@ public sealed class ComponentAttachment
     public IReadOnlyList<MountHandle> Handles => _handles;
 
     /// <summary>
-    /// 执行装配（幂等）：<c>requires-host</c> 校验 → 登记框架注销成员 → 按声明序建边 → 建框架注销边。
+    /// 执行装配（幂等）：<c>requires-host</c> 校验 → 登记框架注销成员 → 包装幂等补登记 →
+    /// 按声明序建边 → 建框架注销边。
     /// 失败一律上抛（组件装配失败＝宿主失败＝卡包失败，R3i：不产生"少了某个组件的卡"）。
+    /// <para>
+    /// **失败＝零残留（R1）**：方法体内任一抛错点（<c>requires-host</c>／<c>Bind</c> 规划／
+    /// <c>disposal-signal</c> 缺失）都被同一个 <c>catch</c> 收口——撤销本实例已建的边**与包装**，
+    /// 清空句柄副本，再裸重抛（类型／文案／原始堆栈不变）。回滚后实例回到"从未装配"的可重试状态，
+    /// 且回滚不产生任何业务事件（不经 <see cref="Dispose"/>）。
+    /// </para>
     /// </summary>
     /// <exception cref="PrefabLoadException">宿主类型不被 requires-host 覆盖，或装配失败。</exception>
     public ComponentAttachment Assemble()
     {
+        // 幂等守卫与运行时取用不抛，留在 try 之外（重试判据＝_assembled 未被失败路径置位）。
         if (_assembled || _disposed)
         {
             return this;
         }
 
-        if (!Type.RequiresHost.HasFlag(OrchestrationRuntime.HostKindOf(Host.Type)))
-        {
-            throw new PrefabLoadException(
-                PrefabErrorCategories.Structure,
-                $"组件 '{Type.Id}' 的 requires-host={Type.RequiresHost} 不覆盖实际宿主类型 '{Host.Type.Id}'"
-                + "（装配被拒绝；如需挂到该宿主，请收窄／扩大 requires-host，R3h）。");
-        }
-
         var runtime = Component.Runtime;
 
-        // 框架注销成员（R1f）：作者不声明、也不能声明（预制体层已拒绝 framework. 前缀）。
-        var disposal = Component.FindMember(ComponentDisposalPolicy.DisposalMemberName)
-            ?? Component.RegisterMember(new MemberDefinition(
-                ComponentDisposalPolicy.DisposalMemberName,
-                ViewSpec.Empty,
-                MemberVisibility.Callable,
-                ownEdges: new[] { new OwnedEdge((_, ctx, _) => DisposeFromFramework(ctx)) },
-                layer: PrefabLayer.Kernel,
-                declaredBy: Type.Id));
-
-        // ① 作者声明的挂载边（声明序＝组件声明段 + 组件内挂载声明序）。
-        foreach (var handle in runtime.Bind(Component))
+        try
         {
-            _handles.Add(handle);
-        }
+            if (!Type.RequiresHost.HasFlag(OrchestrationRuntime.HostKindOf(Host.Type)))
+            {
+                throw new PrefabLoadException(
+                    PrefabErrorCategories.Structure,
+                    $"组件 '{Type.Id}' 的 requires-host={Type.RequiresHost} 不覆盖实际宿主类型 '{Host.Type.Id}'"
+                    + "（装配被拒绝；如需挂到该宿主，请收窄／扩大 requires-host，R3h）。");
+            }
 
-        // ② 框架注销边（R1f）：位次＝该组件所有已声明挂载之后（FrameworkLast），来源 framework:disposal。
-        var engine = runtime.Engine;
-        var signal = Type.DisposalSignal;
-        if (engine.FindMember(signal) is null)
+            // 框架注销成员（R1f）：作者不声明、也不能声明（预制体层已拒绝 framework. 前缀）。
+            var disposal = Component.FindMember(ComponentDisposalPolicy.DisposalMemberName)
+                ?? Component.RegisterMember(new MemberDefinition(
+                    ComponentDisposalPolicy.DisposalMemberName,
+                    ViewSpec.Empty,
+                    MemberVisibility.Callable,
+                    ownEdges: new[] { new OwnedEdge((_, ctx, _) => DisposeFromFramework(ctx)) },
+                    layer: PrefabLayer.Kernel,
+                    declaredBy: Type.Id));
+
+            // 包装幂等补登记（R1 裁决 3）：构造期 CreateEntity 已登记 ⇒ 首次装配条件为假、行为零变化；
+            // 失败回滚后 _wrapHandles 已被 RevokeAll 清空 ⇒ 重新登记，声明序由构造期 DeclarationSegment 稳定复原。
+            // 放在 requires-host 校验之后：必失败的装配不先登记再撤销。
+            if (Type.Wraps.Count > 0 && Component.WrapHandleCount == 0)
+            {
+                runtime.RegisterWraps(Component);
+            }
+
+            // ① 作者声明的挂载边（声明序＝组件声明段 + 组件内挂载声明序）。
+            foreach (var handle in runtime.Bind(Component))
+            {
+                _handles.Add(handle);
+            }
+
+            // ② 框架注销边（R1f）：位次＝该组件所有已声明挂载之后（FrameworkLast），来源 framework:disposal。
+            var engine = runtime.Engine;
+            var signal = Type.DisposalSignal;
+            if (engine.FindMember(signal) is null)
+            {
+                throw new PrefabLoadException(
+                    PrefabErrorCategories.Addressing,
+                    $"组件 '{Type.Id}' 的兜底信号 'engine#{signal}' 未在引擎实体上声明"
+                    + "（框架注销边无法建立——装配被拒绝）。");
+            }
+
+            var table = engine.EdgesFor(signal);
+            var disposalHandle = table.Attach(
+                Component,
+                disposal,
+                EdgeSource.FrameworkDisposal,
+                EdgeOrderSource.Declared,
+                DeclarationOrder.FrameworkLast(Segment),
+                $"engine#{signal}");
+            _handles.Add(disposalHandle);
+            Component.Track(disposalHandle);
+
+            // ★ 失败路径不得置位：否则批量装配的跳过判据把它当成功，回滚与重试语义同时失效。
+            _assembled = true;
+            return this;
+        }
+        catch
         {
-            throw new PrefabLoadException(
-                PrefabErrorCategories.Addressing,
-                $"组件 '{Type.Id}' 的兜底信号 'engine#{signal}' 未在引擎实体上声明"
-                + "（框架注销边无法建立——装配被拒绝）。");
+            // 只撤不销毁（RevokeAll 幂等、不发事件、不 Forget）：边与包装一并撤销；
+            // 失败早期 _mountHandles 为空 ⇒ 仅撤构造期那份包装。清 Attachment 侧副本避免 Dispose 时重复 Revoke。
+            Component.RevokeAll();
+            _handles.Clear();
+            throw; // 裸重抛：保留异常类型／分类／文案／原始堆栈
         }
-
-        var table = engine.EdgesFor(signal);
-        var disposalHandle = table.Attach(
-            Component,
-            disposal,
-            EdgeSource.FrameworkDisposal,
-            EdgeOrderSource.Declared,
-            DeclarationOrder.FrameworkLast(Segment),
-            $"engine#{signal}");
-        _handles.Add(disposalHandle);
-        Component.Track(disposalHandle);
-
-        _assembled = true;
-        return this;
     }
 
     /// <summary>
@@ -299,6 +327,20 @@ public sealed class ComponentAttachmentSet
     }
 
     /// <summary>
+    /// **恢复专用构造**（本会话 S6／D58）：与 <see cref="Grant"/> 同样**不查重**（同宿主同 prefab 多份各自成条、
+    /// D54 数组顺序即身份），但**不装配**（装配前必须写回私有字段——D55 写回时机；装配由恢复流程统一驱动）。
+    /// <para>为什么不是 <see cref="Construct"/>：它拒绝同宿主重复（R3i 装载期口径）；为什么不是
+    /// <see cref="Grant"/>：它立即 <see cref="ComponentAttachment.Assemble"/>，写回就来不及了。</para>
+    /// </summary>
+    internal ComponentAttachment ConstructUnchecked(OrchestrationRuntime runtime, string prefabId, string name)
+    {
+        var component = runtime.CreateEntity(prefabId, name, Host);
+        var attachment = new ComponentAttachment(this, Host, component, _attachments.Count + 1);
+        _attachments.Add(attachment);
+        return attachment;
+    }
+
+    /// <summary>
     /// **授予**一个组件实例（R37）：与 <see cref="Construct"/> 的唯一差别是**不查重**。
     /// <para>
     /// 声明期重复引用仍是错误（R3i：同一 prefab 在同一宿主上至多一份），但**运行期授予**允许重复——
@@ -381,7 +423,8 @@ public sealed partial class OrchestrationRuntime
         ArgumentNullException.ThrowIfNull(prefabId);
         ArgumentNullException.ThrowIfNull(name);
 
-        var type = Catalog.Resolve(prefabId);
+        // 与 CreateEntity 同一解析顺序（R39 裁决 17）：inline 产物同样可以作为组件装配到宿主。
+        var type = ResolveEntityType(prefabId);
         if (type.Kind != EntityKind.Component)
         {
             throw new PrefabLoadException(
@@ -418,7 +461,8 @@ public sealed partial class OrchestrationRuntime
         ArgumentException.ThrowIfNullOrWhiteSpace(prefabId);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        var type = Catalog.Resolve(prefabId);
+        // 与 CreateEntity 同一解析顺序（R39 裁决 17）：inline 产物同样可以作为组件装配到宿主。
+        var type = ResolveEntityType(prefabId);
         if (type.Kind != EntityKind.Component)
         {
             throw new PrefabLoadException(

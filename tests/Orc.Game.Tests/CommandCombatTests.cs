@@ -238,6 +238,7 @@ public class CommandCombatTests
                 GameUpdates.UnitCombatSurvived, // E1-39：攻击者交战存活（被攻击者已阵亡＝不发射）
                 GameUpdates.PointChanged, // 收尾扣行动费（E1-25 后续）
                 GameUpdates.UnitActed,    // E1-33：攻击者行动后（存活）
+                GameUpdates.UnitAttacked, // R3：攻击结算事件（收尾之后——「这次攻击彻底结束了」）
             },
             recorder.Types);
         var diedPayload = recorder.Updates.Single(u => u.Type == GameUpdates.CardDied).Payload!;
@@ -325,7 +326,12 @@ public class CommandCombatTests
         Assert.Equal(2, attacker.GetData<UnitStateData>().Defense); // 无 HP 扣减（直接死亡结果）
         Assert.Equal(6, ambusher.GetData<UnitStateData>().Defense); // 目标不受伤
         Assert.Equal(
-            new[] { GameUpdates.CardDying, GameUpdates.CardDied, GameUpdates.UnitCombatSurvived, GameUpdates.PointChanged }, // E1-39：被攻击者存活；末条＝收尾扣行动费
+            new[]
+            {
+                GameUpdates.CardDying, GameUpdates.CardDied, GameUpdates.UnitCombatSurvived,
+                GameUpdates.PointChanged, // 收尾扣行动费（攻击者死亡不豁免）
+                GameUpdates.UnitAttacked, // R3：Applied 即发——攻击者当场阵亡同样发（事件语义）
+            },
             recorder.Types);
         Assert.Equal(0, playerA.Points); // 攻击者死亡不豁免收尾
     }

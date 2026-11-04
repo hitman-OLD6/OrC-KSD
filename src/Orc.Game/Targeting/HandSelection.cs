@@ -81,10 +81,40 @@ public static class HandSelection
     /// <param name="min">至少选几张（&lt;0 按 0 处理）。</param>
     /// <param name="max">至多选几张（&lt;1 按 1 处理；大于手牌数时收敛为手牌数）。</param>
     /// <param name="ct">取消令牌。</param>
+    /// <param name="exclude">
+    /// 默认建议排除的卡（选牌层的**体验优化**，不是防线——强制点在动作层：`card == source` ⇒ 拒绝）。
+    /// 过滤发生在「min 与手牌数」比较**之前**：排除后手牌可能不足 1 张，必须走「自动取消」而不是把玩家丢进
+    /// 空候选集里等超时。null＝不排除（既有行为零变化）。
+    /// </param>
     /// <exception cref="ArgumentNullException">viewer 为 null。</exception>
-    public static async Task<HandPickResult> PickAsync(Card viewer, int min, int max, CancellationToken ct = default)
+    public static Task<HandPickResult> PickAsync(
+        Card viewer, int min, int max, CancellationToken ct = default, IReadOnlyCollection<Card>? exclude = null)
     {
         ArgumentNullException.ThrowIfNull(viewer);
+
+        var player = OwnerOf(viewer);
+        if (player is null)
+        {
+            return Task.FromResult(HandPickResult.Failed(targeterFailure: TargeterFailureReason.Other));
+        }
+
+        return PickAsync(player, min, max, ct, exclude);
+    }
+
+    /// <summary>
+    /// 从**指定玩家**的手牌中选牌（给对手选牌的唯一正确入口——按玩家而不是按卡：
+    /// 按卡定位时对手手牌为空就没有锚点，是死路）。
+    /// </summary>
+    /// <param name="player">被问的玩家（候选集＝该玩家手牌）。</param>
+    /// <param name="min">至少选几张（&lt;0 按 0 处理）。</param>
+    /// <param name="max">至多选几张（&lt;1 按 1 处理；大于手牌数时收敛为手牌数）。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <param name="exclude">默认建议排除的卡（语义同上一重载——过滤先于计数比较）。</param>
+    /// <exception cref="ArgumentNullException">player 为 null。</exception>
+    public static async Task<HandPickResult> PickAsync(
+        Player player, int min, int max, CancellationToken ct = default, IReadOnlyCollection<Card>? exclude = null)
+    {
+        ArgumentNullException.ThrowIfNull(player);
 
         if (min < 0)
         {
@@ -101,13 +131,10 @@ public static class HandSelection
             max = min;
         }
 
-        var player = OwnerOf(viewer);
-        if (player is null)
-        {
-            return HandPickResult.Failed(targeterFailure: TargeterFailureReason.Other);
-        }
-
-        var hand = player.Hand.ToArray();
+        // 排他先于计数：排除后不足 min ⇒ 自动取消（零交互），不是「空候选集的选择请求」。
+        var hand = exclude is null
+            ? player.Hand.ToArray()
+            : player.Hand.Where(card => !ContainsReference(exclude, card)).ToArray();
 
         // R2：最小张数大于手牌数 ⇒ 自动取消（不产出选择器、零交互）。
         if (min > hand.Length)
@@ -167,6 +194,20 @@ public static class HandSelection
         return result.IsCancelled
             ? HandPickResult.Cancelled()
             : HandPickResult.Failed(targeterFailure: result.Reason);
+    }
+
+    /// <summary>引用相等判定（排除集合用引用比较——不依赖类型是否重写 Equals）。</summary>
+    private static bool ContainsReference(IReadOnlyCollection<Card> cards, Card candidate)
+    {
+        foreach (var card in cards)
+        {
+            if (ReferenceEquals(card, candidate))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>视角卡归属玩家（HQ／卡牌；不可达＝null）。</summary>

@@ -331,6 +331,7 @@ internal static class ContractSnapshot
         ["Orc.Game.Commanding.CommandResult"] = Shape(typeof(CommandResult)),
         ["Orc.Game.CardPlaceResult"] = Shape(typeof(CardPlaceResult)),
         ["Orc.Game.Managers.DeckFetchResult"] = Shape(typeof(DeckFetchResult)),
+        ["Orc.Game.Managers.TutorResult"] = Shape(typeof(TutorResult)),
     };
 
     /// <summary>

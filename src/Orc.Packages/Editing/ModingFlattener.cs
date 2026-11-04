@@ -72,7 +72,12 @@ public sealed record ModingFlattenResult(
 }
 
 /// <summary>
-/// **摊平器**（R8／R28／S11）：把 moding 草案 ＋ 父资产摊平成**自包含**的组件资产文本。
+/// **摊平器（声明面）**（R8／R28／S11／S29）：把 moding 草案 ＋ 父资产摊平成**自包含**的组件资产文本。
+/// <para>
+/// **展开本身不在这里**：沿 <c>Extends</c> 合并、填空位、饱和判定、DSL 生成都收敛进共用核
+/// <see cref="PrefabExpander.Expand"/>（`Orc.Core.Model`）。本类只留**声明面独有**的部分——
+/// 读草案、产物 id／版本、装包与模板只读层、草案与产物的陈旧比对、原子写盘。
+/// </para>
 /// <para>
 /// 成员来源三分（R28 已裁决，按来源判定而不是按「是否需要生成」判定）：
 /// <list type="number">
@@ -82,9 +87,10 @@ public sealed record ModingFlattenResult(
 ///   <item><b>未修改但父本身就是生成物</b> → 原样复制父的**已生成文本与 generated 块**，**不重新生成**；
 ///     **沿用父的 id**（文本与内容寻址结果本就一致，改 id 反而会破坏「摊平的摊平不重新生成」）。</item>
 /// </list>
+/// 这三类的判定在核内（<see cref="PrefabExpander"/>），因为值表面也必须走同一套填充。
 /// </para>
 /// <para>
-/// **生成只发生在这里与草案装载两处**（R28）：产物装载路径不调用生成器，引擎升级不改变已发布产物的行为。
+/// **生成只发生在核与草案装载两处**（R28）：产物装载路径不调用生成器，引擎升级不改变已发布产物的行为。
 /// 因此第 ③ 类**必须**只复制——重生成会把 R28 想挡掉的跨版本漂移从后门放回来。
 /// </para>
 /// <para>
@@ -150,26 +156,27 @@ public static class ModingFlattener
 
         var assets = LoadPackAssets(root, errors);
 
-        // 只读层（R33）：模板库根合并进目录。**只并进目录**，不并进「本包声明」（FindDeclaration 仍以本包为准，
-        // 否则产物会复制出模板库的 handler 文本而绕过摊平来源分流）。
+        // 只读层（R33）：模板库根合并进目录。**只并进目录**，不并进「本包声明」（`TryAdd`：本包声明优先，
+        // 否则产物会复制出模板库的 handler 文本而绕过摊平来源分流——核内的声明查表仍以本包为准）。
         var templateAssets = LoadTemplateAssets(templateRoot, errors);
         foreach (var pair in templateAssets)
         {
             assets.TryAdd(pair.Key, pair.Value);
         }
 
-        // 跨包继承的口子只开在模板上（R33 第 4 条）：父只在模板层里且不是 abstract ⇒ 拒绝。
-        if (templateAssets.ContainsKey(draft.Extends) && !templateAssets[draft.Extends].Abstract)
+        // 跨包继承的口子只开在模板上（R33 第 4 条）：父只在模板层里且**不饱和** ⇒ 允许。
+        // 判据（R39）：模板＝存在未填空位；饱和资产不是模板，跨包继承仍按跨包拒绝。
+        if (templateAssets.ContainsKey(draft.Extends) && !templateAssets[draft.Extends].HasUnfilledSlots)
         {
             errors.Add(new PrefabLoadError(
                 PrefabErrorCategories.Structure,
                 draft.Extends,
-                $"父资产 '{draft.Extends}' 来自模板库但不是抽象资产（abstract: false）："
+                $"父资产 '{draft.Extends}' 来自模板库但已饱和（没有未填空位，不是模板）："
                 + "跨包继承仅限模板（只声明、不实现的效果模板）——指向普通资产仍按跨包拒绝（R33 第 4 条）。"));
             return new ModingFlattenResult(false, productId, null, null, errors);
         }
 
-        var catalog = BuildCatalog(assets, errors);
+        var catalog = BuildCatalog(assets, errors, excludeId: draft.Id);
 
         PrefabType parent;
         try
@@ -186,10 +193,11 @@ public static class ModingFlattener
             return new ModingFlattenResult(false, productId, null, null, errors);
         }
 
-        var draftMembers = new Dictionary<string, ComponentMemberAsset>(StringComparer.Ordinal);
+        // 成员名唯一（声明面自己的校验；展开核按名合并，重名会让「填哪个」变成多解）。
+        var draftMembers = new HashSet<string>(StringComparer.Ordinal);
         foreach (var declaredMember in draft.Members)
         {
-            if (!draftMembers.TryAdd(declaredMember.Name, declaredMember))
+            if (!draftMembers.Add(declaredMember.Name))
             {
                 errors.Add(new PrefabLoadError(
                     PrefabErrorCategories.Structure,
@@ -198,134 +206,43 @@ public static class ModingFlattener
             }
         }
 
-        // ── R31：成员级抽象的**唯一**强制点（摊平期）───────────────────────────
-        // 一次性收集**全部**缺失成员再报（不立即返回）：作者一次就能看到要补哪些。
-        ValidateAbstractMembers(parent, draftMembers, errors);
-
-        // ── R32／D24：模板声明的 requires-host 校验（多抽象成员取交集）────────────
-        ValidateTemplateRequirements(parent, errors);
-
-        var output = new List<ComponentMemberAsset>(parent.Members.Count + draftMembers.Count);
-
-        // ① ② ③：父展开表里的每个成员按来源分流（顺序＝父的成员表序，摊平确定性的一部分）。
-        foreach (var member in parent.Members)
-        {
-            if (draftMembers.TryGetValue(member.Name, out var overridden))
+        // ── S29／D44：合并／填空位／饱和判定**只在共用核 <see cref="PrefabExpander.Expand"/> 里做一次** ──
+        // 声明面只负责提供值（草案声明）与自己的校验（模板 requires-host 交集），不再自持一套展开逻辑。
+        var expanded = PrefabExpander.Expand(
+            new ExpandRequest
             {
-                // ② 草案重载 → 生成或原样取草案的 csx。守卫档从**父展开表**读（作者看不见也改不到，R32）。
-                var guard = ResolveGuardSpec(parent, member, errors);
-                if (guard is not null)
+                Catalog = catalog,
+                Declaration = draft,
+                ResultId = productId,
+                Declarations = assets,
+                HandlerDsl = dsl,
+                ResolveDslPath = relative =>
                 {
-                    ValidateGuardFields(overridden, $"self#{member.Name}", guard, errors);
-                }
+                    // 路径基准必须与**装载期一致**：`AssetPackLoader.CompileDsl` 按「组件资产所在目录」解析
+                    // `handler.dsl`，而产物落在 `effects-v4/`。先试产物目录，再回退包根：两种布局都能工作。
+                    var candidate = ResolvePath(Path.Combine(root, ProductDirectory), relative);
+                    if (!File.Exists(candidate))
+                    {
+                        candidate = ResolvePath(root, relative);
+                    }
 
-                var built = BuildFromDeclaration(
-                    root, overridden, memberAddress: $"self#{member.Name}", dsl, errors, inherited: null, guard);
-                if (built is not null)
-                {
-                    output.Add(built);
-                }
+                    return File.Exists(candidate) ? candidate : null;
+                },
+                Parent = parent,
+                SaturationSource = parent,
+                // 摊平产物的出身记录：只有草案 id（参数已在产物 slots[].value 里）。
+                Origin = AssetOrigin.ForDraft(draft.Id),
+                GuardOf = member => ResolveGuardSpec(parent, member, errors),
+                AfterSaturation = errs => ValidateTemplateRequirements(parent, errs),
+            },
+            errors);
 
-                continue;
-            }
-
-            var declared = FindDeclaration(assets, member);
-            if (declared?.Handler is not { } handler)
-            {
-                // 纯编排成员（没有 handler）：原样复制声明，无来源标记、无 handler id 重写问题。
-                output.Add(new ComponentMemberAsset(
-                    member.Name, member.Visibility, member.View, null, member.Band, member.Bands, member.Seams, member.Sealed));
-                continue;
-            }
-
-            if (handler.Generated is not null)
-            {
-                // ③ 父已是生成物 → **逐字复制**父的已生成文本与 generated 块，**沿用父的 id**，**不重新生成**。
-                // 这是硬要求：重生成会把 R28 想挡掉的跨版本漂移从后门放回来。
-                // 守卫已在父的 csx 里（产物不带 guard 字段）——所以这里不重新合成，否则会重复加守卫（D24 推论）。
-                output.Add(new ComponentMemberAsset(
-                    member.Name,
-                    declared!.Visibility,
-                    declared.View,
-                    handler,
-                    declared.Band,
-                    declared.Bands,
-                    declared.Seams,
-                    declared.Sealed));
-                continue;
-            }
-
-            if (handler.Script is null)
-            {
-                errors.Add(new PrefabLoadError(
-                    PrefabErrorCategories.Structure,
-                    $"self#{member.Name}",
-                    $"父成员 '{member.Name}' 的 handler '{handler.Id}' 既无 csx 文本也无来源标记（只有 assembly-key）："
-                    + "摊平只能复制文本或生成文本，程序集处理器不在此列（R28）。"));
-                continue;
-            }
-
-            // ① 未修改且父有 csx 原文 → 原样复制文本，不带来源标记；id 重新按内容派生（csx/v1/…）。
-            output.Add(new ComponentMemberAsset(
-                member.Name,
-                declared!.Visibility,
-                declared.View,
-                handler with { Id = HandlerContent.AddressOf(handler.Script, generated: false), Generated = null },
-                declared.Band,
-                declared.Bands,
-                declared.Seams,
-                declared.Sealed));
-        }
-
-        // 草案新增的成员（父里没有）：② 语义——必须自带 handler 来源，生成或取 csx。
-        foreach (var declared in draft.Members)
-        {
-            if (parent.FindMember(declared.Name) is not null)
-            {
-                continue;
-            }
-
-            var built = BuildFromDeclaration(
-                root, declared, memberAddress: $"self#{declared.Name}", dsl, errors, inherited: null, guard: null);
-            if (built is not null)
-            {
-                output.Add(built);
-            }
-        }
-
-        if (errors.Count > 0)
+        if (errors.Count > 0 || expanded is null)
         {
             return new ModingFlattenResult(false, productId, null, null, errors);
         }
 
-        // 挂载与包装：父的 ＋ 草案的（草案只存增量，产物必须自包含全部行为）。
-        var mounts = parent.Mounts.Concat(draft.Mounts).ToArray();
-        var wraps = parent.Wraps.Concat(draft.Wraps).ToArray();
-        // 判定器包装声明也随继承链继承（它们并入同一 Wraps 集合，S2a）：沿父链逐层收集＋草案的增量。
-        var judgeWraps = parent.Chain
-            .Select(id => assets.TryGetValue(id, out var ancestor) ? ancestor.JudgeWraps : null)
-            .Where(static list => list is { Count: > 0 })
-            .SelectMany(static list => list!)
-            .Concat(draft.JudgeWraps)
-            .ToArray();
-
-        var product = new ComponentAsset(
-            productId,
-            parent.RequiresHost,
-            parent.ActiveWhen,
-            parent.OneShot,
-            parent.DisposalSignal,
-            parent.PrivateFields,
-            output,
-            mounts,
-            wraps,
-            judgeWraps,
-            // R8 第 4 条：产物**不含 extends**（自包含，装载不要求父存在）。
-            extends: null,
-            // R2 的缺省：产物不自动继承「可被 moding」的授权，作者要开放就显式打开。
-            authorizesModing: false);
-
-        var json = AssetSchema.Write(product);
+        var json = AssetSchema.Write(expanded.Asset);
         return new ModingFlattenResult(
             true, productId, ProductDirectory + "/" + productId + ".component.json", json, Array.Empty<PrefabLoadError>());
     }
@@ -488,220 +405,24 @@ public static class ModingFlattener
         return new ModingFlattenCheckResult(items.Count == 0, items);
     }
 
-    // ── 内部：成员来源 ② ────────────────────────────────────────────────────
-
-    private static ComponentMemberAsset? BuildFromDeclaration(
-        string root,
-        ComponentMemberAsset declared,
-        string memberAddress,
-        HandlerDslEnvironment? dsl,
-        List<PrefabLoadError> errors,
-        ComponentMemberAsset? inherited,
-        HandlerGuardSpec? guard = null)
-    {        _ = inherited;
-
-        if (declared.Handler is not { } handler)
-        {
-            // 重载一个成员却不给 handler ＝把该成员降级成纯编排成员。合法（作者可能就要清空逻辑），
-            // 但这不是「未修改」——它是显式声明，照抄即可。
-            return new ComponentMemberAsset(
-                declared.Name, declared.Visibility, declared.View, null,
-                declared.Band, declared.Bands, declared.Seams, declared.Sealed);
-        }
-
-        if (handler.Dsl is { } dslRelative)
-        {
-            if (dsl is null)
-            {
-                errors.Add(new PrefabLoadError(
-                    PrefabErrorCategories.Capability,
-                    memberAddress,
-                    $"成员 '{declared.Name}' 指向 DSL 文档 '{dslRelative}'，但本环境未装配 handler DSL 编译器："
-                    + "摊平需要生成 csx（请装配 engine.HandlerDsl）。"));
-                return null;
-            }
-
-            // 路径基准必须与**装载期一致**：`AssetPackLoader.CompileDsl` 按「组件资产所在目录」解析
-            // `handler.dsl`（`Path.Combine(directory, relative)`），而产物落在 `effects-v4/`。
-            // 摊平曾只按包根解析 ⇒ 「DSL 与组件同目录」（samples 与前端产物的实际布局）的草案永远摊不平。
-            // 这里先试产物目录，再回退包根：两种布局都能工作，存量资产零改动。
-            var dslPath = ResolvePath(Path.Combine(root, ProductDirectory), dslRelative);
-            if (!File.Exists(dslPath))
-            {
-                dslPath = ResolvePath(root, dslRelative);
-            }
-
-            if (!File.Exists(dslPath))
-            {
-                errors.Add(new PrefabLoadError(
-                    PrefabErrorCategories.Structure,
-                    memberAddress,
-                    $"成员 '{declared.Name}' 引用的 DSL 文档 '{dslRelative}' 不存在。"));
-                return null;
-            }
-
-            var dslText = File.ReadAllText(dslPath);
-
-            // 守卫合成（R32）：走**带守卫的编译**接口；编译器不支持＝能力缺失（不静默不加守卫）。
-            var guardedCompiler = guard is null ? null : dsl.Compiler as IHandlerDslGuardedCompiler;
-            if (guard is not null && guardedCompiler is null)
-            {
-                errors.Add(new PrefabLoadError(
-                    PrefabErrorCategories.Capability,
-                    memberAddress,
-                    $"成员 '{declared.Name}' 的父模板要求守卫（{HandlerGuardNames.Format(guard.Guard)}），"
-                    + "但本环境的 handler DSL 编译器不支持守卫合成（未实现 IHandlerDslGuardedCompiler）："
-                    + "守卫不可省略——请装配实现了该接口的编译器（Orc.HandlerDsl）。"));
-                return null;
-            }
-
-            HandlerDslCompileResult compiled;
-            try
-            {
-                var view = HandlerDslView.FromViewSpec(declared.View);
-                compiled = guardedCompiler is null
-                    ? dsl.Compiler.Compile(dslText, dsl.Catalog, view)
-                    : guardedCompiler.CompileGuarded(dslText, dsl.Catalog, view, guard!);
-            }
-            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
-            {
-                errors.Add(new PrefabLoadError(
-                    PrefabErrorCategories.Structure, memberAddress, $"成员 '{declared.Name}' 的 DSL 编译抛出异常：{ex.Message}"));
-                return null;
-            }
-
-            if (!compiled.Success || compiled.Csx is null)
-            {
-                foreach (var error in compiled.Errors)
-                {
-                    errors.Add(new PrefabLoadError(
-                        string.Equals(error.Code, "write-forbidden", StringComparison.Ordinal)
-                            ? PrefabErrorCategories.View
-                            : PrefabErrorCategories.Structure,
-                        memberAddress,
-                        $"成员 '{declared.Name}' 的 handler DSL 校验失败：{error.Message}",
-                        MissingFields: MissingFieldsOf(error),
-                        Code: error.Code,
-                        NodePath: error.NodePath));
-                }
-
-                if (compiled.Errors.Count == 0)
-                {
-                    errors.Add(new PrefabLoadError(
-                        PrefabErrorCategories.Structure,
-                        memberAddress,
-                        $"成员 '{declared.Name}' 的 DSL 编译失败但未给出错误（编译器实现违约）。"));
-                }
-
-                return null;
-            }
-
-            var csx = compiled.Csx;
-            return new ComponentMemberAsset(
-                declared.Name,
-                declared.Visibility,
-                declared.View,
-                new ComponentHandlerAsset(
-                    HandlerContent.AddressOf(csx, generated: true),
-                    string.IsNullOrWhiteSpace(handler.Entry) ? "HandleAsync" : handler.Entry,
-                    csx,
-                    AssemblyKey: null,
-                    Dsl: null,
-                    DslHash: null)
-                {
-                    // 来源标记（R28／D5）：生成器 ＋ 目录版本 ＋ DSL 路径与双哈希 ＋ 节点映射。
-                    // nodeMap 目前为空：生成器还没有行号表（见 PROGRESS 的遗留风险），字段保留契约形状。
-                    Generated = new HandlerGeneratedBlock(
-                        HandlerGeneratedBlock.CurrentGenerator,
-                        dsl.Catalog.Revision,
-                        dslRelative,
-                        HandlerContent.Hash(dslText),
-                        HandlerContent.Hash(csx),
-                        NodeMap: null),
-                },
-                declared.Band,
-                declared.Bands,
-                declared.Seams,
-                declared.Sealed);
-        }
-
-        if (handler.Script is { } script)
-        {
-            if (guard is not null)
-            {
-                // 守卫只能由生成器合成在文本首段；手写 csx 无法保证「作者改不到」，故拒绝而不是静默不加。
-                errors.Add(new PrefabLoadError(
-                    PrefabErrorCategories.Structure,
-                    memberAddress,
-                    $"成员 '{declared.Name}' 的父模板要求守卫（{HandlerGuardNames.Format(guard.Guard)}），"
-                    + "但草案给的是手写 csx：守卫只能由生成器合成（作者不可编辑），请改用手写 DSL 表达效果体。"));
-                return null;
-            }
-
-            // 草案直接给 csx（不是 DSL）：原样取文本，按内容寻址派生 csx id，无来源标记。
-            return new ComponentMemberAsset(
-                declared.Name,
-                declared.Visibility,
-                declared.View,
-                new ComponentHandlerAsset(
-                    HandlerContent.AddressOf(script, generated: false),
-                    string.IsNullOrWhiteSpace(handler.Entry) ? "HandleAsync" : handler.Entry,
-                    script,
-                    AssemblyKey: null),
-                declared.Band,
-                declared.Bands,
-                declared.Seams,
-                declared.Sealed);
-        }
-
-        errors.Add(new PrefabLoadError(
-            PrefabErrorCategories.Structure,
-            memberAddress,
-            $"成员 '{declared.Name}' 的 handler '{handler.Id}' 只有 assembly-key：摊平只能复制或生成 csx 文本（R28）。"));
-        return null;
-    }
-
-    // ── 内部：抽象强制与守卫（R31／R32）──────────────────────────────────────
-
-    /// <summary>
-    /// **成员级抽象的摊平期强制**（R31 第 1／3 条）：父展开表里 <c>abstract: true</c> 且未被草案实现的成员＝错误。
-    /// <para>
-    /// 一次性收集**全部**缺失成员（不是只报第一条）：与 <see cref="Flatten"/> 末尾汇总 errors 的形态一致。
-    /// 抽象性沿继承链合并——<c>parent.Members</c> 已是展开结果（子覆写即不再抽象），故这里只看展开表。
-    /// </para>
-    /// </summary>
-    private static void ValidateAbstractMembers(
-        PrefabType parent,
-        IReadOnlyDictionary<string, ComponentMemberAsset> draftMembers,
-        List<PrefabLoadError> errors)
+    /// <summary>成员所挂的信号名（父展开表里第一条 <c>engine#&lt;信号&gt;</c> 挂载；无＝null）。</summary>
+    private static string? ResolveSignalOf(PrefabType parent, string memberName)
     {
-        foreach (var member in parent.Members)
+        foreach (var mount in parent.Mounts)
         {
-            if (!member.Abstract)
+            if (!string.Equals(mount.Member, memberName, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            if (draftMembers.TryGetValue(member.Name, out var declared))
+            var hash = mount.Target.IndexOf('#', StringComparison.Ordinal);
+            if (hash > 0)
             {
-                if (declared.Abstract)
-                {
-                    errors.Add(new PrefabLoadError(
-                        PrefabErrorCategories.Structure,
-                        $"self#{member.Name}",
-                        $"成员 '{member.Name}' 在模板 '{parent.Id}' 里被声明为抽象（必须实现），"
-                        + "草案又把它重新声明为 abstract: true：仍然没有实现体（R31 第 3 条）。"));
-                }
-
-                continue;
+                return mount.Target[(hash + 1)..];
             }
-
-            errors.Add(new PrefabLoadError(
-                PrefabErrorCategories.Structure,
-                $"self#{member.Name}",
-                $"成员 '{member.Name}' 是模板 '{parent.Id}' 的抽象成员（尚未实现）：草案必须提供它的实现"
-                + "（成员级 abstract 在摊平期强制，R31）。"));
         }
+
+        return null;
     }
 
     /// <summary>
@@ -775,46 +496,6 @@ public static class ModingFlattener
         }
 
         return spec;
-    }
-
-    /// <summary>
-    /// 守卫要读的载荷字段必须出现在**草案重载后的视图**里（R32）：视图整段替换（R3a），
-    /// 作者若把守卫比较用的字段从视图里删掉，守卫代码会在运行期取不到字段——在摊平期就拒绝。
-    /// </summary>
-    private static void ValidateGuardFields(
-        ComponentMemberAsset declared, string memberAddress, HandlerGuardSpec guard, List<PrefabLoadError> errors)
-    {
-        var field = guard.Guard == HandlerGuard.Self ? guard.SubjectField : guard.PlayerField;
-        if (declared.View.Fields.Any(f => string.Equals(f.Name, field, StringComparison.Ordinal)))
-        {
-            return;
-        }
-
-        errors.Add(new PrefabLoadError(
-            PrefabErrorCategories.View,
-            memberAddress,
-            $"成员 '{declared.Name}' 的视图被草案重载后缺少字段 '{field}'：模板守卫（{HandlerGuardNames.Format(guard.Guard)}）"
-            + "要用它做比较，删掉它会让守卫在运行期取不到载荷字段（R32）。"));
-    }
-
-    /// <summary>成员所挂的信号名（父展开表里第一条 <c>engine#&lt;信号&gt;</c> 挂载；无＝null）。</summary>
-    private static string? ResolveSignalOf(PrefabType parent, string memberName)
-    {
-        foreach (var mount in parent.Mounts)
-        {
-            if (!string.Equals(mount.Member, memberName, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            var hash = mount.Target.IndexOf('#', StringComparison.Ordinal);
-            if (hash > 0)
-            {
-                return mount.Target[(hash + 1)..];
-            }
-        }
-
-        return null;
     }
 
     // ── 内部：读写与索引 ────────────────────────────────────────────────────
@@ -982,12 +663,24 @@ public static class ModingFlattener
         return assets;
     }
 
+    /// <summary>
+    /// 建结构目录（父链解析用）。
+    /// <para>
+    /// <paramref name="excludeId"/>：**排除当前草案自己**——它的声明由共用核 <c>Expand</c> 登记，
+    /// 同一 id 二次登记会被目录拒绝（草案不是父链的一部分，排除后行为与既有摊平逐条一致）。
+    /// </para>
+    /// </summary>
     private static PrefabCatalog BuildCatalog(
-        IReadOnlyDictionary<string, ComponentAsset> assets, List<PrefabLoadError> errors)
+        IReadOnlyDictionary<string, ComponentAsset> assets, List<PrefabLoadError> errors, string? excludeId = null)
     {
         var catalog = GameEnginePrefabs.CreateCatalog();
         foreach (var asset in assets.Values.OrderBy(static a => a.Id, StringComparer.Ordinal))
         {
+            if (excludeId is not null && string.Equals(asset.Id, excludeId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             try
             {
                 catalog.Add(asset.ToStructuralPrefabDefinition());
@@ -1004,28 +697,4 @@ public static class ModingFlattener
         return catalog;
     }
 
-    /// <summary>父成员在**声明它的资产**里的原始声明（继承链上逐层覆写后的最终声明）。</summary>
-    private static ComponentMemberAsset? FindDeclaration(
-        IReadOnlyDictionary<string, ComponentAsset> assets, MemberDefinition member)
-    {
-        if (member.DeclaredBy is null || !assets.TryGetValue(member.DeclaredBy, out var asset))
-        {
-            return null;
-        }
-
-        return asset.Members.FirstOrDefault(m => string.Equals(m.Name, member.Name, StringComparison.Ordinal));
-    }
-
-    /// <summary>缺失引脚名（与装载器同一口径：只有 <c>pin-missing</c> 能无歧义从节点路径末段取到）。</summary>
-    private static IReadOnlyList<string>? MissingFieldsOf(HandlerDslError error)
-    {
-        if (!string.Equals(error.Code, "pin-missing", StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        var dot = error.NodePath.LastIndexOf('.');
-        var name = dot >= 0 && dot + 1 < error.NodePath.Length ? error.NodePath[(dot + 1)..] : error.NodePath;
-        return string.IsNullOrEmpty(name) ? null : new[] { name };
-    }
 }

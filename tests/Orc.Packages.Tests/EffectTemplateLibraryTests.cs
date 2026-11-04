@@ -10,7 +10,7 @@ namespace Orc.Packages.Tests;
 /// **R33／D30 模板库守护**：库是生成物，守护必须「按规则重算再逐条比对」——
 /// 少一条、多一条、改名、手改任一字节都失败；重生成只能走 <c>ORC_WRITE_TEMPLATES=1</c>。
 /// <para>
-/// 断言里的数字（102 ＝ any 38 ＋ self 26 ＋ owner-same 19 ＋ owner-different 19）只是**此刻的实测快照**：
+/// 断言里的数字（104 ＝ any 39 ＋ self 27 ＋ owner-same 19 ＋ owner-different 19）只是**此刻的实测快照**：
 /// 加信号就会变，所以断言写法是「与派生结果一致」＋把数字写进失败信息供人核对。
 /// </para>
 /// </summary>
@@ -20,19 +20,19 @@ public class EffectTemplateLibraryTests
     private static string TemplateRoot => Path.Combine(FindRepoRoot(), "packs", "effect-templates");
 
     [Fact]
-    public void 派生矩阵_38个信号_102条模板且四档条数与快照一致()
+    public void 派生矩阵_39个信号_104条模板且四档条数与快照一致()
     {
         var specs = EffectTemplateLibrary.Derive();
 
         var derived = specs.Select(static s => s.Signal).Distinct(StringComparer.Ordinal).ToList();
-        Assert.Equal(38, derived.Count); // 39 − card.load（SignalTiming.Load 不出模板）
+        Assert.Equal(39, derived.Count); // 40 − card.load（SignalTiming.Load 不出模板）
         Assert.DoesNotContain(GameUpdates.CardLoad, derived);
 
-        Assert.Equal(38, specs.Count(s => s.Guard == HandlerGuard.Any));  // any 恒出
-        Assert.Equal(26, specs.Count(s => s.Guard == HandlerGuard.Self)); // Subjects 白名单 26 条
+        Assert.Equal(39, specs.Count(s => s.Guard == HandlerGuard.Any));  // any 恒出
+        Assert.Equal(27, specs.Count(s => s.Guard == HandlerGuard.Self)); // Subjects 白名单 27 条
         Assert.Equal(19, specs.Count(s => s.Guard == HandlerGuard.OwnerSame));
         Assert.Equal(19, specs.Count(s => s.Guard == HandlerGuard.OwnerDifferent));
-        Assert.Equal(102, specs.Count);
+        Assert.Equal(104, specs.Count);
 
         // id 形态（D30）：template.<signal>.<guard>，无 '/'（否则不能当文件名），且唯一。
         Assert.All(specs, s => Assert.Equal("template." + s.Signal + "." + HandlerGuardNames.Format(s.Guard), s.Id));
@@ -102,21 +102,21 @@ public class EffectTemplateLibraryTests
     }
 
     [Fact]
-    public void 模板资产形态_抽象资产单个抽象成员带守卫且不写授权()
+    public void 模板资产形态_未饱和空位带守卫且不写废止字段()
     {
         var spec = EffectTemplateLibrary.Derive().Single(s => s.Id == "template.unit.deployed.self");
         var asset = EffectTemplateLibrary.BuildAsset(spec);
         var member = Assert.Single(asset.Members);
 
-        Assert.True(asset.Abstract);
-        Assert.True(asset.AuthorizesModing);          // D29：未声明 ⇒ 缺省推导为 true
+        Assert.True(asset.HasUnfilledSlots);          // 抽象性由未填空位推导（R39 裁决 4）
         Assert.Equal(HostKind.Unit, asset.RequiresHost);
         Assert.Equal("部署时（本单位）", asset.Label);
 
         Assert.Equal("onHook", member.Name);          // R34 第 3 条：内置模板成员名固定
-        Assert.True(member.Abstract);
+        Assert.NotNull(member.Slot);                  // 1:1 迁移：slot: { type: "handler" }
+        Assert.True(member.IsUnfilledSlot);
         Assert.Equal(HandlerGuard.Self, member.Guard);
-        Assert.Null(member.Handler);                  // 空洞：实现由子提供
+        Assert.Null(member.Handler);                  // 未填：实现由子提供
 
         // 信号由**挂载声明**给出（不从 id 解析）：摊平/守卫都靠它。
         var mount = Assert.Single(asset.Mounts);
@@ -128,18 +128,55 @@ public class EffectTemplateLibraryTests
             SignalGuards.MemberOf(GameUpdates.UnitDeployed)!.View.Fields.Select(static f => f.Name),
             member.View.Fields.Select(static f => f.Name));
 
-        // 落盘文本里既有 abstract 也有 guard（模板是唯一允许带它们的形态）。
+        // 落盘文本：成员带 slot 与 guard，**不带**已废止的 abstract／authorize-moding。
         var json = EffectTemplateLibrary.Render(spec);
-        Assert.Contains("\"abstract\": true", json, StringComparison.Ordinal);
+        Assert.Contains("\"slot\": {", json, StringComparison.Ordinal);
+        Assert.Contains("\"type\": \"handler\"", json, StringComparison.Ordinal);
         Assert.Contains("\"guard\": \"self\"", json, StringComparison.Ordinal);
         Assert.Contains("\"id\": \"template.unit.deployed.self\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"abstract\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("authorize-moding", json, StringComparison.Ordinal);
 
         // 且能原样读回（schema 往返）。
         var read = AssetSchema.Read(json, "template");
-        Assert.True(read.Abstract);
-        Assert.True(read.AuthorizesModing);
+        Assert.True(read.HasUnfilledSlots);
+        Assert.True(Assert.Single(read.Members).IsUnfilledSlot);
         Assert.Equal(HandlerGuard.Self, Assert.Single(read.Members).Guard);
+    }
+
+    [Fact]
+    public void 每条模板的成员均为handler空位_独立断言不走重算快照()
+    {
+        // **为什么必须独立**（R39 裁决 7「守护必须显式」）：`ExpectedFiles` 与本生成器同源，
+        // 生成器漏写 `slot` 时「逐条一致」仍会全绿（重算跟着一起变绿）。这条断言直接读
+        // `Derive() → BuildAsset()` 的**对象图**，不读快照文本，因此能抓住生成器的降级。
+        // **已人工验证（2026-11-03，S34 A）**：临时删掉生成器的 `Slot:` 行 ⇒ 本断言在
+        // `Assert.NotNull(member.Slot)` 处转红；临时改成 `Sealed: true` ⇒ 在 `Assert.False(member.Sealed)` 处转红。
+        var specs = EffectTemplateLibrary.Derive();
+        Assert.NotEmpty(specs);
+
+        foreach (var spec in specs)
+        {
+            var asset = EffectTemplateLibrary.BuildAsset(spec);
+
+            // 模板不得用资产级 slot 承载空洞（空洞在成员层）。
+            Assert.Empty(asset.Slots);
+
+            var member = Assert.Single(asset.Members);
+            Assert.Equal(EffectTemplateSpec.MemberName, member.Name);
+            Assert.NotNull(member.Slot);                       // 删掉生成器的 slot 行 ⇒ 这里转红
+            Assert.Equal(SlotType.Handler, member.Slot!.Type);
+            Assert.Null(member.Handler);                       // 未填 ⇒ D40 第 1 行
+            Assert.True(member.IsUnfilledSlot);
+            Assert.False(member.Sealed);                       // 加 sealed ⇒ 抽象永远无法解除
+            Assert.True(asset.HasUnfilledSlots);               // 模板＝未饱和（可被 components 拒绝）
+
+            // S34 C（迁移等价性）：迁移前的 `abstractMember: true` 集合＝迁移后的 `slot ∧ ¬handler` 集合，
+            // 102 条**逐条**都恰为 {onHook}（1:1，不是「大致相同」）。
+            Assert.Equal(
+                new[] { EffectTemplateSpec.MemberName },
+                asset.Members.Where(m => m.IsUnfilledSlot).Select(m => m.Name).ToArray());
+        }
     }
 
     [Fact]
@@ -196,10 +233,10 @@ public class EffectTemplateLibraryTests
 
         Assert.False(load.Loaded);
         Assert.Empty(load.AssetIds);
-        // 两条结构性拒绝都在装载链上：保留前缀（D30）＋ 产物不得带 members[].abstract（R31）。
+        // 两条结构性拒绝都在装载链上：保留前缀（D30）＋ 产物不得带未填空位（R31 修订／S32）。
         Assert.All(load.Errors, e => Assert.True(
             e.Message.Contains("保留前缀", StringComparison.Ordinal)
-            || e.Message.Contains("members[].abstract", StringComparison.Ordinal),
+            || e.Message.Contains("未填空位", StringComparison.Ordinal),
             $"模板库装载只允许出现两类结构拒绝，收到：{e.Message}"));
         Assert.Contains(load.Errors, e => e.Message.Contains("保留前缀", StringComparison.Ordinal));
         Assert.Empty(runtime.Catalog.Definitions.Where(d => AssetSchema.IsTemplateId(d.Id)));

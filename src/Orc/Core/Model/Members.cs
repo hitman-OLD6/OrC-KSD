@@ -230,18 +230,21 @@ public sealed class MemberDefinition
     /// </para>
     /// </param>
     /// <param name="sealedMember">
-    /// **成员级封死**（R2；缺省 false＝可覆写）：父把某个成员逐个封死，任何资产层覆写＝装载期拒绝。
-    /// <para>
-    /// 与资产级开关（<see cref="PrefabDefinition.AuthorizesModing"/>）的分工：资产级是总闸（缺省关闭），
-    /// 成员级是逐个排除（默认全部可覆写）。<c>framework.</c> 前缀的框架合成成员**恒为 sealed**，
-    /// 不依赖本字段（沿用 <see cref="ComponentDisposalPolicy.IsReservedMember"/> 的保留名判定，不新增名单）。
-    /// </para>
+    /// **成员级封死**（R2／R39 裁决 5）：它锁定**这个 slot**（沿链向下生效）——把「已填可再填」降级为
+    /// 「不可再填」。对非 slot 成员无意义（不再有资产级总闸）。
+    /// <para><c>framework.</c> 前缀的框架合成成员**恒为 sealed**（沿用
+    /// <see cref="ComponentDisposalPolicy.IsReservedMember"/> 的保留名判定，不新增名单）。</para>
     /// </param>
-    /// <param name="abstractMember">
-    /// **成员级抽象**（R30／R31；缺省 false）：该成员的 handler 是空洞，必须由子实现。
+    /// <param name="slot">
+    /// **成员级空位声明**（R39 裁决 5／8；null＝普通成员或纯编排成员）：链上声明过 ⇒ 可被填／重填。
+    /// 与 <paramref name="hasHandler"/> 是**正交的两个事实**（D40）：本字段＝「这里有一个空位」，
+    /// hasHandler＝「现在填了什么」；四行判定表就是两者的存在性组合，没有第三个状态位。
+    /// </param>
+    /// <param name="hasHandler">
+    /// 该成员当前是否已有实现（资产层 `handler` 字段的存在性投影）。
     /// <para>
-    /// **只有摊平期读它**（S14／D28）：装载链不判「成员是否已实现」——成品里 handler 为 null 与
-    /// 「纯编排成员」不可区分。抽象性**沿继承链合并**：子覆写 ⇒ 不再抽象；子可重新声明 <c>abstract: true</c> 再打开。
+    /// 为什么要一个显式位：摊平器用 `ToStructuralPrefabDefinition`（不解析 handler）建目录，
+    /// 那种投影里 `OwnEdges` 恒为空，无法从边数推出「有没有 handler」。
     /// </para>
     /// </param>
     /// <param name="guard">
@@ -264,8 +267,9 @@ public sealed class MemberDefinition
         IReadOnlyList<string>? bands = null,
         IReadOnlyList<string>? seams = null,
         bool sealedMember = false,
-        bool abstractMember = false,
-        HandlerGuard? guard = null)
+        HandlerGuard? guard = null,
+        MemberSlotDeclaration? slot = null,
+        bool hasHandler = false)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -287,8 +291,9 @@ public sealed class MemberDefinition
         Bands = scheme;
         Seams = ValidateSeams(name, seams);
         Sealed = sealedMember;
-        Abstract = abstractMember;
         Guard = guard;
+        Slot = slot;
+        HasHandler = hasHandler;
     }
 
     /// <summary>以父守卫补全子成员（守卫沿继承链继承，R32：作者看不见也改不到）。</summary>
@@ -308,8 +313,36 @@ public sealed class MemberDefinition
                 Bands,
                 Seams,
                 Sealed,
-                Abstract,
-                parentGuard);
+                parentGuard,
+                Slot,
+                HasHandler);
+
+    /// <summary>
+    /// 以父 slot 补全子成员（R39 裁决 5／D39：填一次**不消灭**空位，只改变状态）。
+    /// <para>
+    /// 子没重声明 slot（草案只给了 handler）时沿用父的声明 ⇒ 产物保留 <c>slot ∧ handler</c>，
+    /// 下一层草案仍可再填；子重声明时类型只能是 handler（构造期已保证），不存在类型分叉。
+    /// </para>
+    /// </summary>
+    internal MemberDefinition WithInheritedSlot(MemberSlotDeclaration? parentSlot)
+        => parentSlot is null || Slot is not null
+            ? this
+            : new MemberDefinition(
+                Name,
+                View,
+                Visibility,
+                OwnEdges,
+                Validation,
+                Layer,
+                DeclaredBy,
+                SignalTiming,
+                Band,
+                Bands,
+                Seams,
+                Sealed,
+                Guard,
+                parentSlot,
+                HasHandler);
 
     /// <summary>
     /// 具名缝声明的合法性校验（fail-fast）：空白项、重复名一律拒绝（重复名会让"按名取包装器列表"变成多解）。
@@ -515,12 +548,19 @@ public sealed class MemberDefinition
     public bool Sealed { get; }
 
     /// <summary>
-    /// **成员级抽象**（R30／R31；缺省 false＝已实现）：该成员的 handler 是空洞，必须由子实现。
-    /// <para>
-    /// 摊平期**唯一**的强制点（S14／D28）：装载链不读本字段。抽象性沿继承链合并——子覆写即不再抽象。
-    /// </para>
+    /// **成员级空位声明**（R39 裁决 5／8；null＝普通成员／纯编排成员）：链上声明过＝可填／可重填。
+    /// 与 <see cref="HasHandler"/> 正交，四行判定表就是两个事实的存在性组合（D40）。
     /// </summary>
-    public bool Abstract { get; }
+    public MemberSlotDeclaration? Slot { get; }
+
+    /// <summary>该成员当前是否已有实现（资产层 <c>handler</c> 字段的存在性投影）。</summary>
+    public bool HasHandler { get; }
+
+    /// <summary>
+    /// **未填空位**（D40 判定表第 1 行；S28／S32 的**唯一**成员层判据）。
+    /// <para>装载期「是否可被 components 引用」与摊平期「是否必须实现」都只读它。</para>
+    /// </summary>
+    public bool IsUnfilledSlot => Slot is not null && !HasHandler;
 
     /// <summary>
     /// **守卫档**（R32；null＝不守卫）：模板成员声明，生成器把它合成进 csx 首行过滤代码；
@@ -539,17 +579,20 @@ public sealed class MemberDefinition
     /// <summary>
     /// 覆写本成员（R3a：整段替换；可见性只能收紧）。
     /// <para>
-    /// **R2（批次 4）新增授权门**：资产层参与的继承还要过两级授权——父的资产级开关
-    /// （<see cref="PrefabDefinition.AuthorizesModing"/>，缺省关闭）＋ 成员级封死（<see cref="IsEffectivelySealed"/>）。
+    /// **授权门（R39 裁决 5，D39／D40；R2 已被修订）**：资产层参与的继承必须同时满足
+    /// ①该成员在链上被声明为 slot（本对象的 <see cref="Slot"/> 非空）；
+    /// ②该 slot 未被 <see cref="IsEffectivelySealed"/> 锁定。**可覆写性只由声明决定，不由实现状态决定**
+    /// ——「已经有 handler 正文」不产生任何资格；也不再有任何资产级总闸。
+    /// </para>
+    /// <para>
     /// 引擎内部层间继承（<see cref="PrefabLayer.Kernel"/> ↔ <see cref="PrefabLayer.Game"/>）**豁免**，
     /// 既有 <c>engine ← engine.game</c>、<c>base ← unit/order/counter/hq</c> 的覆写行为逐条不变（R2 第 5、6 条）。
     /// </para>
     /// </summary>
     /// <exception cref="InvalidOperationException">子声明的可见性放宽了父声明。</exception>
-    /// <exception cref="PrefabLoadException">资产层覆写未获授权（父开关关闭／成员 sealed／<c>framework.</c> 前缀）。</exception>
+    /// <exception cref="PrefabLoadException">该成员不是空位／空位已 sealed／<c>framework.</c> 前缀。</exception>
     internal MemberDefinition Override(
         MemberDefinition child,
-        bool parentAuthorizesModing,
         PrefabLayer parentLayer,
         PrefabLayer childLayer,
         string parentId)
@@ -567,22 +610,27 @@ public sealed class MemberDefinition
             {
                 throw new PrefabLoadException(
                     PrefabErrorCategories.Structure,
-                    $"成员 '{Name}' 被父资产 '{parentId}' 封死（"
+                    $"成员 '{Name}' 的空位被父资产 '{parentId}' 封死（"
                     + (Sealed ? "成员级 sealed" : "framework. 前缀恒 sealed")
-                    + "）：未授权即装载期拒绝（R2）。");
+                    + ")：sealed 锁定这个 slot，子不得再填（R39 裁决 5）。");
             }
 
-            if (!parentAuthorizesModing)
+            if (Slot is null)
             {
+                // R39 裁决 5／D40：**可覆写性只由声明决定**——没有 slot 就是不可覆写，与实现状态无关。
+                // 不再提示「请打开 authorize-moding」（该开关已废止）。
                 throw new PrefabLoadException(
                     PrefabErrorCategories.Structure,
-                    $"父资产 '{parentId}' 未打开可重载开关（authorize-moding），成员 '{Name}' 不允许被覆写："
-                    + "未授权即装载期拒绝（R2）。");
+                    $"成员 '{Name}' 不是空位：父资产 '{parentId}' 没有在链上把它声明为 slot "
+                    + "(slot <成员名>: handler)，因此不允许被覆写（R2 已被 R39 修订）。");
             }
         }
 
-        // 守卫沿继承链继承（R32）：作者看不见 guard，子覆写「不重声明」＝沿用父的档，不是「取消守卫」。
-        return child.WithInheritedGuard(Guard);
+        // 守卫与 slot 沿继承链继承（R32／R39）：
+        //  - 作者看不见 guard，子覆写「不重声明」＝沿用父的档，不是「取消守卫」；
+        //  - slot 是「这里有一个空位」的声明，子填一次**不消灭**它（D39：填一次只改状态），否则
+        //    「产物可再填」不成立。子显式重声明 slot 时类型必须相同（成员级只有 handler，天然相同）。
+        return child.WithInheritedGuard(Guard).WithInheritedSlot(Slot);
     }
 
     /// <summary>

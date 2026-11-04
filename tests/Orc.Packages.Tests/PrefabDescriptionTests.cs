@@ -43,8 +43,13 @@ public class PrefabDescriptionTests : IDisposable
 
         var prefab = Assert.IsType<PrefabSummary>(description.Prefab);
         Assert.Equal(ParentId, prefab.Id);
-        Assert.True(prefab.AuthorizesModing);
         Assert.Equal("unit", prefab.RequiresHost);
+        // S33：资产级开关字段已删除；可覆写性只在成员级（下面的 member.Overridable）。
+        // 空位 schema 由合并后的展开表给出（S33：父链声明的空位也在表里）。
+        var slot = Assert.Single(prefab.Slots!, s => s.Name == "onDeployed");
+        Assert.Equal("handler", slot.Type);
+        Assert.Equal("member", slot.Scope);
+        Assert.True(slot.Filled);
 
         // 一次查询拿到成员表 ＋ 视图字段与可写性（R24 第 1 条）。
         var member = Assert.Single(description.Members);
@@ -153,10 +158,78 @@ public class PrefabDescriptionTests : IDisposable
     }
 
     [Fact]
-    public void 未授权的覆写_展开即拒绝并给父与成员名()
+    public void 合并后的空位schema_父链声明的资产级空位对表单可见()
     {
-        // 父没打开 authorize-moding：子一覆写就过不了装载期的同一个门（R2），因此 DescribePrefab 也拒绝展开。
-        Write("effects-v4/test.parent.component.json", Parent.Replace("\"authorize-moding\": true,", string.Empty));
+        // S33：schema 由**合并后的展开表**给出——子没声明，父声明的资产级空位仍出现在表单里。
+        Write(
+            "effects-v4/test.parent.component.json",
+            Parent.Replace(
+                "\"requires-host\": \"unit\",",
+                "\"requires-host\": \"unit\",\n    \"slots\": [ { \"name\": \"damage\", \"type\": \"number\", \"value\": 3 } ],",
+                StringComparison.Ordinal));
+        Write("effects-v4/test.child.component.json", Child);
+
+        var description = NewEditor().DescribePrefab(_pack, "test.child");
+
+        var slot = Assert.Single(description.Prefab!.Slots!, s => s.Name == "damage");
+        Assert.Equal("number", slot.Type);
+        Assert.Equal("asset", slot.Scope);
+        Assert.True(slot.Filled);
+        Assert.True(slot.RuntimeEffect);
+        Assert.False(description.Prefab.IsTemplate); // 已饱和＝具体资产
+    }
+
+    [Fact]
+    public void 零空位存量资产_呈现无空位且不可派生_不报错()
+    {
+        Write(
+            "effects-v4/plain.component.json",
+            """
+            {
+              "schemaVersion": 4,
+              "asset": {
+                "kind": "component",
+                "id": "plain",
+                "requires-host": "any",
+                "active-when": "placed",
+                "one-shot": false,
+                "private-fields": [],
+                "members": [
+                  {
+                    "name": "onFixed",
+                    "visibility": [ "callable" ],
+                    "view": { "fields": [] },
+                    "handler": {
+                      "id": "plain#onFixed",
+                      "entry": "HandleAsync",
+                      "script": "public Task HandleAsync(dynamic view, Context ctx, CancellationToken ct) => Task.CompletedTask;"
+                    }
+                  }
+                ],
+                "mounts": [],
+                "wraps": []
+              }
+            }
+            """);
+
+        var description = NewEditor().DescribePrefab(_pack, "plain");
+
+        Assert.Empty(description.Diagnostics);
+        Assert.Empty(description.Prefab!.Slots!);
+        Assert.False(description.Prefab.IsTemplate);
+        var member = Assert.Single(description.Members);
+        Assert.False(member.Overridable);   // 没有 slot ⇒ 不可覆写
+        Assert.False(member.RequiresImplementation);
+    }
+
+    [Fact]
+    public void 成员不是空位_覆写即拒绝并给父与成员名()
+    {
+        // 父没把 onDeployed 声明为 slot：子一覆写就过不了装载期的同一个门（R39 裁决 5），
+        // 因此 DescribePrefab 也拒绝展开。
+        Write(
+            "effects-v4/test.parent.component.json",
+            Parent.Replace("\"slot\": { \"type\": \"handler\" },", string.Empty, StringComparison.Ordinal));
         Write("effects-v4/test.child.component.json", OverridingChild);
 
         var description = NewEditor().DescribePrefab(_pack, "test.child");
@@ -238,7 +311,6 @@ public class PrefabDescriptionTests : IDisposable
           "asset": {
             "kind": "component",
             "id": "test.parent",
-            "authorize-moding": true,
             "requires-host": "unit",
             "active-when": "placed",
             "one-shot": false,
@@ -253,6 +325,7 @@ public class PrefabDescriptionTests : IDisposable
                     { "name": "Card", "type": "entity", "writable": false, "required": false }
                   ]
                 },
+                "slot": { "type": "handler" },
                 "handler": {
                   "id": "test.parent#onDeployed",
                   "entry": "HandleAsync",

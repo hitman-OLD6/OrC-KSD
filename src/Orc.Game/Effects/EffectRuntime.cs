@@ -74,9 +74,10 @@ public enum EffectDuration
 /// <summary>
 /// 效果运行时门面（csx handler 的**唯一游戏层受控入口**）：把「消灭（死亡链）／伤害／属性修饰／词条授予（含参值）／
 /// 词条撤销／词条参值改写／内容型词条授予／抽牌／无头选靶／指挥点槽加·减／指挥点加·减（E1-25）」收敛到一处集中暴露——不给各服务零散加 public 面（便于审计与替换）。
-/// <para>批 4 加性（csx 动态效果能力）：动态效果的**受控挂载/卸载/编译挂载**（<c>AttachPrefabAsync</c>／
-/// <c>AttachSnapshotAsync</c>／<c>CompileAttachAsync</c>／<c>DetachEffectAsync</c>——统一结果体系）见
-/// <c>EffectRuntime.DynamicEffects.cs</c>。</para>
+/// <para>动态效果（csx 可达的**受控挂载/卸载/编译挂载**）：<c>AttachPrefabAsync</c>／<c>AttachSnapshotAsync</c>／
+/// <c>CompileAttachAsync</c>／<c>DetachEffectAsync</c> 见 <c>EffectRuntime.ActionExtensions.cs</c>——
+/// 前三者返回挂载凭据 <see cref="GrantHandle"/>（撤销只认凭据，不按效果 id 反查），
+/// 失败抛 <see cref="InvalidOperationException"/>（不放宽成静默空转、不另立结果体系）。</para>
 /// <para>批 6 加性（卡组定向取卡）：<c>FetchFromDeckAsync</c>——从目标卡归属玩家卡组定向取出该实例并移动到其手牌
 /// （主场景＝「（触发条件）后从卡组抽取此牌」；结果对象 <c>DeckFetchResult</c>——三态＋类别，两层同型）。</para>
 /// <para>解析路径与既有服务同构：<see cref="ResolveFor"/>（卡 → 玩家 → 服务）。</para>
@@ -98,6 +99,7 @@ public sealed partial class EffectRuntime
     private readonly Func<bool>? _allowRandom;
     private readonly Func<LogicEngine?>? _engine;
     private readonly Func<bool>? _isActionAllowed;
+    private readonly Func<HandTransferService?>? _handTransfer;
 
     /// <summary>创建运行时门面（协作者以延迟读取注入——装配链时序无关）。</summary>
     /// <param name="commands">指挥管理器访问器。</param>
@@ -111,6 +113,10 @@ public sealed partial class EffectRuntime
     /// 随机选择器开关访问器（R2c／A-5）：缺省 null＝**禁止**随机取样（生产口径）；
     /// 测试／沙盒／简单 AI 装配方显式返回 true。
     /// </param>
+    /// <param name="handTransfer">
+    /// 手牌转移服务访问器（跨玩家手牌移动：交换／洗入他人卡组）。对局装配＝<c>Match</c> 装配期创建的服务；
+    /// 缺省 null＝独立构造（转移面按「服务未装配」明确拒绝——不静默空转）。
+    /// </param>
     /// <exception cref="ArgumentNullException">任一必填访问器为 null。</exception>
     public EffectRuntime(
         Func<CommandManager?> commands,
@@ -120,7 +126,8 @@ public sealed partial class EffectRuntime
         Func<LogicEngine?>? engine = null,
         Func<bool>? isActionAllowed = null,
         Func<Orc.Game.Board.Battlefield?>? battlefield = null,
-        Func<bool>? allowRandom = null)
+        Func<bool>? allowRandom = null,
+        Func<HandTransferService?>? handTransfer = null)
     {
         ArgumentNullException.ThrowIfNull(commands);
         ArgumentNullException.ThrowIfNull(players);
@@ -134,6 +141,7 @@ public sealed partial class EffectRuntime
         _isActionAllowed = isActionAllowed;
         _battlefield = battlefield;
         _allowRandom = allowRandom;
+        _handTransfer = handTransfer;
     }
 
     /// <summary>
@@ -1209,4 +1217,142 @@ public sealed partial class EffectRuntime
         };
     }
 
+    // ---------- 跨玩家手牌转移（动作族：交换 / 洗入他人卡组） ----------
+
+    /// <summary>
+    /// **交换两张手牌的归属**（薄转发到 <see cref="HandTransferService.ExchangeAsync"/>）：
+    /// 两张牌实例不变，各自进入对方手牌；两张全部落位后各发一次 <c>card.hand.add</c>
+    /// （次序固定＝<paramref name="first"/> → <paramref name="second"/>）。
+    /// <para>
+    /// <paramref name="first"/> 须为**施放者侧**那张——本次序即信号发射次序（服务不按 <c>source.Owner</c> 反推，
+    /// 否则「把 second 传成施放者侧」的调用方会静默改变次序而看不出）。
+    /// </para>
+    /// <para>
+    /// **<paramref name="source"/> 语义（同名不同义，注意区分）**：本族 <c>source</c> 是**判定操作数**——
+    /// 必填非空；传入的卡出现在被转移任一侧 ⇒ 拒绝（结算中的施放源卡不得参与）。这与
+    /// <c>DiscardCardAsync.source</c>（可空、仅作归因、不参与判定）不同；共用名字是因为 csx 作者不该记两套命名，
+    /// 差异由类型（非空、无默认值）与本节注释承载。
+    /// </para>
+    /// <para>
+    /// 转发面**不吞异常、不改写结局**：拒绝＝<see cref="InvalidOperationException"/> 原样冒泡。
+    /// 将来若真出现「无源卡的规则性转移」，那是需要单独讨论的新场景（可能另开 <c>SystemTransferAsync</c> 入口），
+    /// **不得**为此把 <paramref name="source"/> 退回可空——那会把本卡的强制点一起废掉。
+    /// </para>
+    /// </summary>
+    /// <param name="first">被转移卡之一（施放者侧；本次序即信号次序）。</param>
+    /// <param name="second">被转移卡之二。</param>
+    /// <param name="source">结算中的施放源卡（必填）。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <exception cref="ArgumentNullException">first / second / source 为 null。</exception>
+    /// <exception cref="InvalidOperationException">服务未装配；或任一前置断言不成立（拒绝——零副作用、零信号）。</exception>
+    public Task ExchangeAsync(Card first, Card second, Card source, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(first);
+        ArgumentNullException.ThrowIfNull(second);
+        ArgumentNullException.ThrowIfNull(source);
+        return RequireHandTransfer().ExchangeAsync(first, second, source, ct);
+    }
+
+    /// <summary>
+    /// **把一张手牌塞入指定玩家卡组并洗切**（薄转发到 <see cref="HandTransferService.ShuffleIntoDeckAsync"/>）：
+    /// 移动**既有实例**并翻转归属（发 <c>deck.shuffled</c> 恰一次；装入本身静默）。
+    /// <para>
+    /// 命名邻近风险：<see cref="ShuffleInAsync"/>＝按卡名**新建**一张塞入卡组；
+    /// 本方法＝**移动既有实例并翻转归属**。两者不是同一语义，别选错。
+    /// </para>
+    /// <para><paramref name="source"/> 的语义同 <see cref="ExchangeAsync"/>（必填判定操作数，非归因）。</para>
+    /// </summary>
+    /// <param name="card">被转移的手牌（须在其归属方手牌中）。</param>
+    /// <param name="targetPlayer">目标玩家（须属本对局，且 ≠ 卡当前归属）。</param>
+    /// <param name="source">结算中的施放源卡（必填）。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <exception cref="ArgumentNullException">card / targetPlayer / source 为 null。</exception>
+    /// <exception cref="InvalidOperationException">服务未装配；或任一前置断言不成立（拒绝——零副作用、零信号）。</exception>
+    public Task ShuffleIntoDeckAsync(
+        Card card, Player targetPlayer, Card source, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(card);
+        ArgumentNullException.ThrowIfNull(targetPlayer);
+        ArgumentNullException.ThrowIfNull(source);
+        return RequireHandTransfer().ShuffleIntoDeckAsync(card, targetPlayer, source, ct);
+    }
+
+    /// <summary>
+    /// **按玩家**从手牌选 1..N 张（给对手选牌的唯一正确入口）。
+    /// <para>
+    /// 必须按玩家而不是按卡：给对手选牌时若复用 <see cref="PickHandCardsAsync"/> 就得随手抓对手一张牌当锚点，
+    /// 而对手手牌为空时根本没有锚点（死路），还会污染 <paramref name="exclude"/>。
+    /// </para>
+    /// <para>
+    /// **<paramref name="exclude"/> 是体验优化，不是防线**：排除后候选为空 ⇒ <see cref="HandPickStatus.Cancelled"/>
+    /// （零交互、不挂起——过滤发生在「min 与手牌数」比较之前）；不传 exclude 让玩家选中了不该选的牌，
+    /// 动作层仍会拒绝（<see cref="ExchangeAsync"/>／<see cref="ShuffleIntoDeckAsync"/> 的强制点）。
+    /// </para>
+    /// </summary>
+    /// <param name="player">被问的玩家（候选集＝该玩家手牌）。</param>
+    /// <param name="min">至少选几张（&lt;0 按 0 处理）。</param>
+    /// <param name="max">至多选几张（收敛为手牌数）。</param>
+    /// <param name="exclude">默认建议排除的卡（如结算中的施放源卡）；null＝不排除。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <exception cref="ArgumentNullException">player 为 null。</exception>
+    public async Task<HandCardPick> PickHandCardsForAsync(
+        Player player, int min, int max, IReadOnlyCollection<Card>? exclude = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(player);
+        var result = await HandSelection.PickAsync(player, min, max, ct, exclude).ConfigureAwait(false);
+
+        var cards = new List<Card>(result.Picks.Count);
+        foreach (var reference in result.Picks)
+        {
+            if (reference.IsAlive && reference.Value is Card card)
+            {
+                cards.Add(card);
+            }
+        }
+
+        return new HandCardPick(result.Status, cards, result.TargeterFailure);
+    }
+
+    /// <summary>
+    /// **卡的对家**（本对局玩家清单里除 <c>card.Owner</c> 外的唯一一个）；
+    /// <c>Owner</c> 为空／运行时未装配／清单不是双人 ⇒ null（不抛）。
+    /// <para>
+    /// 不另造「针对对手」的便利动作（<c>PickOpponentHandCardAsync</c> 之类）：每加一个针对对手的成品方法，
+    /// 动作面就多一条只服务单卡的路径；本方法一次就能喂给上面两个动作。动作面要原语，不要成品菜。
+    /// </para>
+    /// </summary>
+    /// <param name="card">视角卡（其归属玩家为「我方」）。</param>
+    /// <exception cref="ArgumentNullException">card 为 null。</exception>
+    public Player? OpponentOf(Card card)
+    {
+        ArgumentNullException.ThrowIfNull(card);
+        if (OwnerOf(card) is not { } me || _players() is not { } players)
+        {
+            return null;
+        }
+
+        Player? opponent = null;
+        foreach (var player in players.Players)
+        {
+            if (ReferenceEquals(player, me))
+            {
+                continue;
+            }
+
+            if (opponent is not null)
+            {
+                return null; // 不是双人局：没有「唯一的对家」
+            }
+
+            opponent = player;
+        }
+
+        return opponent;
+    }
+
+    /// <summary>手牌转移服务解析（未装配＝明确异常——转移是状态变更动作，不能静默空转）。</summary>
+    private HandTransferService RequireHandTransfer()
+        => _handTransfer?.Invoke()
+            ?? throw new InvalidOperationException(
+                "手牌转移服务未装配（独立构造场景不支持跨玩家转移——装配性错误）。");
 }

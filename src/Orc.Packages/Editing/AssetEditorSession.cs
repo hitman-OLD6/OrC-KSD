@@ -65,6 +65,7 @@ internal sealed class AssetEditorSession
     private readonly IEditableRootPolicy _policy;
     private readonly NormalizedPath _temporaryRoot;
     private readonly Dictionary<EditorAssetKey, EditorAssetEntry> _assets = new();
+    private readonly Dictionary<string, NamedInstanceRecord> _named = new(StringComparer.Ordinal);
     private readonly Dictionary<EditorAssetKey, EditorAssetEntry> _initialAssets = new();
     private readonly HashSet<string> _pinned = new(StringComparer.Ordinal);
     private readonly HashSet<string> _deletedSourceRelatives = new(StringComparer.Ordinal);
@@ -423,6 +424,124 @@ internal sealed class AssetEditorSession
 
         RecomputeLocks();
         return ToInfo(_assets[key]);
+    }
+
+    /// <summary>
+    /// **创建 `named` 的虚拟 moding 记录**（R39 裁决 13／S30）：展开成功但**不落盘**。
+    /// <para>
+    /// 查重：与已声明资产（<c>_assets</c>）和已有虚拟记录比对——**两处都拒绝同 id、不覆盖**（D47 ②）。
+    /// 记录只在本次会话可见；<see cref="PrefabCatalog"/> 正式解析面看不到它。
+    /// </para>
+    /// </summary>
+    /// <exception cref="AssetEditorException">id 非法／重名／展开失败。</exception>
+    public NamedInstanceRecord CreateNamedInstance(
+        string id,
+        ComponentAsset template,
+        IReadOnlyDictionary<string, object?> arguments,
+        IReadOnlyDictionary<string, ComponentAsset> declarations,
+        HandlerDslEnvironment? dsl,
+        Func<string, string?>? resolveDslPath)
+    {
+        ArgumentNullException.ThrowIfNull(template);
+        ArgumentNullException.ThrowIfNull(arguments);
+        ArgumentNullException.ThrowIfNull(declarations);
+
+        ValidateLocalId(id);
+        if (_named.ContainsKey(id) || _assets.ContainsKey(new EditorAssetKey(AssetKind.Effect, id)))
+        {
+            throw new AssetEditorException(
+                AssetEditorErrorCode.AssetExists,
+                $"named 实例 id '{id}' 已被虚拟记录或资产库占用：两处都拒绝同 id、不覆盖（R39 裁决 13）。");
+        }
+
+        InstantiatedPrefab instantiated;
+        try
+        {
+            instantiated = PrefabExpander.Instantiate(new InstantiationRequest
+            {
+                Template = template,
+                Arguments = arguments,
+                Mode = ExpansionMode.Named,
+                Id = id,
+                Declarations = declarations,
+                HandlerDsl = dsl,
+                ResolveDslPath = resolveDslPath,
+            });
+        }
+        catch (PrefabLoadException ex)
+        {
+            throw new AssetEditorException(
+                AssetEditorErrorCode.InvalidContent, $"named 实例 '{id}' 展开失败：{ex.Message}", ex);
+        }
+
+        var asset = instantiated.Expanded.Asset;
+        var record = new NamedInstanceRecord(
+            id,
+            asset,
+            instantiated.Expanded.Type,
+            asset.Origin ?? AssetOrigin.ForTemplate(template.Id, instantiated.ArgsHash, arguments),
+            AssetSchema.Write(asset));
+        _named[id] = record;
+        return record;
+    }
+
+    /// <summary>会话内的虚拟记录（按 id 排序；<c>Save</c> 后移出）。</summary>
+    public IReadOnlyList<NamedInstanceRecord> ListNamedInstances()
+        => _named.Values.OrderBy(static record => record.Id, StringComparer.Ordinal).ToArray();
+
+    /// <summary>按 id 找虚拟记录（不存在＝null）。</summary>
+    public NamedInstanceRecord? FindNamedInstance(string id)
+        => _named.TryGetValue(id, out var record) ? record : null;
+
+    /// <summary>
+    /// **`Save` 虚拟记录**（R39 裁决 13）：写产品到 <c>effects-v4/&lt;id&gt;.component.json</c> ＋
+    /// 走既有 <see cref="CreateAsset"/>（sidecar／版本 1.0.0／**测试 lock**）。
+    /// <para>不碰正式 lock——转正仍走 <see cref="Promote"/>（R10）。失败时不留半份文件。</para>
+    /// </summary>
+    /// <exception cref="AssetEditorException">记录不存在／写盘失败／声明失败。</exception>
+    public EditorCommitResult SaveNamedInstance(string id)
+    {
+        if (!_named.TryGetValue(id, out var record))
+        {
+            throw new AssetEditorException(
+                AssetEditorErrorCode.AssetNotFound, $"named 虚拟记录 '{id}' 不存在（可能已保存或已丢弃）。");
+        }
+
+        var sourceRelative = $"effects-v4/{id}.component.json";
+        var sourceAbsolute = TemporaryPath(sourceRelative);
+        EnsureWritable(sourceAbsolute, sourceRelative);
+        Directory.CreateDirectory(Path.GetDirectoryName(sourceAbsolute)!);
+        WriteText(sourceAbsolute, record.ProductJson);
+
+        try
+        {
+            var info = CreateAsset(AssetKind.Effect, id, sourceRelative);
+            _named.Remove(id);
+            return new EditorCommitResult(info, VersionBumped: false);
+        }
+        catch
+        {
+            // 声明失败（重名／版本等）⇒ 把刚写下的产品删掉，保持「失败零残留」。
+            if (File.Exists(sourceAbsolute))
+            {
+                File.Delete(sourceAbsolute);
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>该包根是否就是本次会话的临时包（用于 <see cref="PrefabStage.Test"/> 判定）。</summary>
+    public bool IsTemporaryRoot(string packRoot)
+    {
+        try
+        {
+            return PathNormalizer.Normalize(packRoot).IsUnderOrEqual(_temporaryRoot);
+        }
+        catch (PathViolationException)
+        {
+            return false;
+        }
     }
 
     /// <summary>

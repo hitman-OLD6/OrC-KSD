@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "catalogRevision": 1142203374,
+  "catalogRevision": 1662329392,
   "nodes": [
     {
       "name": "addToHand",
@@ -23,6 +23,46 @@
         {
           "name": "result",
           "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "attackByEffect",
+      "pins": [
+        {
+          "name": "attacker",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "target",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "boolean",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "attackCandidates",
+      "pins": [
+        {
+          "name": "attacker",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "result",
+          "type": "list\u003Centity\u003E",
           "required": true
         }
       ]
@@ -208,6 +248,26 @@
         {
           "name": "result",
           "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "exchange",
+      "pins": [
+        {
+          "name": "first",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "second",
+          "type": "entity",
+          "required": true
+        },
+        {
+          "name": "source",
+          "type": "entity",
           "required": true
         }
       ]
@@ -554,6 +614,31 @@
     {
       "name": "stop",
       "pins": []
+    },
+    {
+      "name": "unitsOf",
+      "pins": [
+        {
+          "name": "side",
+          "type": "string",
+          "required": true,
+          "enum": [
+            "any",
+            "enemy",
+            "self"
+          ]
+        },
+        {
+          "name": "zone",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "result",
+          "type": "list\u003Centity\u003E",
+          "required": true
+        }
+      ]
     },
     {
       "name": "upgrade",

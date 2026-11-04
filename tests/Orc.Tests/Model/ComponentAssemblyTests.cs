@@ -56,15 +56,37 @@ public sealed class ComponentAssemblyTests
         Assert.Contains("comp.react", error.Message, StringComparison.Ordinal);
     }
 
-    /// <summary>装配失败上浮：<c>requires-host</c> 不覆盖实际宿主＝拒绝（不产生"少了某个组件的卡"）。</summary>
+    /// <summary>
+    /// 装配失败上浮：<c>requires-host</c> 不覆盖实际宿主＝拒绝（不产生"少了某个组件的卡"）。
+    /// <para>
+    /// 失败路径①（R1 矩阵第 1 行）：零残留对**两条通道**同时成立——边未建（投递信号不写 marker A）、
+    /// 构造期已生效的包装被撤销（结算 <c>damage-apply</c> 的数值不被改写）。包装条数基线为 1：
+    /// <c>CreateEntity</c> 已登记，故"装配失败后为 0"是撤销的结果、不是从未登记。
+    /// </para>
+    /// </summary>
     [Fact]
-    public void RequiresHostNotCoveringActualHost_IsRejected()
+    public async Task RequiresHostNotCoveringActualHost_IsRejected()
     {
-        var runtime = Scene(out var host, trace: out _, requiresHost: HostKind.Order);
-        var attachment = runtime.ConstructComponent(host, "comp.react", "r");
+        var amounts = new List<object?>();
+        var runtime = Scene(out var host, trace: out var trace, requiresHost: HostKind.Order, amounts: amounts);
+        var attachment = runtime.ConstructComponent(host, BrokenPrefabId, "r");
+        Assert.Single(runtime.Wraps.Entries(DamageTarget)); // 构造期包装已生效（R1 裁决 2 的前提）
 
         var error = Assert.Throws<PrefabLoadException>(() => attachment.Assemble());
         Assert.Contains("requires-host", error.Message, StringComparison.Ordinal);
+        Assert.Equal(PrefabErrorCategories.Structure, error.Category);
+
+        Assert.Empty(attachment.Handles);
+        Assert.False(attachment.IsAssembled);
+        Assert.False(attachment.IsDisposed);
+        Assert.Empty(runtime.Wraps.Entries(DamageTarget));
+
+        await runtime.EmitAsync(Updates.CardDestroyed);
+        Assert.DoesNotContain("onTurnStart", trace);
+
+        await runtime.RunMemberAsync(runtime.Engine, DamageApply, Amount(5));
+        Assert.DoesNotContain("wrap", trace);
+        Assert.Equal(new object?[] { 5 }, amounts);
     }
 
     // ==================== ② 复装＝重建实例（R3i） ====================
@@ -256,17 +278,176 @@ public sealed class ComponentAssemblyTests
         Assert.Empty(trace); // 装配只建边，不跑成员
     }
 
-    /// <summary>装配失败不留半装配状态：没有任何边被建立，组件可被安全丢弃。</summary>
+    /// <summary>装配失败不留半装配状态：没有任何边被建立、包装条数为 0，组件可被安全丢弃。</summary>
     [Fact]
     public void FailedAssemble_LeavesNoEdges()
     {
         var runtime = Scene(out var host, trace: out _, requiresHost: HostKind.Order);
-        var attachment = runtime.ConstructComponent(host, "comp.two", "two");
+        var attachment = runtime.ConstructComponent(host, BrokenPrefabId, "two");
 
         Assert.Throws<PrefabLoadException>(() => attachment.Assemble());
 
         Assert.Empty(runtime.Engine.EdgesFor(Updates.CardDestroyed).All);
         Assert.False(attachment.IsAssembled);
+        Assert.Empty(attachment.Handles);
+        Assert.Empty(runtime.Wraps.Entries(DamageTarget));
+    }
+
+    /// <summary>
+    /// 首次装配（矩阵的成功路径对照组）：补登记条件为假 ⇒ 包装条数不变、仍是构造期那一份
+    /// （Handler／DeclarationOrder 逐项相同），且该包装在执行期照常生效。
+    /// 条件写反（无条件补登记）会得到 2 份，条件写成恒假会在重试用例里露馅。
+    /// </summary>
+    [Fact]
+    public async Task FirstAssemble_DoesNotDuplicateConstructionTimeWraps()
+    {
+        var amounts = new List<object?>();
+        var runtime = Scene(out var host, trace: out _, amounts: amounts);
+        var attachment = runtime.ConstructComponent(host, WrappedPrefabId, "w");
+        var before = Assert.Single(runtime.Wraps.Entries(DamageTarget));
+
+        attachment.Assemble();
+
+        var after = Assert.Single(runtime.Wraps.Entries(DamageTarget));
+        Assert.Same(before.Handler, after.Handler);
+        Assert.Equal(before.Order, after.Order);
+        Assert.Equal(2, attachment.Handles.Count); // 作者边 + 框架注销边
+
+        await runtime.RunMemberAsync(runtime.Engine, DamageApply, Amount(5));
+        Assert.Equal(new object?[] { 99 }, amounts);
+    }
+
+    /// <summary>
+    /// 失败路径②（R1 矩阵第 2 行）：<c>mounts</c> 目标成员不存在＝<c>Bind</c> 规划错误。
+    /// 该路径在 <c>Bind</c> 之前已登记 <c>framework.dispose</c>、且构造期包装已生效——回滚必须把包装一并撤掉。
+    /// </summary>
+    [Fact]
+    public async Task MountPlanFailure_RollsBackBothChannels()
+    {
+        var amounts = new List<object?>();
+        var runtime = Scene(out var host, trace: out var trace, amounts: amounts);
+        var attachment = runtime.ConstructComponent(host, BrokenMountPrefabId, "b");
+        Assert.Single(runtime.Wraps.Entries(DamageTarget));
+
+        var error = Assert.Throws<PrefabLoadException>(() => attachment.Assemble());
+        Assert.Equal(PrefabErrorCategories.Addressing, error.Category);
+        Assert.Contains("no.such.target", error.Message, StringComparison.Ordinal);
+
+        Assert.Empty(attachment.Handles);
+        Assert.False(attachment.IsAssembled);
+        Assert.False(attachment.IsDisposed);
+        Assert.Empty(runtime.Engine.EdgesFor(Updates.CardDestroyed).All); // 边表无本实例边
+        Assert.Empty(runtime.Wraps.Entries(DamageTarget));
+
+        await runtime.EmitAsync(Updates.CardDestroyed);
+        Assert.DoesNotContain("onTurnStart", trace);
+
+        await runtime.RunMemberAsync(runtime.Engine, DamageApply, Amount(7));
+        Assert.DoesNotContain("wrap", trace);
+        Assert.Equal(new object?[] { 7 }, amounts);
+    }
+
+    /// <summary>
+    /// 失败路径③（R1 矩阵第 3 行，主场景）：<c>disposal-signal</c> 指向不存在的成员。
+    /// 这是唯一「边已全部建好之后才抛」的路径（缺口的原始形态），也是日志「该组件不生效」说谎的现场。
+    /// </summary>
+    [Fact]
+    public async Task DisposalSignalMissing_RollsBackBothChannels_AndKeepsEntity()
+    {
+        var amounts = new List<object?>();
+        var runtime = Scene(out var host, trace: out var trace, amounts: amounts);
+        var attachment = runtime.ConstructComponent(host, BrokenPrefabId, "b");
+        Assert.Single(runtime.Wraps.Entries(DamageTarget));
+
+        var error = Assert.Throws<PrefabLoadException>(() => attachment.Assemble());
+        Assert.Equal(PrefabErrorCategories.Addressing, error.Category);
+        Assert.Contains("no.such.signal", error.Message, StringComparison.Ordinal);
+        Assert.Contains("兜底信号", error.Message, StringComparison.Ordinal);
+
+        // 账本：句柄清空、未装配、未销毁。
+        Assert.Empty(attachment.Handles);
+        Assert.False(attachment.IsAssembled);
+        Assert.False(attachment.IsDisposed);
+
+        // 执行面：边表无本实例边、包装条数 0。
+        Assert.Empty(runtime.Engine.EdgesFor(Updates.CardDestroyed).All);
+        Assert.Empty(runtime.Wraps.Entries(DamageTarget));
+
+        // 边通道不生效。
+        await runtime.EmitAsync(Updates.CardDestroyed);
+        Assert.DoesNotContain("onTurnStart", trace);
+
+        // 包装通道不生效（对照组见重试用例：同一包装在装配成功时会改写数值）。
+        await runtime.RunMemberAsync(runtime.Engine, DamageApply, Amount(5));
+        Assert.DoesNotContain("wrap", trace);
+        Assert.Equal(new object?[] { 5 }, amounts);
+
+        // 失败实例仍可重试：实体未被销毁、仍在存活集合与宿主组件集合内（未 Forget）。
+        Assert.Contains(attachment.Component, runtime.Entities);
+        Assert.Contains(attachment, runtime.ComponentsOf(host));
+    }
+
+    /// <summary>
+    /// R3（矩阵第 4 行，对照组）：连续两次失败（两条**不同**路径）后第三次装配成功——
+    /// 边与包装都恰好一份，边通道 handler 恰执行 1 次、包装通道恢复生效（数值被改写）。
+    /// 若补登记缺失则包装条数为 0／数值不被改写；若条件写反或重复登记则包装条数 &gt; 1。
+    /// </summary>
+    [Fact]
+    public async Task RetryAfterFailures_RebuildsExactlyOneCopyOfEdgesAndWraps()
+    {
+        var amounts = new List<object?>();
+        var runtime = Scene(out var host, trace: out var trace, amounts: amounts);
+        var attachment = runtime.ConstructComponent(host, BrokenMountPrefabId, "b");
+
+        // 第一次失败：Bind 规划错误（②）。
+        Assert.Throws<PrefabLoadException>(() => attachment.Assemble());
+        Assert.Empty(attachment.Handles);
+        Assert.Empty(runtime.Wraps.Entries(DamageTarget));
+
+        // 修复致因之一：补齐缺失的挂载目标成员 ⇒ 第二次失败落在 disposal-signal（③）。
+        runtime.Engine.RegisterMember(new MemberDefinition(
+            "no.such.target", ViewSpec.Empty, MemberVisibility.All));
+        Assert.Throws<PrefabLoadException>(() => attachment.Assemble());
+        Assert.Empty(attachment.Handles);
+        Assert.Empty(runtime.Wraps.Entries(DamageTarget));
+
+        // 修复致因之二：补齐兜底信号成员 ⇒ 装配成功（重试＝干净重建）。
+        runtime.Engine.RegisterMember(new MemberDefinition(
+            "no.such.signal", ViewSpec.Empty, MemberVisibility.All));
+        attachment.Assemble();
+
+        Assert.True(attachment.IsAssembled);
+        Assert.False(attachment.IsDisposed);
+        Assert.Equal(3, attachment.Handles.Count); // 2 条作者边 + 1 条框架注销边（无重复）
+        Assert.Single(runtime.Engine.EdgesFor(Updates.CardDestroyed).All); // 作者边（只有这一条）
+        Assert.Single(runtime.Engine.EdgesFor("no.such.target").All); // 补齐的挂载目标只有一条边
+        Assert.Single(runtime.Engine.EdgesFor(NoSuchSignal).All); // 框架注销边落在声明的兜底信号上
+
+        // 包装恰好一份（"无重复"的判据是条数）。
+        // 注：声明序不逐字相等是可接受偏差——构造期 RegisterWraps 跑在 DeclarationSegment 赋值之前（首次登记 Component=0），
+        // 补登记取构造期声明段＝1；唯一一份包装的相位／目标／行为不受影响（见 PROGRESS 记录）。
+        var wrap = Assert.Single(runtime.Wraps.Entries(DamageTarget));
+        Assert.Equal(WrapperPhase.Before, wrap.Phase);
+        Assert.Equal(1, wrap.Order.Component);
+
+        // 包装通道恢复生效。
+        await runtime.RunMemberAsync(runtime.Engine, DamageApply, Amount(5));
+        Assert.Equal(new object?[] { 99 }, amounts);
+        Assert.Single(trace, static t => t == "wrap");
+
+        // 边通道恰好执行 1 次（边被建两份时这里会是 2）。
+        await runtime.EmitAsync(Updates.CardDestroyed);
+        Assert.Single(trace, static t => t == "onTurnStart");
+        Assert.False(attachment.IsDisposed); // 兜底信号是 no.such.signal，card.destroyed 不解注销本实例
+
+        // 卸载语义（S3 末条）：边全撤、包装全撤、实体销毁。
+        runtime.DisposeComponent(attachment);
+        Assert.True(attachment.IsDisposed);
+        Assert.Empty(attachment.Handles);
+        Assert.Empty(runtime.Engine.EdgesFor(Updates.CardDestroyed).All);
+        Assert.Empty(runtime.Engine.EdgesFor(NoSuchSignal).All);
+        Assert.Empty(runtime.Wraps.Entries(DamageTarget));
+        Assert.DoesNotContain(attachment.Component, runtime.Entities);
     }
 
     /// <summary><c>active-when</c> 缺省＝<c>placed</c>，且缺省值在**声明层**可读到（不靠 C# 默认参数隐式决定）。</summary>
@@ -340,9 +521,14 @@ public sealed class ComponentAssemblyTests
     // ==================== 场景构件 ====================
 
     /// <summary>
-    /// 引擎（内核 4 信号）＋一张单位卡类型预制体 ＋ 四个组件预制体：
+    /// 引擎（内核 4 信号 ＋ 一个可被包装的 <c>damage-apply</c> 成员）＋一张单位卡类型预制体 ＋ 组件预制体：
     /// <c>comp.react</c>（挂 card.destroyed 一个成员）、<c>comp.two</c>（两个作者边）、
-    /// <c>comp.silent</c>（无作者边）、<c>comp.loaded</c>／<c>comp.placed</c>（时点各一）、<c>comp.stateful</c>（私有字段）。
+    /// <c>comp.silent</c>（无作者边）、<c>comp.loaded</c>／<c>comp.placed</c>（时点各一）、<c>comp.stateful</c>（私有字段）、
+    /// <c>comp.broken</c>（兜底信号缺失；边通道＋包装通道各一）、<c>comp.broken.mount</c>（另含不存在的挂载目标）。
+    /// <para>
+    /// <c>damage-apply</c> 的自有边只做观测：把包装改写后的数值记进 <paramref name="amounts"/>——
+    /// 这是「包装是否生效」的可观察读数（内核侧没有别的读点）。
+    /// </para>
     /// </summary>
     private static OrchestrationRuntime Scene(
         out OrchestrationEntity host,
@@ -350,13 +536,23 @@ public sealed class ComponentAssemblyTests
         ActiveWhen placedWhen = ActiveWhen.Placed,
         ActiveWhen loadedWhen = ActiveWhen.Loaded,
         HostKind requiresHost = HostKind.Any,
-        bool oneShot = false)
+        bool oneShot = false,
+        List<object?>? amounts = null)
     {
         var log = new List<string>();
         trace = log;
+        var observed = amounts ?? new List<object?>();
+
+        var handlers = new HandlerRegistry();
+        handlers.Register("h.damage-rewrite", (view, _, _) =>
+        {
+            log.Add("wrap");
+            ((ViewCarrier)view).Set("amount", 99);
+            return Task.CompletedTask;
+        });
 
         var catalog = new PrefabCatalog()
-            .Add(KernelSignals.CreateEnginePrefab())
+            .Add(Engine(observed))
             .Add(new PrefabDefinition("card.unit", EntityKind.Card, hosts: HostKind.Unit))
             .Add(Component("comp.react", "react", requiresHost, log, placedWhen, oneShot: oneShot))
             .Add(new PrefabDefinition(
@@ -399,12 +595,76 @@ public sealed class ComponentAssemblyTests
                 EntityKind.Component,
                 requiresHost: requiresHost,
                 members: new[] { Member("run", log) },
-                privateFields: new[] { new PrivateFieldDefinition("hits", ViewFieldType.Number, 0) }));
+                privateFields: new[] { new PrivateFieldDefinition("hits", ViewFieldType.Number, 0) }))
+            .Add(new PrefabDefinition(
+                "comp.wrapped",
+                EntityKind.Component,
+                requiresHost: requiresHost,
+                members: new[] { Member("onTurnStart", log) },
+                mounts: new[] { new MountDeclaration($"engine#{Updates.CardDestroyed}", "onTurnStart") },
+                wraps: new[]
+                {
+                    WrapDeclaration.ForMember($"engine#{DamageApply}", WrapperPhase.Before, "h.damage-rewrite"),
+                }))
+            .Add(Broken(BrokenPrefabId, requiresHost, log, new[]
+            {
+                new MountDeclaration($"engine#{Updates.CardDestroyed}", "onTurnStart"),
+            }))
+            .Add(Broken(BrokenMountPrefabId, requiresHost, log, new[]
+            {
+                // 一条合法（边通道用）＋ 一条目标成员不存在（Bind 规划错误用）：修复目标后即装配成功。
+                new MountDeclaration($"engine#{Updates.CardDestroyed}", "onTurnStart"),
+                new MountDeclaration("engine#no.such.target", "onTurnStart"),
+            }));
 
-        var runtime = new OrchestrationRuntime(catalog, new HandlerRegistry());
+        var runtime = new OrchestrationRuntime(catalog, handlers);
         host = runtime.CreateEntity("card.unit", "卡");
         return runtime;
     }
+
+    /// <summary>
+    /// 「坏组件」：边通道（<c>engine#card.destroyed → onTurnStart</c>）＋包装通道
+    /// （<c>engine#damage-apply → before</c>，改写成 99）＋**不存在的兜底信号**（裸成员名，事实 17）。
+    /// </summary>
+    private static PrefabDefinition Broken(
+        string id, HostKind requiresHost, List<string> log, IEnumerable<MountDeclaration> mounts)
+        => new(
+            id,
+            EntityKind.Component,
+            requiresHost: requiresHost,
+            members: new[] { Member("onTurnStart", log) },
+            mounts: mounts,
+            wraps: new[]
+            {
+                WrapDeclaration.ForMember($"engine#{DamageApply}", WrapperPhase.Before, "h.damage-rewrite"),
+            },
+            disposalSignal: NoSuchSignal);
+
+    /// <summary>引擎预制体：内核 4 信号 ＋ 可被包装的 <c>damage-apply</c>（自有边只记读数）。</summary>
+    private static PrefabDefinition Engine(List<object?> amounts)
+        => new(
+            KernelSignals.PrefabId,
+            EntityKind.Engine,
+            layer: PrefabLayer.Kernel,
+            members: KernelSignals.Members
+                .Append(new MemberDefinition(
+                    DamageApply,
+                    new ViewSpec(new[]
+                    {
+                        new ViewFieldDefinition("amount", ViewFieldType.Number, writable: true, required: false),
+                    }),
+                    MemberVisibility.All,
+                    new[] { ModelKit.Own((view, _) => amounts.Add(view.Get("amount"))) }))
+                .ToArray());
+
+    private static Dictionary<string, object?> Amount(int value) => new() { ["amount"] = value };
+
+    private const string DamageApply = "damage-apply";
+    private const string BrokenPrefabId = "comp.broken";
+    private const string BrokenMountPrefabId = "comp.broken.mount";
+    private const string WrappedPrefabId = "comp.wrapped";
+    private const string NoSuchSignal = "no.such.signal";
+    private static readonly WrapTarget DamageTarget = WrapTarget.ForMember(MemberAddress.Parse($"engine#{DamageApply}"));
 
     private static PrefabDefinition Component(
         string id, string member, HostKind requiresHost, List<string> log, ActiveWhen activeWhen, bool oneShot)

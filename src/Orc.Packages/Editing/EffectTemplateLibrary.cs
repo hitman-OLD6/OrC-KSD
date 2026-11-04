@@ -43,9 +43,10 @@ public sealed record EffectTemplateSpec(
 /// <item><c>id = "template." + signal + "." + guard</c>；<c>label = 信号中文名</c>，非 any 档再加「（guard 中文名）」；
 ///   <c>description = 该信号 Notes</c>（无则省略）。</item>
 /// </list>
-/// 资产字段：<c>abstract: true</c>、<c>requires-host</c> 按 D24 推导、<c>active-when</c> 按 timing 推导、
-/// **不写 <c>authorize-moding</c>**（缺省推导为 true）；成员恒一个：<c>onHook</c>、<c>abstract: true</c>、
-/// <c>guard: &lt;档&gt;</c>、视图字段＝该信号的载荷视图、成员 <c>label</c> 不写。
+/// 资产字段：<c>requires-host</c> 按 D24 推导、<c>active-when</c> 按 timing 推导、
+/// **不写 <c>abstract</c>／<c>authorize-moding</c>**（两标志已废止，R39 裁决 4）；成员恒一个：<c>onHook</c>、
+/// <c>slot: { type: "handler" }</c>（未填 ⇒ 模板）、<c>guard: &lt;档&gt;</c>、
+/// 视图字段＝该信号的载荷视图、成员 <c>label</c> 不写。
 /// </para>
 /// </summary>
 public static class EffectTemplateLibrary
@@ -114,7 +115,7 @@ public static class EffectTemplateLibrary
         }
     }
 
-    /// <summary>把一条派生结果落成**组件资产**（生成物形态：抽象资产 ＋ 单个抽象成员 ＋ 挂到该信号）。</summary>
+    /// <summary>把一条派生结果落成**组件资产**（生成物形态：未饱和资产 ＋ 单个未填 handler 空位 ＋ 挂到该信号）。</summary>
     /// <param name="spec">派生结果。</param>
     /// <exception cref="InvalidOperationException">信号未在信号表里登记（理论上不可达）。</exception>
     public static ComponentAsset BuildAsset(EffectTemplateSpec spec)
@@ -130,14 +131,17 @@ public static class EffectTemplateLibrary
             // 继承只能收紧（R5），父若只开一部分，子就再也打不开其余能力。
             MemberVisibility.Callable | MemberVisibility.Hostable | MemberVisibility.Mountable,
             signal.View,
-            Handler: null,             // 抽象成员＝空洞，handler 由子提供
+            Handler: null,             // 空位未填：handler 由子提供
             Band: null,
             Bands: null,
             Seams: null,
+            // **不加 sealed**（R39 裁决 7）：模板的 slot 必须能被子填，sealed 会让抽象永远无法解除。
             Sealed: false,
-            Abstract: true,
             Guard: spec.Guard,
-            Label: null);              // 内置模板的成员 label 不写（R34 第 3 条：成员名固定即可辨认）
+            Label: null,               // 内置模板的成员 label 不写（R34 第 3 条：成员名固定即可辨认）
+            // R39 裁决 7（D41 的 1:1 迁移）：`abstractMember: true` → `slot: { type: "handler" }` ＋ handler=null。
+            // 落 D40 判定表第 1 行＝未填 ⇒ 抽象；**不得**用「不写 slot」表达空洞（那会落纯编排成员，被判为具体资产）。
+            Slot: MemberSlotDeclaration.Handler);
 
         return new ComponentAsset(
             spec.Id,
@@ -151,9 +155,7 @@ public static class EffectTemplateLibrary
             wraps: Array.Empty<WrapDeclaration>(),
             judgeWraps: Array.Empty<ComponentJudgeWrapAsset>(),
             extends: null,
-            // 不写 authorize-moding：抽象资产缺省推导为 true（D29 的二分）。
-            authorizesModing: null,
-            isAbstract: true,
+            // 不写 abstract / authorize-moding：两个手写标志已废止（R39 裁决 4），抽象性由未填空位推导。
             label: spec.Label,
             description: spec.Description);
     }

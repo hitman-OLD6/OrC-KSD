@@ -130,6 +130,13 @@ public static class GameHooksJson
         new SignalEntry(GameHooks.CounterDisarmed,
             [GameHooks.PayloadCard, GameHooks.PayloadPlayer, "Reason", GameHooks.PayloadSource],
             ["Cards/CounterCard.cs·HandleTurnStartAsync（己方回合开始——解除落定后发射）"], []),
+        new SignalEntry(GameHooks.UnitAttacked,
+            [GameHooks.PayloadUnit, GameHooks.PayloadTarget, GameHooks.PayloadByEffect, GameHooks.PayloadSource],
+            [
+                "Commanding/CommandManager.cs·DispatchAttackAsync（指挥攻击：扣费/清位/unit.acted 之后）",
+                "Commanding/CommandManager.cs·AttackByEffectAsync（效果攻击：Applied 后立即；不发 unit.acted）",
+            ],
+            []),
         new SignalEntry(GameHooks.UnitDamageDealt,
             [GameHooks.PayloadUnit, GameHooks.PayloadCard, GameHooks.PayloadAmount, GameHooks.PayloadSource],
             ["Commanding/CommandManager.cs·HandleDefaultAttackDamageAsync", "Commanding/CommandManager.cs·HandleUnitAttackAsync"], []),

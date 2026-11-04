@@ -40,21 +40,21 @@ public sealed class PrefabDefinition
     /// 兜底信号（R1f；仅组件有意义）：null＝<see cref="ComponentDisposalPolicy.DefaultSignal"/>。
     /// 声明为 <c>effect.removed</c>＝装载期拒绝（<see cref="ComponentDisposalPolicy"/> 是唯一规则来源）。
     /// </param>
-    /// <param name="authorizesModing">
-    /// **资产级可重载开关**（R2；缺省关闭）：本资产允许被 moding 草案／派生资产覆写成员实现。
-    /// <para>
-    /// 缺省关闭是 R2 的原话（「父声明『本资产可被 moding』，缺省关闭」）：没有显式打开＝任何成员覆写都是装载期拒绝。
-    /// 引擎内部层间继承（<see cref="PrefabLayer.Kernel"/>／<see cref="PrefabLayer.Game"/>）**豁免**本开关，
-    /// 既有覆写行为逐条不变（R2 第 5、6 条）。
-    /// </para>
-    /// </param>
-    /// <param name="isAbstract">
-    /// **资产级抽象**（R30／D28）：本资产是模板，不是可装配组件——被卡牌 <c>components</c> 引用＝装载期拒绝。
-    /// 可注册、可被编辑期展开（草案的父必须能解析）。
-    /// </param>
     /// <param name="label">展示名（R35；null＝未声明）。</param>
     /// <param name="description">展示描述（R35；null＝未声明）。</param>
-    /// <exception cref="ArgumentException">id 为空或纯空白。</exception>
+    /// <param name="slots">资产级空位声明（R39 裁决 8；null＝无空位）——抽象性由它和成员 slot 共同推导。</param>
+    /// <param name="origin">
+    /// **出身记录**（本会话 D52：内存投影，透传自 <see cref="ComponentAsset.Origin"/>；null＝非实例化）。
+    /// **取叶子、不沿链继承**（<see cref="PrefabCatalog.Build"/> 只读正在展开的叶子的本字段）：
+    /// 父链是资产继承，origin 是"这次实例化"的记录——沿链继承会把父的出身冒充成子的。
+    /// </param>
+    /// <param name="save">
+    /// **存档门户**（本会话 S1；null＝未声明＝不可存档）：存档导出器的服务 id。
+    /// **沿 <c>Extends</c> 链继承、子可覆盖**（合并由 <see cref="PrefabCatalog.Build"/> 完成）；
+    /// 装载期只校验形态（非空、无空白／路径分隔符），**不校验服务是否存在**——
+    /// 注册表是对局级、可空注入，存在性在存档时刻解析（D50）。
+    /// </param>
+    /// <exception cref="ArgumentException">id 为空或纯空白；save 形态非法。</exception>
     public PrefabDefinition(
         string id,
         EntityKind kind,
@@ -70,10 +70,11 @@ public sealed class PrefabDefinition
         ActiveWhen activeWhen = ActiveWhen.Placed,
         bool oneShot = false,
         string? disposalSignal = null,
-        bool authorizesModing = false,
-        bool isAbstract = false,
         string? label = null,
-        string? description = null)
+        string? description = null,
+        IReadOnlyList<AssetSlotDeclaration>? slots = null,
+        AssetOrigin? origin = null,
+        string? save = null)
     {
         if (string.IsNullOrWhiteSpace(id))
         {
@@ -94,10 +95,11 @@ public sealed class PrefabDefinition
         ActiveWhen = activeWhen;
         OneShot = oneShot;
         DisposalSignal = disposalSignal;
-        AuthorizesModing = authorizesModing;
-        Abstract = isAbstract;
         Label = label;
         Description = description;
+        Slots = slots?.ToArray() ?? Array.Empty<AssetSlotDeclaration>();
+        Origin = origin;
+        Save = SavePolicy.Normalize(save);
     }
 
     /// <summary>预制体 id（唯一）。</summary>
@@ -143,22 +145,29 @@ public sealed class PrefabDefinition
     public string? DisposalSignal { get; }
 
     /// <summary>
-    /// 资产级可重载开关（R2；缺省 false）：父声明「本资产可被 moding」，未打开＝成员覆写即装载期拒绝。
-    /// 引擎内部层间继承（<see cref="PrefabLayer.Kernel"/>／<see cref="PrefabLayer.Game"/>）不受它约束。
+    /// 资产级空位声明（R39 裁决 8；空数组＝无空位）。沿链合并由 <see cref="PrefabCatalog.Build"/> 负责，
+    /// **类型沿链不可变**（<see cref="AssetSlotMerge"/>）。
     /// </summary>
-    public bool AuthorizesModing { get; }
-
-    /// <summary>
-    /// **资产级抽象**（R30／D28）：模板——不得被 <c>components</c> 引用进对局。
-    /// 判定在**引用解析**（<see cref="PrefabCatalog"/> 展开卡片组件列表时），不在资产注册处。
-    /// </summary>
-    public bool Abstract { get; }
+    public IReadOnlyList<AssetSlotDeclaration> Slots { get; }
 
     /// <summary>展示名（R35；null＝未声明）。</summary>
     public string? Label { get; }
 
     /// <summary>展示描述（R35；null＝未声明）。</summary>
     public string? Description { get; }
+
+    /// <summary>
+    /// **出身记录**（D52；null＝非实例化）：本声明的内存投影（透传自资产层）。
+    /// **不是依赖**（装载链不因它解析不到而拒绝）；存档回溯用它取源预制体 id
+    /// （<c>extends = type.Origin?.TemplateId ?? type.Id</c>）。
+    /// </summary>
+    public AssetOrigin? Origin { get; }
+
+    /// <summary>
+    /// **存档门户**（本会话 S1；null＝未声明＝不可存档）：本层是**已合并**的值
+    /// （沿 <c>Extends</c> 链继承、子覆盖父——合并在 <see cref="PrefabCatalog.Build"/>）。
+    /// </summary>
+    public string? Save { get; }
 }
 
 /// <summary>
@@ -184,8 +193,11 @@ public sealed class PrefabType
         IReadOnlyList<WrapDeclaration> wraps,
         IReadOnlyList<string> components,
         IReadOnlyList<string> chain,
+        IReadOnlyList<AssetSlotDeclaration> slots,
         HostKind requiresHost,
-        string disposalSignal)
+        string disposalSignal,
+        AssetOrigin? origin,
+        string? save)
     {
         Id = leaf.Id;
         Kind = leaf.Kind;
@@ -201,10 +213,11 @@ public sealed class PrefabType
         ActiveWhen = leaf.ActiveWhen;
         OneShot = leaf.OneShot;
         DisposalSignal = disposalSignal;
-        AuthorizesModing = leaf.AuthorizesModing;
-        Abstract = leaf.Abstract;
+        Slots = slots;
         Label = leaf.Label;
         Description = leaf.Description;
+        Origin = origin;
+        Save = save;
 
         _members = new Dictionary<string, MemberDefinition>(StringComparer.Ordinal);
         foreach (var member in members)
@@ -277,17 +290,51 @@ public sealed class PrefabType
     /// <summary>继承链（根→叶子）。</summary>
     public IReadOnlyList<string> Chain { get; }
 
-    /// <summary>本预制体的资产级可重载开关（R2；叶子的声明；<see cref="PrefabDefinition.AuthorizesModing"/>）。</summary>
-    public bool AuthorizesModing { get; }
+    /// <summary>合并后的资产级空位（R39 裁决 8；类型沿链不变，值/sealed 子覆盖父）。</summary>
+    public IReadOnlyList<AssetSlotDeclaration> Slots { get; }
 
-    /// <summary>本预制体是否为**模板**（R30／D28；叶子的声明）。前端据此标「模板」并允许继承。</summary>
-    public bool Abstract { get; }
+    /// <summary>
+    /// **本预制体是否饱和**（R39 裁决 4／8；S28 的唯一判定入口）。
+    /// <para>
+    /// 未填 ＝ 资产级 <c>slot ∧ ¬value</c> ∨ 成员级 <c>slot ∧ ¬handler</c>——两层取或，与本资产
+    /// <see cref="ComponentAsset.HasUnfilledSlots"/> 同一规则（展开层投影）。不饱和＝模板，**不得被
+    /// <c>components</c> 引用**（R39 裁决 4）。
+    /// </para>
+    /// </summary>
+    public bool HasUnfilledSlots =>
+        Slots.Any(static slot => !slot.IsFilled) || Members.Any(static member => member.IsUnfilledSlot);
+
+    /// <summary>
+    /// 是否存在**可再填**的空位（slot 存在 ∧ 未 sealed）——DTO 的「可派生／可重载」投影用
+    /// （R39 裁决 5；与 <c>Override</c> 的授权门同一事实）。
+    /// </summary>
+    public bool HasOverridableSlots =>
+        Members.Any(static member => member.Slot is not null && !member.IsEffectivelySealed);
 
     /// <summary>展示名（R35；null＝未声明，前端回退显示 <see cref="Id"/>）。</summary>
     public string? Label { get; }
 
     /// <summary>展示描述（R35；null＝未声明）。</summary>
     public string? Description { get; }
+
+    /// <summary>
+    /// **出身记录**（D52；null＝非实例化——手写资产／内建预制体）：**取叶子、不沿链继承**。
+    /// <para>
+    /// 唯一溯源入口：<c>extends = type.Origin?.TemplateId ?? type.Id</c>（存档回溯，D51）。
+    /// 手写资产取 <see cref="Id"/>；inline／named 产物取 <see cref="AssetOrigin.TemplateId"/>（源模板 id）——
+    /// <c>inline/&lt;id&gt;/&lt;hash&gt;</c> 缓存键与产物资产 id **绝不**进 <c>extends</c>（跨对局必失效）。
+    /// </para>
+    /// </summary>
+    public AssetOrigin? Origin { get; }
+
+    /// <summary>
+    /// **存档门户**（本会话 S1；null＝未声明＝不可存档）：已沿链合并的存档导出器服务 id。
+    /// <para>
+    /// 门户判据**看源**：产物自身（inline／named）不带 <c>save</c>，存档时先
+    /// <c>catalog.Resolve(extends)</c> 解析源预制体、读**源**的 <see cref="Save"/>（D51）。
+    /// </para>
+    /// </summary>
+    public string? Save { get; }
 
     /// <summary>owner 通道允许的名字集合（私有字段 ∪ 实体公开属性；S5 第 6d 条静态检查用）。</summary>
     public IReadOnlySet<string> OwnerMemberNames { get; }
@@ -455,15 +502,26 @@ public sealed class PrefabCatalog
             else
             {
                 // R3a：覆写＝整段替换（读子预制体即知最终行为，无 super）；可见性只能收紧（R5）。
-                // R2（批次 4）：**资产层**参与覆写时还要过授权门——父的资产级开关 ＋ 成员级 sealed。
+                // R39 裁决 5（R2 已修订）：授权门只剩「链上声明了 slot ∧ 未 sealed」——`Override` 自己判。
                 var inherited = parent!; // existing >= 0 ⇒ 成员来自父，父必存在。
                 members[existing] = members[existing].Override(
                     member,
-                    parentAuthorizesModing: inherited.AuthorizesModing,
                     parentLayer: inherited.Layer,
                     childLayer: definition.Layer,
                     parentId: inherited.Id);
             }
+        }
+
+        // 资产级空位沿链合并（R39 裁决 8／D48）：**类型沿链不可变**，子只可填值或 sealed。
+        var slots = AssetSlotMerge.Merge(
+            parent?.Slots ?? Array.Empty<AssetSlotDeclaration>(),
+            definition.Slots,
+            out var slotError);
+        if (slotError is not null)
+        {
+            throw new PrefabLoadException(
+                PrefabErrorCategories.Structure,
+                $"预制体 '{definition.Id}' 的空位声明非法：{slotError}");
         }
 
         var privateFields = parent is null
@@ -516,17 +574,44 @@ public sealed class PrefabCatalog
                 + "非可组合实体声明组件＝装载期拒绝（R3d；可组合能力目前只对卡牌实体开放）。");
         }
 
-        // 资产级 abstract（R30／D28）：判定点＝**卡牌 components 的引用解析**，不是资产注册。
-        // 不判的话，被引用的抽象资产会以「无 handler 的纯编排成员」形态静默装配——
+        // 未登记的组件引用＝**明确报错**（R39 裁决 13／D47）：虚拟 named 记录只在编辑器会话里可见，
+        // 正式解析面（PrefabCatalog）不认它——不静默装配、也不允许「内存里的东西」进入对局。
+        foreach (var component in components)
+        {
+            if (_definitions.ContainsKey(component))
+            {
+                continue;
+            }
+
+            throw new PrefabLoadException(
+                PrefabErrorCategories.Structure,
+                $"预制体 '{definition.Id}' 引用了未登记的组件 '{component}'："
+                + "正式解析面不认未保存的 named 记录（虚拟记录只在编辑器会话内可见，R39 裁决 13）——"
+                + "请先把实例 Save 成资产，或改用已注册的效果 id。");
+        }
+
+        // 抽象性（R39 裁决 4／S28）：判定点＝**卡牌 components 的引用解析**，不是资产注册。
+        // 判据＝「存在未填空位」（两层合并，唯一谓词 `HasUnfilledSlots`），**不再读任何手写标志**。
+        // 不判的话，被引用的模板会以「无 handler 的纯编排成员」形态静默装配——
         // 装载层无法把「handler 为 null」与「纯编排成员」区分开，正是 Constraint 禁止的静默失效。
         foreach (var component in components)
         {
-            if (_definitions.TryGetValue(component, out var referenced) && referenced.Abstract)
+            if (!_definitions.ContainsKey(component))
             {
+                continue;
+            }
+
+            // 用**合并后**的类型判定（继承来的未填空位同样算数）：只读叶子定义会漏掉父模板的空位。
+            var referenced = Resolve(component);
+            if (referenced.HasUnfilledSlots)
+            {
+                var gaps = referenced.Slots.Where(static slot => !slot.IsFilled).Select(static slot => "slots." + slot.Name)
+                    .Concat(referenced.Members.Where(static m => m.IsUnfilledSlot).Select(static m => "members." + m.Name))
+                    .ToArray();
                 throw new PrefabLoadException(
                     PrefabErrorCategories.Structure,
-                    $"预制体 '{definition.Id}' 引用了抽象资产 '{component}'：模板不可实例化"
-                    + "（abstract: true ＝只声明、不实现的效果模板，只能作 moding 草案的父，不得装配进对局，R30）。");
+                    $"预制体 '{definition.Id}' 引用了未饱和的资产 '{component}'（模板不可实例化）："
+                    + $"未填空位 {string.Join("、", gaps)}——只能作 moding 草案的父，不得装配进对局（R39 裁决 4）。");
             }
         }
 
@@ -591,6 +676,11 @@ public sealed class PrefabCatalog
             : new List<string>(parent.Chain) { id };
         chain.RemoveAt(chain.Count - 1);
 
+        // 存档门户（本会话 S1／D50）：沿 Extends 链继承、子覆盖父（与 disposalSignal 同一合并形态）。
+        var save = definition.Save ?? parent?.Save;
+
+        // 出身记录（D52）：**取叶子、不沿链继承**——父链是资产继承，origin 是"这次实例化"的记录，
+        // 沿链继承会把父的出身冒充成子的。null＝非实例化（手写／内建）。
         return new PrefabType(
             definition,
             members,
@@ -599,7 +689,48 @@ public sealed class PrefabCatalog
             wraps,
             components,
             chainCopy,
+            slots,
             requiresHost,
-            disposalSignal);
+            disposalSignal,
+            definition.Origin,
+            save);
+    }
+}
+
+/// <summary>
+/// 存档门户字段（<c>save</c>）的策略（本会话 S1／D50）：装载期**只校验形态**、不校验服务存在性——
+/// <see cref="JudicatorRegistry"/> 是对局级、可空注入（装载期看不到它），存在性在存档时刻解析、失败即整体失败。
+/// </summary>
+public static class SavePolicy
+{
+    /// <summary>
+    /// 内置完整复制导出器的服务 id（B；沿用 <c>framework.</c> 保留命名域、与 <c>framework.</c> 成员同族）。
+    /// 注册面在 <c>Orc.Game</c> 内置注册段（纯内核构造路径没有内置 B，调用方自行注册——已知限制 C2）。
+    /// </summary>
+    public const string FullCopyServiceId = "framework.save.full-copy";
+
+    /// <summary>
+    /// 规范化并校验 <c>save</c> 形态（装载期唯一形态门）：空白＝null（未声明）；其余必须非空、
+    /// 不含空白字符与 <c>#</c>／<c>:</c>／<c>/</c>／<c>\</c> 分隔符。**不做**服务存在性校验（D50）。
+    /// </summary>
+    /// <exception cref="ArgumentException">形态非法。</exception>
+    public static string? Normalize(string? save)
+    {
+        if (string.IsNullOrWhiteSpace(save))
+        {
+            return null;
+        }
+
+        var trimmed = save.Trim();
+        if (trimmed.Any(char.IsWhiteSpace)
+            || trimmed.IndexOfAny(['#', ':', '/', '\\']) >= 0)
+        {
+            throw new ArgumentException(
+                $"save 服务 id '{save}' 形态非法（不得含空白字符或 '#:/' 分隔符）——装载期只校验形态，"
+                + "服务存在性在存档时刻解析（D50）。",
+                nameof(save));
+        }
+
+        return trimmed;
     }
 }

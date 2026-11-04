@@ -81,6 +81,55 @@ public sealed class DeckFetchResult
         => new(DeckFetchStatus.Rejected, reason, card);
 }
 
+/// <summary>检索（Tutor）结局状态（三态；**全部是卡面的正常结局**，没有「故障」一档）。</summary>
+public enum TutorStatus
+{
+    /// <summary>命中且已入手（走既有抽牌链路：<c>card.drawn</c> → <c>card.hand.add</c>）。</summary>
+    Fetched,
+
+    /// <summary>命中但满手爆牌（牌已销毁：<c>card.drawn</c> → 销毁 → <c>card.burned</c>）——不是失败，是裁决完成。</summary>
+    Burned,
+
+    /// <summary>扫完全卡组无匹配（零副作用：不抽牌、不发信号、不报错）。</summary>
+    NotFound,
+}
+
+/// <summary>
+/// 检索结果对象（<see cref="TutorStatus"/> 三态＋命中卡引用）。
+/// <para>
+/// **为什么不复用 <see cref="DeckFetchResult"/>**：后者的 <c>Rejected</c> 是**故障**语义（服务不可用／卡已销毁／非本局），
+/// 而「卡组里没有空军」是**卡面的正常结局**——一个返回值不能同时表示「故障」与「今天没抽到」。
+/// 也不用「<c>Fetched</c> 但 Card 置 null」——那会污染已进冻结面的 <c>Fetched</c> 语义。
+/// </para>
+/// <para>
+/// 消费口径：<c>Status == Fetched &amp;&amp; Card is { } card</c> 才授予/使用；
+/// <b><see cref="TutorStatus.NotFound"/> 不是错误</b>——不要写成「<c>!= Fetched</c> 就抛」。
+/// </para>
+/// </summary>
+public sealed class TutorResult
+{
+    private TutorResult(TutorStatus status, Card? card)
+    {
+        Status = status;
+        Card = card;
+    }
+
+    /// <summary>结局状态（三态）。</summary>
+    public TutorStatus Status { get; }
+
+    /// <summary>命中实例（<see cref="TutorStatus.Fetched"/>／<see cref="TutorStatus.Burned"/> 时非 null；<see cref="TutorStatus.NotFound"/> 时 null）。</summary>
+    public Card? Card { get; }
+
+    /// <summary>创建「命中且已入手」结果（框架内部）。</summary>
+    internal static TutorResult Fetched(Card card) => new(TutorStatus.Fetched, card);
+
+    /// <summary>创建「命中但爆牌」结果（框架内部；实例已销毁）。</summary>
+    internal static TutorResult Burned(Card card) => new(TutorStatus.Burned, card);
+
+    /// <summary>创建「无匹配」结果（框架内部；零副作用）。</summary>
+    internal static TutorResult NotFound() => new(TutorStatus.NotFound, card: null);
+}
+
 /// <summary>
 /// 玩家管理器（玩家领域真源）：创建双玩家、提供玩家访问、执行卡组加载与抽牌操作。
 /// 卡组加载（对局开始；2A 新增）：逐玩家（索引升序）逐张——卡组取件（洗牌后顺序）→ 经卡牌库实例化（三类卡之一）

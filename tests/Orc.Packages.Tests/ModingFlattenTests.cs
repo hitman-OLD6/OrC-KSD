@@ -272,7 +272,6 @@ public class ModingFlattenTests : IDisposable
           "asset": {
             "kind": "component",
             "id": "test.parent",
-            "authorize-moding": true,
             "requires-host": "any",
             "active-when": "placed",
             "one-shot": false,
@@ -292,6 +291,7 @@ public class ModingFlattenTests : IDisposable
                 "name": "onDeployed",
                 "visibility": [ "callable" ],
                 "view": { "fields": [ { "name": "Defense", "type": "number", "writable": true, "required": false } ] },
+                "slot": { "type": "handler" },
                 "handler": {
                   "id": "test.parent#onDeployed",
                   "entry": "HandleAsync",

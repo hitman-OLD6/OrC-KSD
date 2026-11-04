@@ -24,6 +24,22 @@ public static class SignalEndpointPrefab
 }
 
 /// <summary>
+/// 框架合成实体判据（本会话 S5／D54，**集中一处**——唯一的 <c>legacy.</c> 字面在此）：
+/// <c>legacy.</c> 前缀＝框架合成的旧路径实体（如 <see cref="SignalEndpointPrefab.PrefabId"/>）——
+/// 它们不是作者资产，恢复时由框架重建、**不进存档**（D54 第三判据）。
+/// 不造第三个保留前缀（<c>framework.</c> 管成员名、<c>template.</c> 管资产 id）。
+/// </summary>
+public static class FrameworkEntityPolicy
+{
+    /// <summary>框架合成实体的 id 前缀（保留命名域）。</summary>
+    public const string SyntheticPrefix = "legacy.";
+
+    /// <summary>是否为框架合成实体（存档枚举与恢复校验共用本谓词；判据集中＝改口径只改这里）。</summary>
+    public static bool IsSynthetic(string prefabId)
+        => prefabId.StartsWith(SyntheticPrefix, StringComparison.Ordinal);
+}
+
+/// <summary>
 /// 生产发射与生产订阅（A2）：<c>Emit</c>＝对 <c>engine#&lt;信号&gt;</c> 成员的调用，
 /// <c>Subscribe</c>＝往该成员上挂一条边，<c>UnmountOwner</c>＝按所有者撤销边（句柄级精确撤销）。
 /// <para>

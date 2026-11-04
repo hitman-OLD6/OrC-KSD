@@ -141,6 +141,72 @@ public static class HandlerDslExclusions
             + "生成的 host: orcSelf 还附加 Card→CardBase 的向下转换失败。",
             "用 read（属性读取）或脚本节点；若要「遍历某人拥有的单位」，"
             + "应由新增的只读 path／目录节点承担，而不是伪装成动作节点。"),
+
+        // 跨玩家手牌转移族（S5）：三个方法都含 Player——引脚封闭集没有 player 类型（见下三行的统一理由）。
+        new HandlerDslExclusion(
+            "OpponentOf(Card)",
+            "OpponentOf",
+            "形参/返回值含 `Player`，非引脚类型（封闭集 `entity`/`number`/`string`/`boolean`/`list<T>`，"
+            + "实体子类型只到 `unit`/`hq`/`card`）；图形化节点需要新增 `player` 引脚类型，属独立需求。",
+            "只能脚本节点。"),
+
+        new HandlerDslExclusion(
+            "PickHandCardsForAsync(Player, int, int, IReadOnlyCollection`1, CancellationToken)",
+            "PickHandCardsForAsync",
+            "形参/返回值含 `Player`，非引脚类型（封闭集 `entity`/`number`/`string`/`boolean`/`list<T>`，"
+            + "实体子类型只到 `unit`/`hq`/`card`）；图形化节点需要新增 `player` 引脚类型，属独立需求。",
+            "只能脚本节点。"),
+
+        new HandlerDslExclusion(
+            "ShuffleIntoDeckAsync(Card, Player, Card, CancellationToken)",
+            "ShuffleIntoDeckAsync",
+            "形参/返回值含 `Player`，非引脚类型（封闭集 `entity`/`number`/`string`/`boolean`/`list<T>`，"
+            + "实体子类型只到 `unit`/`hq`/`card`）；图形化节点需要新增 `player` 引脚类型，属独立需求。",
+            "只能脚本节点。"),
+
+        // 检索（Tutor）两重载（R5／D5）：兵种数组版的 list<string> 在 v1 表达式里没有产出形态，谓词版是委托。
+        new HandlerDslExclusion(
+            "TutorFromDeckAsync(Card, IReadOnlyList`1, Card, CancellationToken)",
+            "TutorFromDeckAsync",
+            "兵种数组版的 `unitTypes` 是 `list<string>` 引脚——v1 表达式（lit／var／view／read／ask／聚合算子）"
+            + "**没有任何形态能产出一个字符串列表**，图形化无法给它填值（不是「以后再拆」，而是当前契约本身就表达不了）。",
+            "只能脚本节点；图形化侧没有等价动作（要让它进目录需先扩契约：为字符串列表提供产出形态）。"),
+
+        new HandlerDslExclusion(
+            "TutorFromDeckAsync(Card, Func`2, Card, CancellationToken)",
+            "TutorFromDeckAsync",
+            "谓词重载含 `Func<Card,bool>` 形参——引脚封闭集（`entity`/`number`/`string`/`boolean`/`list<T>`）表达不了委托；"
+            + "`[HandlerDslPin]` 只能覆盖**单个**参数的类型，无法把委托展开成图上的条件子网。",
+            "只能脚本节点（条件可直接写在谓词里）；图形化侧无等价动作。"),
+
+        // 动态效果授予四方法（R6）：`GrantHandle`／`EffectSnapshot` 都是引擎对象，封闭集与图都无法承载凭据。
+        new HandlerDslExclusion(
+            "AttachPrefabAsync(Card, string, GrantLifetime, CancellationToken)",
+            "AttachPrefabAsync",
+            "返回 `GrantHandle`（挂载凭据——封口类型，不在引脚封闭集内）：默认规则与标注都表达不了，"
+            + "且凭据是必须被调用方持有的图外对象（没有它就无法撤销）。",
+            "只能脚本节点；图形化侧不提供授予节点（授予与撤销是一对，缺凭据的一侧不成立）。"),
+
+        new HandlerDslExclusion(
+            "AttachSnapshotAsync(Card, EffectSnapshot, GrantLifetime, CancellationToken)",
+            "AttachSnapshotAsync",
+            "形参 `EffectSnapshot`（引擎对象）与返回值 `GrantHandle` 都不在引脚封闭集内；"
+            + "图形化没有「内联快照」这一承载形态（资产必须先是已注册的组件）。",
+            "只能脚本节点。"),
+
+        new HandlerDslExclusion(
+            "CompileAttachAsync(Card, string, GrantLifetime, CancellationToken)",
+            "CompileAttachAsync",
+            "返回 `GrantHandle`（挂载凭据）不在引脚封闭集内；且「DSL 文本 → 快照」是编译期动作，"
+            + "图上的节点本身就是 DSL，再嵌一层文本等于在 DSL 里开第二套 DSL。",
+            "只能脚本节点。"),
+
+        new HandlerDslExclusion(
+            "DetachEffectAsync(GrantHandle, CancellationToken)",
+            "DetachEffectAsync",
+            "入参 `GrantHandle`（挂载凭据）不在引脚封闭集内，图形化也**无法持有凭据**；"
+            + "改成「按效果 id 反查撤销」在同卡同效果多实例时无法仲裁——那是错误的撤销语义。",
+            "只能脚本节点（凭据由 `attach` 一侧的脚本节点持有）。"),
     };
 
     /// <summary>签名键形式：<c>Name(参数类型短名, …)</c>（参数类型只用短名，避免反射全名的程序集版本噪声）。</summary>

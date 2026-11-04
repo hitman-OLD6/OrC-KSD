@@ -413,6 +413,31 @@ public abstract class CardBase : Orc.Cards.Card
     public Player? Owner { get; private set; }
 
     /// <summary>
+    /// **归属受控门户**（手牌转移，运行期唯一写面）：把本卡归属改为 <paramref name="owner"/>。
+    /// <para>
+    /// 与 <see cref="LoadAsync"/> 的分工：<c>LoadAsync</c> 是**装配期**归属（每卡恰一次）；
+    /// 本方法只服务**运行期**的跨玩家转移（交换 / 洗入他人卡组）。全仓 `Owner` 赋值点因此恰两处，可审计。
+    /// </para>
+    /// <para>
+    /// **只做赋值，不做任何业务校验**：归属是跨组件不变量（装载、打出链扣费、离手、修饰归属都读它），
+    /// 「校验先行」必须由唯一调用方（<c>HandTransferService</c>）一次做全，而不是在本门户做一半——
+    /// 半套校验会让调用方误以为门户已担保前提。
+    /// </para>
+    /// <para>
+    /// `internal` 而非 `public`：csx 与外部插件不可能绕过动作层直接改归属（不新增 public 写面）；
+    /// 唯一调用权限＝<see cref="Managers.HandTransferService"/>（不下放给 <see cref="PlayerManager"/>／
+    /// <c>MatchCardService</c>）。
+    /// </para>
+    /// </summary>
+    /// <param name="owner">新的归属玩家（非空）。</param>
+    /// <exception cref="ArgumentNullException">owner 为 null。</exception>
+    internal void ReassignOwner(Player owner)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        Owner = owner;
+    }
+
+    /// <summary>
     /// 回合上下文（2B 加性面；internal）：当前行动方读取提供器——反制「仅己方回合」验证所需的对局上下文；
     /// 由对局加载路径经卡牌库注入（延迟读取、随对局回合推进取当前值）；独立构造（脱离对局）＝null
     /// （反制使用将无法通过回合验证——拒绝、可观测）。
